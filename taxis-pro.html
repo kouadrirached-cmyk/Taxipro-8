@@ -1374,9 +1374,11 @@ function calcOwnerProfit(s){
 }
 function calcEcart(s){
   const remis=pf(s.comp)+pf(s.card)+pf(s.sts)+pf(s.coup)+pf(s.ext);
-  // Attendu = taximètre fin - début (le pourboire est déjà dans le taximètre)
   const attendu=parseFloat((pf(s.taxf)-pf(s.taxd)).toFixed(2));
-  return parseFloat((attendu-remis).toFixed(2));
+  const ecart=parseFloat((attendu-remis).toFixed(2));
+  // Si surplus (écart négatif) et montant proche du pourboire → pas d'écart
+  if(ecart<0 && Math.abs(ecart)<=pf(s.pourboire)+0.5) return 0;
+  return ecart;
 }
 function buildCumulMap(arr,field){
   const sorted=[...arr].sort((a,b)=>new Date(a.date+' '+(a.time||'00:00'))-new Date(b.date+' '+(b.time||'00:00')));
@@ -1822,7 +1824,9 @@ function calc(){
   const salary=isOwn?rec:parseFloat((taxNet*(pct/100)).toFixed(2));
   const ownerProfit=isOwn?rec:parseFloat((taxNet*(1-pct/100)).toFixed(2));
   const ecart=parseFloat((attendu-(comp+card+sts+coup+ext)).toFixed(2));
-  const hasEcart=Math.abs(ecart)>0.5;
+  // Si surplus <= pourboire → normal, pas d'écart
+  const ecartAffiche=(ecart<0 && Math.abs(ecart)<=pour+0.5)?0:ecart;
+  const hasEcart=Math.abs(ecartAffiche)>0.5;
   let html='';
   if(rec>0||taxf>0){
     html+='<div class="rb rb-gold"><div><div class="rbl">Recette brute</div></div><div class="rbv">'+fm(rec)+'</div></div>';
@@ -1830,7 +1834,7 @@ function calc(){
     if(U.role==='owner'&&!isOwn)
       html+='<div class="rb rb-neon"><div><div class="rbl">Profit patron</div></div><div class="rbv">'+fm(ownerProfit)+'</div></div>';
     if(hasEcart){
-      html+='<div class="rb '+(ecart>0?'rb-red':'rb-pur')+'"><div><div class="rbl">'+(ecart>0?'⚠️ MANQUE':'💰 SURPLUS')+'</div><div style="font-size:10px;color:var(--m2);margin-top:2px;">Remis '+fm(rec)+' · Attendu '+fm(attendu)+'</div></div><div class="rbv">'+fm(Math.abs(ecart))+'</div></div>';
+      html+='<div class="rb '+(ecartAffiche>0?'rb-red':'rb-pur')+'"><div><div class="rbl">'+(ecartAffiche>0?'⚠️ MANQUE':'💰 SURPLUS')+'</div><div style="font-size:10px;color:var(--m2);margin-top:2px;">Remis '+fm(rec)+' · Attendu '+fm(attendu)+'</div></div><div class="rbv">'+fm(Math.abs(ecartAffiche))+'</div></div>';
     }else{
       html+='<div class="bn bn-grn">✓ Recette équilibrée</div>';
     }
@@ -1849,7 +1853,9 @@ function saveShift(){
   const taxNet=taxf-taxd-crs;  // pour le salaire
   const taxBrut=taxf-taxd;     // pour l'écart (pourboire déjà dans taximètre)
   const salary=isOwn?rec:parseFloat((taxNet*(pct/100)).toFixed(2));
-  const ecart=parseFloat((taxBrut-rec).toFixed(2));
+  let ecart=parseFloat((taxBrut-rec).toFixed(2));
+  // Si surplus <= pourboire → normal, pas d'écart
+  if(ecart<0 && Math.abs(ecart)<=pour+0.5) ecart=0;
   if(!gv('fd')||!selV)return;
 
   // ── Si manque → popup de confirmation ──
