@@ -942,7 +942,31 @@ body{
         </div>
         <div class="frow">
           <div class="fsm"><label>🚐 STS</label><input type="number" inputmode="decimal" id="fsts" placeholder="0.00" oninput="calc()"></div>
-          <div class="fsm"><label>🎟️ Coupons</label><input type="number" inputmode="decimal" id="fcoup" placeholder="0.00" oninput="calc()"></div>
+          <div class="fsm"><label>🎟️ Coupons total</label><input type="number" inputmode="decimal" id="fcoup" placeholder="0.00" oninput="onFcoupManual()" style="background:rgba(245,200,0,.06);color:var(--gold);font-weight:800;"></div>
+        </div>
+        <!-- ══ COUPONS PAR CLIENT ══ -->
+        <div style="background:rgba(245,200,0,.04);border:1.5px solid rgba(245,200,0,.15);border-radius:13px;padding:12px;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;">
+            <div style="font-size:10px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:.5px;">🎟️ Coupons par client <span style="color:var(--m2);font-weight:500;text-transform:none;letter-spacing:0;">(optionnel)</span></div>
+            <button onclick="toggleCoupDetail()" id="coupToggleBtn" style="background:rgba(245,200,0,.12);border:1px solid rgba(245,200,0,.25);color:var(--gold);border-radius:8px;padding:4px 10px;font-size:10px;font-weight:700;cursor:pointer;">Détailler ▼</button>
+          </div>
+          <div id="coupDetailSection" style="display:none;">
+            <div id="coupClientList"></div>
+            <!-- Autocomplete search -->
+            <div style="position:relative;margin-top:7px;">
+              <div style="display:flex;gap:7px;">
+                <div style="flex:1;position:relative;">
+                  <input type="text" id="coupClientSearch" placeholder="🔍 Nom ou numéro (ex: 15)..." autocomplete="off"
+                    oninput="filterCoupClients()" onfocus="filterCoupClients()"
+                    style="width:100%;box-sizing:border-box;background:rgba(10,8,0,.8);border:1px solid var(--brd2);color:var(--m1);border-radius:9px;padding:9px 11px;font-size:13px;">
+                  <div id="coupDropdown" style="display:none;position:absolute;left:0;right:0;top:100%;margin-top:3px;background:#1a1500;border:1px solid var(--brd2);border-radius:10px;z-index:999;max-height:180px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,.6);"></div>
+                </div>
+                <input type="number" inputmode="decimal" id="coupClientAmt" placeholder="$" style="width:80px;background:rgba(10,8,0,.8);border:1px solid var(--brd2);color:var(--m1);border-radius:9px;padding:9px 8px;font-size:13px;">
+                <button onclick="addCoupClient()" style="background:var(--gold);color:#000;border:none;border-radius:9px;padding:9px 14px;font-weight:900;font-size:15px;cursor:pointer;">+</button>
+              </div>
+              <button onclick="showCoupNumList()" style="margin-top:7px;background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.2);color:var(--gold);border-radius:8px;padding:5px 12px;font-size:10px;font-weight:700;cursor:pointer;width:100%;">📋 Voir la liste numérotée</button>
+            </div>
+          </div>
         </div>
         <div class="frow">
           <div class="fsm"><label>⭐ Extra</label><input type="number" inputmode="decimal" id="fext" placeholder="0.00" oninput="calc()"></div>
@@ -1349,8 +1373,10 @@ function calcOwnerProfit(s){
   return parseFloat((net*(1-drv.pct/100)-pf(s.essence)).toFixed(2));
 }
 function calcEcart(s){
-  const net=pf(s.taxf)-pf(s.taxd)-pi(s.courses);
-  return parseFloat((s.recette-(net+pf(s.pourboire))).toFixed(2));
+  const remis=pf(s.comp)+pf(s.card)+pf(s.sts)+pf(s.coup)+pf(s.ext);
+  // Attendu = taximètre fin - début (le pourboire est déjà dans le taximètre)
+  const attendu=parseFloat((pf(s.taxf)-pf(s.taxd)).toFixed(2));
+  return parseFloat((attendu-remis).toFixed(2));
 }
 function buildCumulMap(arr,field){
   const sorted=[...arr].sort((a,b)=>new Date(a.date+' '+(a.time||'00:00'))-new Date(b.date+' '+(b.time||'00:00')));
@@ -1531,6 +1557,8 @@ function doLogin(){
   document.getElementById('tb-sched').style.display='flex';
   audit('LOGIN');
   initShiftForm();
+  initCoupSel();
+  renderCoupList();
   goPage('shift');
   renderSoldeBar();
 }
@@ -1566,12 +1594,213 @@ function selVeh(el){
   document.querySelectorAll('.vsb').forEach(t=>t.classList.remove('on'));
   el.classList.add('on');selV=el.dataset.v;
 }
+// ═══ COUPONS PAR CLIENT ═══
+const COUP_CLIENTS=[
+  'ACSMS','AIR CANADA','AIR MÉDIC','AUTISME SAGUENAY','AUTOBUS GILL','BELL CANADA',
+  'BISTRO D','BON CONSEIL','BON PASTEUR','CAIN LAMARRE','CALACS DU SAGUENAY',
+  'CANADIAN TIRE','CANMEC','CEGEP ÉTUDIANT','CEGEP DE CHIC. (CQFA)','CEMENTATION CANADA',
+  'CENTRE DE SERVICE SCOLAIRE DES RIVES DU SAG.','CENTRE FÉMININ','CENTRE MAMIK DU SAGUENAY',
+  'CERADYNE CANADA','CENTRE DENTAIRE','CENTRE JEUNESSE (CSG)','CFGA','CLSC CHICOUTIMI',
+  'CONSEIL DES MONTAGNAIS','COOL TAXI','COUPESAG','COUPON TAXI ROSE QUÉBEC',
+  'CPE LE BERCEAU DES LUTINS','CROIX-ROUGE CANADIENNE','CSSS ALMA','CSSS BAIE JAMES',
+  'CSSS CHICOUTIMI','CSSS DOM DU ROY','CSSS DOLBEAU','CSSS JONQUIÈRE','CSSS LA BAIE',
+  'CSSS CÔTE NORD','CURATEUR PUBLIC DU QUÉBEC','DEMEX-CENTREM','ÉGOGÈNE 21',
+  'ÉCOLE CHARLES GRAVEL','ÉCOLE DOMINIQUE RACINE','ÉCOLE LAURE CONAN','ÉCOLE LAFONTAINE',
+  'ELKEM MÉTAL','ENTREPRISE HOLDINGS INC.','ÉTOILE DODGE CHRYSLER',
+  'FAMILIPRIX LEVESQUE ET ASS. INC.','FAMILIPRIX LAPIERRE ET TREMBLAY BARETTE',
+  'FAMILIPRIX LAPIERRE ET TREMBLAY ÉLYSÉES','FONDERIE SAGUENAY','FOYER ST-FRANCOIS',
+  'HAVRE DU FJORD','HÔTEL CHICOUTIMI','HYDRO-QUÉBEC','HYUNDAI','INDUSTRIE BOFAB',
+  'INDUSTRIE DODEC','JARDIN DU COIN','LEO AUTO.','LES GARDES CLINIQUE SOINS MÉDICAUX PRIVÉS',
+  'MAISON ACCUEIL ET HÉB. LA CHAMBRÉE','MAISON ACCUEIL SANS ABRIS',
+  'MAISON HÉBERGEMENT L\'ISSUE','MAISON DE L\'ESPOIR','MAISON DES FAMILLES DE CHICOUTIMI',
+  'MAISON DU RIVAGE','MAISON MARIE FITZBACH','MAZDA','MM PROPANE','MINE NIOBEC','MOREAU',
+  'NISSAN','NUTRINOR ÉNERGIE','OMH','PACO','PALLI-AIDE','PERRON AUTO','PFM',
+  'PHARMACIE DAVID LAPIERRE','PHARMACIE HÉLENE MONTPETIT','PHARMACIE ÉRIC TREMBLAY',
+  'RADIO CANADA','RIO TINTO ALMA','RIO TINTO COMPLEXE JONQUIÈRE',
+  'RIO TINTO INSTALLATIONS PORTUAIRES','RIO TINTO LATÉRRIÈRE','RIO TINTO USINE GRANDE-BAIE',
+  'SAAQ','SAGUENAY MITSUBISHI','SAGUENAY VOLKSWAGEN','SANTÉ OPTICIWAN',
+  'SERVICE TRAVAIL DE RUE DE CHICOUTIMI','SERVICE QUÉBEC AIDE SOCIALE (LA BAIE)',
+  'SERVICE SANTÉ MASHTEUIATSH','SOEUR ANT. DE MARIE','SOCIÉTÉ VIA','SOUPE POPULAIRE',
+  'SOTREM','STAS INC.','STS TRANSPORT ADAPTÉ','STS EXTRA (CHAUFFEUR)','SYLVIE PEDNEAULT',
+  'TAXIS UNIS','TOUNDRA AVENTURIA','UBISOFT','USINE LAPOINTE','VILLA CHICOUTIMI',
+  'VILLA SAGUENAY','VISA/MASTER APPLICATION','WESTJET'
+];
+
+let coupClients=[];
+let coupDetailOpen=false;
+let coupManualMode=false; // true si l'utilisateur a tapé directement dans fcoup
+
+function toggleCoupDetail(){
+  coupDetailOpen=!coupDetailOpen;
+  const sec=document.getElementById('coupDetailSection');
+  const btn=document.getElementById('coupToggleBtn');
+  if(sec)sec.style.display=coupDetailOpen?'block':'none';
+  if(btn)btn.textContent=coupDetailOpen?'Masquer ▲':'Détailler ▼';
+  if(coupDetailOpen){
+    setTimeout(()=>{const s=document.getElementById('coupClientSearch');if(s)s.focus();},100);
+  }
+}
+
+function onFcoupManual(){
+  // Si le patron tape directement dans fcoup, on note que c'est manuel
+  coupManualMode=true;
+  calc();
+}
+
+function showCoupNumList(){
+  const old=document.getElementById('coupNumModal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='coupNumModal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:9999;overflow-y:auto;padding:16px;';
+  let rows='';
+  COUP_CLIENTS.forEach(function(c,i){
+    rows+='<div onclick="selectFromNumList('+i+')" '
+    +'style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer;border-radius:8px;margin-bottom:2px;">'
+    +'<span style="background:rgba(245,200,0,.15);color:var(--gold);font-size:11px;font-weight:900;border-radius:7px;padding:3px 8px;min-width:32px;text-align:center;">'+(i+1)+'</span>'
+    +'<span style="font-size:13px;color:#eee;">'+c+'</span>'
+    +'</div>';
+  });
+  modal.innerHTML=
+    '<div style="max-width:480px;margin:0 auto;">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;position:sticky;top:0;background:rgba(0,0,0,.95);padding:10px 0;z-index:1;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--gold);">📋 Liste numérotée des clients</div>'
+    +'<button onclick="document.getElementById(\'coupNumModal\').remove()" style="background:rgba(255,255,255,.1);border:none;color:#fff;border-radius:8px;padding:7px 14px;font-weight:700;cursor:pointer;">✕ Fermer</button>'
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--m2);margin-bottom:10px;">Appuyez sur un client pour le sélectionner</div>'
+    +rows
+    +'</div>';
+  document.body.appendChild(modal);
+}
+
+function selectFromNumList(idx){
+  const name=COUP_CLIENTS[idx];
+  const old=document.getElementById('coupNumModal');if(old)old.remove();
+  const s=document.getElementById('coupClientSearch');
+  if(s)s.value=name;
+  const amt=document.getElementById('coupClientAmt');
+  if(amt){amt.value='';setTimeout(function(){amt.focus();},100);}
+}
+
+function filterCoupClients(){
+  const q=(document.getElementById('coupClientSearch').value||'').trim();
+  const dd=document.getElementById('coupDropdown');
+  if(!dd)return;
+  if(!q){dd.style.display='none';return;}
+  const qUp=q.toUpperCase();
+  const qNum=parseInt(q,10);
+  let matches=[];
+  // Recherche par numéro exact
+  if(!isNaN(qNum)&&qNum>=1&&qNum<=COUP_CLIENTS.length){
+    matches=[{idx:qNum-1,name:COUP_CLIENTS[qNum-1]}];
+  } else {
+    // Recherche par nom
+    matches=COUP_CLIENTS
+      .map((c,i)=>({idx:i,name:c}))
+      .filter(c=>c.name.toUpperCase().includes(qUp))
+      .slice(0,10);
+  }
+  if(!matches.length){dd.style.display='none';return;}
+  dd.style.display='block';
+  dd.innerHTML=matches.map(c=>
+    '<div onclick="selectCoupClient(\''+c.name.replace(/'/g,"\\'")+'\')" style="padding:10px 13px;font-size:13px;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.05);color:var(--m1);display:flex;gap:10px;align-items:center;" '
+    +'onmouseover="this.style.background=\'rgba(245,200,0,.12)\'" onmouseout="this.style.background=\'\'"> '
+    +'<span style="background:rgba(245,200,0,.15);color:var(--gold);font-size:10px;font-weight:900;border-radius:6px;padding:2px 7px;min-width:28px;text-align:center;">'+(c.idx+1)+'</span>'
+    +'<span>'+c.name+'</span>'
+    +'</div>'
+  ).join('');
+}
+
+function selectCoupClient(name){
+  const s=document.getElementById('coupClientSearch');
+  const dd=document.getElementById('coupDropdown');
+  if(s)s.value=name;
+  if(dd)dd.style.display='none';
+  const amt=document.getElementById('coupClientAmt');
+  if(amt)amt.focus();
+}
+
+function addCoupClient(){
+  const search=document.getElementById('coupClientSearch');
+  const amtEl=document.getElementById('coupClientAmt');
+  const client=(search?search.value:'').trim();
+  const montant=pf(amtEl?amtEl.value:'');
+  if(!client){if(search)search.focus();return;}
+  if(montant<=0){if(amtEl)amtEl.focus();return;}
+  const existing=coupClients.find(c=>c.name===client);
+  if(existing)existing.amt=parseFloat((existing.amt+montant).toFixed(2));
+  else coupClients.push({name:client,amt:montant});
+  if(search)search.value='';
+  if(amtEl)amtEl.value='';
+  const dd=document.getElementById('coupDropdown');
+  if(dd)dd.style.display='none';
+  coupManualMode=false;
+  renderCoupList();calc();
+  if(search)search.focus();
+}
+
+function removeCoupClient(idx){
+  coupClients.splice(idx,1);
+  coupManualMode=false;
+  renderCoupList();calc();
+}
+
+function renderCoupList(){
+  const el=document.getElementById('coupClientList');
+  if(!el)return;
+  const total=parseFloat(coupClients.reduce((a,c)=>a+c.amt,0).toFixed(2));
+  if(!coupClients.length){
+    el.innerHTML='';
+  } else {
+    el.innerHTML=coupClients.map((c,i)=>
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--brd);font-size:12px;">'
+      +'<span style="color:var(--m1);flex:1;font-size:11px;">🎟️ '+c.name+'</span>'
+      +'<span style="color:var(--gold);font-weight:800;margin:0 8px;">'+fm(c.amt)+'</span>'
+      +'<button onclick="removeCoupClient('+i+')" style="background:rgba(255,58,58,.15);border:1px solid rgba(255,58,58,.3);color:var(--red);border-radius:7px;padding:2px 7px;font-size:11px;cursor:pointer;">✕</button>'
+      +'</div>'
+    ).join('')
+    +'<div style="display:flex;justify-content:space-between;padding:6px 0;font-size:12px;font-weight:800;">'
+    +'<span style="color:var(--m2);">Total détaillé</span><span style="color:var(--gold);">'+fm(total)+'</span></div>';
+  }
+  // Mettre à jour fcoup seulement si pas en mode manuel
+  if(!coupManualMode){
+    const fcoup=document.getElementById('fcoup');
+    if(fcoup)fcoup.value=total||'';
+  }
+}
+
+function initCoupSel(){renderCoupList();}
+
+function resetCoupClients(){
+  coupClients=[];
+  coupManualMode=false;
+  coupDetailOpen=false;
+  const sec=document.getElementById('coupDetailSection');
+  const btn=document.getElementById('coupToggleBtn');
+  if(sec)sec.style.display='none';
+  if(btn)btn.textContent='Détailler ▼';
+  const s=document.getElementById('coupClientSearch');
+  if(s)s.value='';
+  const dd=document.getElementById('coupDropdown');
+  if(dd)dd.style.display='none';
+  renderCoupList();
+}
+
+// Fermer dropdown si on clique ailleurs
+document.addEventListener('click',function(e){
+  const dd=document.getElementById('coupDropdown');
+  const search=document.getElementById('coupClientSearch');
+  if(dd&&search&&!search.contains(e.target)&&!dd.contains(e.target)){
+    dd.style.display='none';
+  }
+});
+
 function resetForm(){
   ['ftaxd','ftaxf','fcrsd','fcrsf','fcrs','fcomp','fcard','fsts','fcoup','fext','fpour','fess'].forEach(function(id){
     const e=document.getElementById(id);if(e)e.value='';
   });
   document.getElementById('frem').value='';
   document.getElementById('calcBox').innerHTML='';
+  resetCoupClients();
 }
 function autoCrs(){
   const d=pi(gv('fcrsd')),f=pi(gv('fcrsf'));
@@ -1583,14 +1812,16 @@ function calc(){
   const comp=pf(gv('fcomp')),card=pf(gv('fcard')),sts=pf(gv('fsts'));
   const coup=pf(gv('fcoup')),ext=pf(gv('fext')),pour=pf(gv('fpour'));
   const rec=comp+card+sts+coup+ext;
-  const taxNet=taxf-taxd-crs;
+  const taxNet=taxf-taxd-crs;   // pour le salaire
+  const taxBrut=taxf-taxd;      // pour l'écart (pourboire déjà inclus dans taximètre)
+  const attendu=parseFloat((taxBrut).toFixed(2));
   const driver=gv('fdr')||U.name;
   const drv=getDrv(driver);
   const isOwn=drv&&drv.role==='owner';
   const pct=drv?drv.pct:40;
   const salary=isOwn?rec:parseFloat((taxNet*(pct/100)).toFixed(2));
   const ownerProfit=isOwn?rec:parseFloat((taxNet*(1-pct/100)).toFixed(2));
-  const ecart=parseFloat((rec-(taxNet+pour)).toFixed(2));
+  const ecart=parseFloat((attendu-(comp+card+sts+coup+ext)).toFixed(2));
   const hasEcart=Math.abs(ecart)>0.5;
   let html='';
   if(rec>0||taxf>0){
@@ -1599,7 +1830,7 @@ function calc(){
     if(U.role==='owner'&&!isOwn)
       html+='<div class="rb rb-neon"><div><div class="rbl">Profit patron</div></div><div class="rbv">'+fm(ownerProfit)+'</div></div>';
     if(hasEcart){
-      html+='<div class="rb '+(ecart<0?'rb-red':'rb-pur')+'"><div><div class="rbl">'+(ecart<0?'⚠️ MANQUE':'💰 SURPLUS')+'</div><div style="font-size:10px;color:var(--m2);margin-top:2px;">Recette '+fm(rec)+' vs attendu '+fm(taxNet+pour)+'</div></div><div class="rbv">'+fm(Math.abs(ecart))+'</div></div>';
+      html+='<div class="rb '+(ecart>0?'rb-red':'rb-pur')+'"><div><div class="rbl">'+(ecart>0?'⚠️ MANQUE':'💰 SURPLUS')+'</div><div style="font-size:10px;color:var(--m2);margin-top:2px;">Remis '+fm(rec)+' · Attendu '+fm(attendu)+'</div></div><div class="rbv">'+fm(Math.abs(ecart))+'</div></div>';
     }else{
       html+='<div class="bn bn-grn">✓ Recette équilibrée</div>';
     }
@@ -1615,14 +1846,28 @@ function saveShift(){
   const drv=getDrv(driver);
   const isOwn=drv&&drv.role==='owner';
   const pct=drv?drv.pct:40;
-  const taxNet=taxf-taxd-crs;
+  const taxNet=taxf-taxd-crs;  // pour le salaire
+  const taxBrut=taxf-taxd;     // pour l'écart (pourboire déjà dans taximètre)
   const salary=isOwn?rec:parseFloat((taxNet*(pct/100)).toFixed(2));
-  const ecart=parseFloat((rec-(taxNet+pour)).toFixed(2));
+  const ecart=parseFloat((taxBrut-rec).toFixed(2));
   if(!gv('fd')||!selV)return;
+
+  // ── Si manque → popup de confirmation ──
+  if(ecart>0.5){
+    showManqueConfirm(fm(ecart), fm(taxBrut), fm(rec), function(){
+      doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart});
+    });
+    return;
+  }
+  doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart});
+}
+
+function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart}){
   const s={
     id:uid(),date:gv('fd'),time:gv('ft'),vehicle:'Prius '+selV,driver,
     isOwner:isOwn,drvPct:pct,taxd,taxf,crsd:gv('fcrsd'),crsf:gv('fcrsf'),
     courses:crs,comp,card,sts,coup,ext,pourboire:pour,
+    coupDetails:[...coupClients],
     essence:pf(gv('fess')),remarque:gv('frem'),
     recette:rec,salary,ecart,createdBy:U.name,ts:new Date().toISOString()
   };
@@ -1631,6 +1876,42 @@ function saveShift(){
   const ok=document.getElementById('shiftOk');
   ok.style.display='block';setTimeout(function(){ok.style.display='none';},2000);
   resetForm();calc();renderWkList();renderSoldeBar();
+}
+
+function showManqueConfirm(manque, attendu, remis, onConfirm){
+  // Supprimer popup existante
+  const old=document.getElementById('manqueModal');if(old)old.remove();
+  const modal=document.createElement('div');
+  modal.id='manqueModal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML=
+    '<div style="background:linear-gradient(145deg,#1a0a0a,#120808);border:2px solid rgba(255,58,58,.4);border-radius:20px;padding:24px;max-width:340px;width:100%;text-align:center;">'
+    +'<div style="font-size:40px;margin-bottom:10px;">⚠️</div>'
+    +'<div style="font-size:18px;font-weight:900;color:var(--red);margin-bottom:6px;">MANQUE D\'ARGENT</div>'
+    +'<div style="font-size:13px;color:var(--m2);margin-bottom:16px;">Ce quart a un écart négatif</div>'
+    +'<div style="background:rgba(255,58,58,.08);border:1px solid rgba(255,58,58,.2);border-radius:12px;padding:14px;margin-bottom:16px;">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'
+    +'<div><div style="font-size:9px;color:var(--m2);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Attendu</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--gold);">'+attendu+'</div></div>'
+    +'<div><div style="font-size:9px;color:var(--m2);font-weight:700;text-transform:uppercase;margin-bottom:3px;">Remis</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--grn);">'+remis+'</div></div>'
+    +'</div>'
+    +'<div style="border-top:1px solid rgba(255,58,58,.2);padding-top:10px;">'
+    +'<div style="font-size:10px;color:var(--m2);margin-bottom:3px;">Manque</div>'
+    +'<div style="font-size:28px;font-weight:900;color:var(--red);letter-spacing:-1px;">−'+manque+'</div>'
+    +'</div>'
+    +'</div>'
+    +'<div style="font-size:12px;color:var(--m2);margin-bottom:18px;">Voulez-vous enregistrer ce quart malgré le manque ?</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
+    +'<button onclick="document.getElementById(\'manqueModal\').remove();" style="background:rgba(255,255,255,.06);border:1px solid var(--brd);color:var(--m1);border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">✕ Annuler</button>'
+    +'<button id="manqueConfirmBtn" style="background:linear-gradient(135deg,var(--red),#c00);border:none;color:#fff;border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">✓ Confirmer</button>'
+    +'</div>'
+    +'</div>';
+  document.body.appendChild(modal);
+  document.getElementById('manqueConfirmBtn').onclick=function(){
+    modal.remove();
+    onConfirm();
+  };
 }
 
 // ═══ DELETE ═══
@@ -1656,7 +1937,7 @@ function shiftRow(s,cumulMap){
   const cumul=cumulMap?cumulMap[s.id]:null;
   const field=U.role==='owner'?s.recette:salary;
   const drvPct=s.drvPct||40;
-  const ecartHTML=hasEcart?'<div class="sr-ecart" style="color:'+(ecart<0?'var(--red)':'var(--pur)')+';">'+(ecart<0?'⚠️ ':'+$')+fm(Math.abs(ecart))+'</div>':'';
+  const ecartHTML=hasEcart?'<div class="sr-ecart" style="color:'+(ecart>0?'var(--red)':'var(--pur)')+';">'+(ecart>0?'⚠️ −':'💰 +')+fm(Math.abs(ecart))+'</div>':'';
   return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses'+(s.remarque?' · 📝 '+s.remarque:'')+'</div></div><div class="sr-right"><div class="sr-amt">'+fm(field)+'</div>'+(cumul!==null?'<div class="sr-cumul">Cumul: '+fm(cumul)+'</div>':'')+(U.role!=='owner'?'<div style="font-size:10px;color:var(--gold)">'+drvPct+'%</div>':'')+ecartHTML+'</div></div>'
     +'<div class="sr-acts"><button class="bedt" onclick="event.stopPropagation();openEdit(\''+s.id+'\')">✏️ Modifier</button><button class="bdlt" onclick="event.stopPropagation();delS(\''+s.id+'\')">🗑️ Supprimer</button></div>';
 }
@@ -1675,7 +1956,7 @@ function siHTML(s,cumulMap){
   if(s.coup>0)tags+='<span class="tag ty">🎟️ '+fm(s.coup)+'</span>';
   if(s.essence>0)tags+='<span class="tag tr">⛽ '+fm(s.essence)+'</span>';
   if(s.pourboire>0)tags+='<span class="tag ty">🪙 '+fm(s.pourboire)+'</span>';
-  if(hasEc)tags+='<span class="tag '+(ecart<0?'tr':'tp')+'">'+(ecart<0?'⚠️':'+$')+fm(Math.abs(ecart))+'</span>';
+  if(hasEc)tags+='<span class="tag '+(ecart>0?'tr':'tp')+'">'+(ecart>0?'⚠️ −':'💰 +')+fm(Math.abs(ecart))+'</span>';
   return '<div class="si"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;"><div><div class="si-drv">'+s.driver+' — '+s.vehicle+'</div><div class="si-meta">'+s.date+(s.time?' · '+s.time:'')+'</div></div><div style="text-align:right"><div class="si-amt">'+fm(s.recette)+'</div><div class="si-sal">'+(s.isOwner?'Patron 100%':'Sal: '+fm(salary)+' ('+( s.drvPct||40)+'%)')+'</div>'+(cumul!==null?'<div class="si-cumul">Cumul: '+fm(cumul)+'</div>':'')+'</div></div>'
     +'<div class="tags">'+tags+'</div>'
     +(s.remarque?'<div style="font-size:10px;color:var(--m2);margin-top:4px;">📝 '+s.remarque+'</div>':'')
@@ -2711,6 +2992,33 @@ function renderProfit(){
       +(fixedOth>0?'<div class="ss-row"><span style="color:var(--m3)">📝 '+(fc.otherLabel||'Autre')+'</span><span style="color:var(--red);font-weight:700;">− '+fm(fixedOth)+'</span></div>':'')
       +'</div>'
 
+      // Coupons par client pour ce mois
+      +(totCoup>0?(()=>{
+        const coupMap={};
+        arr.forEach(s=>{
+          if(s.coupDetails&&s.coupDetails.length){
+            s.coupDetails.forEach(cd=>{
+              coupMap[cd.name]=(coupMap[cd.name]||0)+cd.amt;
+            });
+          }
+        });
+        const coupEntries=Object.entries(coupMap).sort((a,b)=>b[1]-a[1]);
+        if(!coupEntries.length)return '';
+        const dataEnc=encodeURIComponent(JSON.stringify({lbl:m.lbl,entries:coupEntries,total:totCoup}));
+        return '<div style="background:rgba(0,229,255,.04);border:1px solid rgba(0,229,255,.15);border-radius:11px;padding:11px;margin-bottom:8px;">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">'
+          +'<div style="font-size:10px;color:var(--neon);font-weight:700;text-transform:uppercase;letter-spacing:.4px;">🎟️ Coupons à réclamer — '+m.lbl+'</div>'
+          +'<button onclick="printCoupons(\''+dataEnc+'\')" style="background:var(--neon);color:#000;border:none;border-radius:8px;padding:5px 12px;font-size:11px;font-weight:800;cursor:pointer;">🖨️ Imprimer</button>'
+          +'</div>'
+          +coupEntries.map(([name,amt])=>
+            '<div class="ss-row"><span style="color:var(--m3);font-size:11px;">'+name+'</span><span style="color:var(--neon);font-weight:800;">'+fm(amt)+'</span></div>'
+          ).join('')
+          +'<div class="ss-row" style="border-top:1.5px solid rgba(0,229,255,.2);margin-top:4px;padding-top:8px;">'
+          +'<span style="font-weight:700;color:var(--txt)">Total à réclamer</span>'
+          +'<span style="font-weight:900;color:var(--neon);font-size:15px;">'+fm(totCoup)+'</span>'
+          +'</div></div>';
+      })():'')
+
       // Final net
       +'<div style="background:'+(isPositive?'rgba(57,211,83,.08)':'rgba(255,58,58,.08)')+';border:2px solid '+(isPositive?'rgba(57,211,83,.3)':'rgba(255,58,58,.3)')+';border-radius:12px;padding:13px;display:flex;justify-content:space-between;align-items:center;">'
       +'<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:'+(isPositive?'var(--grn)':'var(--red)')+';">💹 Profit net entreprise</div>'
@@ -2744,6 +3052,59 @@ function renderProfit(){
     html+='</div>';
   }
   c.innerHTML=html;
+}
+
+function printCoupons(dataEnc){
+  const d=JSON.parse(decodeURIComponent(dataEnc));
+  const veh=C.vehicles&&C.vehicles.length?C.vehicles.map(v=>v.number||v).join(', '):'';
+  const rows=d.entries.map(([name,amt])=>{
+    const num=COUP_CLIENTS.indexOf(name)+1;
+    return '<tr><td style="padding:7px 10px;border-bottom:1px solid #ddd;font-size:13px;">'
+      +(num>0?'<span style="background:#f5f5f5;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:700;margin-right:8px;color:#555;">'+num+'</span>':'')
+      +name+'</td>'
+      +'<td style="padding:7px 10px;border-bottom:1px solid #ddd;text-align:right;font-size:13px;font-weight:700;">'+amt.toFixed(2)+'$</td></tr>';
+  }).join('');
+  const win=window.open('','_blank','width=700,height=900');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>Coupons à réclamer — ${d.lbl}</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:30px;color:#111;}
+    h1{font-size:20px;margin-bottom:4px;}
+    .sub{font-size:13px;color:#555;margin-bottom:20px;}
+    table{width:100%;border-collapse:collapse;margin-bottom:20px;}
+    thead tr{background:#f0f0f0;}
+    thead th{padding:9px 10px;text-align:left;font-size:13px;border-bottom:2px solid #bbb;}
+    thead th:last-child{text-align:right;}
+    .total-row td{font-weight:900;font-size:15px;border-top:2px solid #111;padding-top:10px;}
+    .footer{margin-top:30px;font-size:12px;color:#777;border-top:1px solid #ddd;padding-top:15px;}
+    .sign{margin-top:40px;display:flex;gap:60px;}
+    .sign div{flex:1;border-top:1px solid #333;padding-top:6px;font-size:12px;color:#555;}
+    @media print{button{display:none!important;}}
+  </style></head><body>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
+    <div>
+      <h1>🎟️ Coupons à réclamer</h1>
+      <div class="sub">Mois : <b>${d.lbl}</b> &nbsp;|&nbsp; Taxi #: <b>${veh}</b></div>
+    </div>
+    <button onclick="window.print()" style="background:#111;color:#fff;border:none;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;">🖨️ Imprimer</button>
+  </div>
+  <table>
+    <thead><tr><th>Client</th><th style="text-align:right;">Montant</th></tr></thead>
+    <tbody>${rows}
+    <tr class="total-row">
+      <td style="padding:10px 10px 5px;">SOUS TOTAL</td>
+      <td style="padding:10px 10px 5px;text-align:right;">${d.total.toFixed(2)}$</td>
+    </tr>
+    </tbody>
+  </table>
+  <div class="footer">TaxiPro — Généré le ${new Date().toLocaleDateString('fr-CA',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</div>
+  <div class="sign">
+    <div>Signature du chauffeur</div>
+    <div>Signature du patron</div>
+    <div>Date</div>
+  </div>
+  </body></html>`);
+  win.document.close();
 }
 
 function saveFixedCosts(){
