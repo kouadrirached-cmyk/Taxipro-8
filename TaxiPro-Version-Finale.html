@@ -3785,7 +3785,18 @@ function renderCoupPage(){
   const c=document.getElementById('coupPageContent');
   if(!c)return;
   if(U.role==='owner'){
-    renderCoupPageOwner(c);
+    const tab=window._coupOwnerTab||'team';
+    c.innerHTML=
+      '<div style="display:flex;gap:7px;margin-bottom:14px;">'
+      +'<button onclick="window._coupOwnerTab=\'mine\';renderCoupPage();" '
+      +'style="flex:1;background:'+(tab==='mine'?'var(--gold)':'rgba(255,255,255,.06)')+';border:1px solid '+(tab==='mine'?'var(--gold)':'var(--brd)')+';color:'+(tab==='mine'?'#000':'var(--m3)')+';border-radius:9px;padding:9px 4px;font-size:12px;font-weight:800;cursor:pointer;">👑 Mes coupons</button>'
+      +'<button onclick="window._coupOwnerTab=\'team\';renderCoupPage();" '
+      +'style="flex:1;background:'+(tab==='team'?'var(--gold)':'rgba(255,255,255,.06)')+';border:1px solid '+(tab==='team'?'var(--gold)':'var(--brd)')+';color:'+(tab==='team'?'#000':'var(--m3)')+';border-radius:9px;padding:9px 4px;font-size:12px;font-weight:800;cursor:pointer;">👥 Équipe</button>'
+      +'</div>'
+      +'<div id="coupTabContent"></div>';
+    const tc=document.getElementById('coupTabContent');
+    if(tab==='mine') renderCoupPageDriver(tc);
+    else renderCoupPageOwner(tc);
   } else {
     renderCoupPageDriver(c);
   }
