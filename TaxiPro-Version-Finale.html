@@ -897,6 +897,7 @@ body{
     <button class="tb" id="tb-profit" onclick="goPage('profit')" style="display:none"><span class="ti">💹</span><span>Profit</span></button>
     <button class="tb" id="tb-analyse" onclick="goPage('analyse')" style="display:none"><span class="ti">🏆</span><span>Analyse</span></button>
     <button class="tb" id="tb-paye" onclick="goPage('paye')" style="display:none"><span class="ti">💵</span><span>Paye</span></button>
+    <button class="tb" id="tb-coup" onclick="goPage('coup')"><span class="ti">🎟️</span><span>Coupons</span></button>
     <button class="tb" id="tb-exp" onclick="goPage('exp')"><span class="ti">💸</span><span>Dépenses</span></button>
     <button class="tb" id="tb-team" onclick="goPage('team')" style="display:none"><span class="ti">👥</span><span>Équipe</span></button>
     <button class="tb" id="tb-sched" onclick="goPage('sched')" style="display:none"><span class="ti">📅</span><span>Horaire</span></button>
@@ -1014,6 +1015,12 @@ body{
         <button class="btn bsec bsm" onclick="exportPrint()" style="flex:1">🖨️ Imprimer</button>
       </div>
       <div id="histList"></div>
+    </div>
+
+    <!-- ══ COUPONS ══ -->
+    <div class="pg" id="pg-coup">
+      <div class="ptit">🎟️ Coupons</div>
+      <div id="coupPageContent"></div>
     </div>
 
     <!-- ══ STATS ══ -->
@@ -2006,6 +2013,7 @@ function goPage(name){
   if(name==='profit')renderProfit();
   if(name==='analyse')renderAnalyse();
   if(name==='paye')renderPaye();
+  if(name==='coup')renderCoupPage();
   if(name==='exp')renderExp();
   if(name==='team')renderTeam();
   if(name==='sched')renderSched();
@@ -3766,6 +3774,434 @@ async function sendPayEmails(){
       setTimeout(function(){el.scrollIntoView({behavior:'smooth',block:'center'});},380);
   });
 })();
+
+// ═══════════════════════════════════════════════
+// PAGE COUPONS — saisie rapide + vue patron
+// ═══════════════════════════════════════════════
+
+let coupPageClients={}; // {clientName: montant} pour le quart en cours (vue chauffeur)
+
+function renderCoupPage(){
+  const c=document.getElementById('coupPageContent');
+  if(!c)return;
+  if(U.role==='owner'){
+    renderCoupPageOwner(c);
+  } else {
+    renderCoupPageDriver(c);
+  }
+}
+
+// ── VUE CHAUFFEUR ──
+function renderCoupPageDriver(c){
+  const today=new Date().toISOString().slice(0,10);
+  // Chercher le quart du jour pour ce chauffeur
+  const todayShifts=getArr().filter(s=>s.driver===U.name&&s.date===today);
+  const lastShift=todayShifts.length?todayShifts[todayShifts.length-1]:null;
+
+  // Calculer total coupon déjà dans coupPageClients
+  const total=Object.values(coupPageClients).reduce((a,v)=>a+v,0);
+
+  let clientsHtml='';
+  if(Object.keys(coupPageClients).length===0){
+    clientsHtml='<div style="text-align:center;padding:18px;color:var(--m2);font-size:13px;">Aucun coupon ajouté pour l\'instant</div>';
+  } else {
+    clientsHtml=Object.entries(coupPageClients).map(([name,amt])=>
+      '<div style="display:flex;justify-content:space-between;align-items:center;background:rgba(245,200,0,.07);border:1px solid rgba(245,200,0,.2);border-radius:11px;padding:11px 14px;margin-bottom:7px;">'
+      +'<div style="font-size:13px;font-weight:700;color:var(--txt);">'+name+'</div>'
+      +'<div style="display:flex;align-items:center;gap:10px;">'
+      +'<div style="font-size:15px;font-weight:900;color:var(--gold);">'+fm(amt)+'</div>'
+      +'<button onclick="removeCoupPageClient(\''+name.replace(/'/g,"\\'")+'\')" style="background:rgba(255,58,58,.15);border:1px solid rgba(255,58,58,.3);color:var(--red);border-radius:7px;padding:4px 9px;font-size:12px;font-weight:700;cursor:pointer;">✕</button>'
+      +'</div></div>'
+    ).join('');
+  }
+
+  // Liste clients pour sélection rapide
+  const clientBtns=COUP_CLIENTS.map((name,i)=>
+    '<button onclick="selectCoupPageClient(\''+name.replace(/'/g,"\\'")+'\')" '
+    +'style="background:'+(coupPageClients[name]?'rgba(245,200,0,.18)':'rgba(255,255,255,.04)')+';'
+    +'border:1px solid '+(coupPageClients[name]?'rgba(245,200,0,.5)':'var(--brd)')+';'
+    +'color:'+(coupPageClients[name]?'var(--gold)':'var(--m3)')+';'
+    +'border-radius:8px;padding:8px 11px;font-size:11px;font-weight:700;cursor:pointer;text-align:left;line-height:1.3;">'
+    +(coupPageClients[name]?'✓ ':'')+name
+    +'</button>'
+  ).join('');
+
+  c.innerHTML=
+    // Info quart du jour
+    '<div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.2);border-radius:13px;padding:13px;margin-bottom:14px;">'
+    +'<div style="font-size:10px;color:var(--m2);font-weight:700;text-transform:uppercase;margin-bottom:4px;">Quart du jour — '+today+'</div>'
+    +'<div style="font-size:13px;font-weight:700;color:var(--txt);">'+U.name
+    +(lastShift?'<span style="color:var(--grn);margin-left:8px;font-size:11px;">✅ Quart enregistré</span>':'<span style="color:var(--org);margin-left:8px;font-size:11px;">⚠️ Pas encore de quart aujourd\'hui</span>')
+    +'</div></div>'
+
+    // Coupons ajoutés
+    +'<div style="background:rgba(10,8,0,.6);border:1.5px solid var(--brd2);border-radius:14px;padding:14px;margin-bottom:14px;">'
+    +'<div style="font-size:11px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">🎟️ Coupons ajoutés</div>'
+    +clientsHtml
+    +(Object.keys(coupPageClients).length>0?
+      '<div style="border-top:1px solid var(--brd);margin-top:10px;padding-top:10px;display:flex;justify-content:space-between;align-items:center;">'
+      +'<div style="font-size:12px;color:var(--m2);font-weight:700;">TOTAL</div>'
+      +'<div style="font-size:18px;font-weight:900;color:var(--gold);">'+fm(total)+'</div>'
+      +'</div>':''
+    )
+    +'</div>'
+
+    // Bouton appliquer au quart
+    +(Object.keys(coupPageClients).length>0?
+      '<button onclick="applyCoupToShift()" class="btn btn-gold" style="margin-bottom:14px;width:100%;">✅ Appliquer au quart du jour ('+fm(total)+')</button>':''
+    )
+
+    // Recherche rapide
+    +'<div style="background:rgba(10,8,0,.6);border:1.5px solid var(--brd2);border-radius:14px;padding:14px;margin-bottom:14px;">'
+    +'<div style="font-size:11px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">➕ Ajouter un coupon</div>'
+    +'<input type="text" id="coupPageSearch" placeholder="🔍 Rechercher un client..." oninput="filterCoupPageList()" autocomplete="off" '
+    +'style="width:100%;background:rgba(10,8,0,.8);border:1px solid var(--brd2);color:var(--txt);border-radius:10px;padding:10px 13px;font-size:13px;margin-bottom:10px;">'
+    +'<div id="coupPageList" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:280px;overflow-y:auto;">'
+    +clientBtns
+    +'</div></div>'
+
+    // Modale montant
+    +'<div id="coupAmtModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;padding:20px;">'
+    +'<div style="background:linear-gradient(145deg,#1a1200,#120e00);border:2px solid rgba(245,200,0,.3);border-radius:20px;padding:24px;max-width:320px;width:100%;text-align:center;">'
+    +'<div style="font-size:13px;font-weight:800;color:var(--gold);margin-bottom:6px;">🎟️ COUPON</div>'
+    +'<div id="coupAmtClientName" style="font-size:16px;font-weight:900;color:var(--txt);margin-bottom:16px;"></div>'
+    +'<input type="number" inputmode="decimal" id="coupAmtInput" placeholder="Montant $" '
+    +'style="width:100%;background:rgba(10,8,0,.8);border:2px solid rgba(245,200,0,.4);color:var(--gold);border-radius:12px;padding:14px;font-size:22px;font-weight:900;text-align:center;margin-bottom:14px;">'
+    +'<div style="display:flex;gap:10px;">'
+    +'<button onclick="closeCoupAmtModal()" style="flex:1;background:rgba(255,255,255,.08);border:1px solid var(--brd2);color:var(--m2);border-radius:11px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;">Annuler</button>'
+    +'<button onclick="confirmCoupAmt()" style="flex:2;background:var(--gold);border:none;color:#000;border-radius:11px;padding:12px;font-size:15px;font-weight:900;cursor:pointer;">✓ Ajouter</button>'
+    +'</div></div></div>';
+}
+
+let coupPageSelectedClient='';
+
+function filterCoupPageList(){
+  const q=(document.getElementById('coupPageSearch').value||'').toLowerCase().trim();
+  const list=document.getElementById('coupPageList');
+  if(!list)return;
+  const filtered=q?COUP_CLIENTS.filter(n=>n.toLowerCase().includes(q)):COUP_CLIENTS;
+  list.innerHTML=filtered.map(name=>
+    '<button onclick="selectCoupPageClient(\''+name.replace(/'/g,"\\'")+'\')" '
+    +'style="background:'+(coupPageClients[name]?'rgba(245,200,0,.18)':'rgba(255,255,255,.04)')+';'
+    +'border:1px solid '+(coupPageClients[name]?'rgba(245,200,0,.5)':'var(--brd)')+';'
+    +'color:'+(coupPageClients[name]?'var(--gold)':'var(--m3)')+';'
+    +'border-radius:8px;padding:8px 11px;font-size:11px;font-weight:700;cursor:pointer;text-align:left;line-height:1.3;">'
+    +(coupPageClients[name]?'✓ ':'')+name+'</button>'
+  ).join('');
+}
+
+function selectCoupPageClient(name){
+  coupPageSelectedClient=name;
+  const modal=document.getElementById('coupAmtModal');
+  if(modal){
+    modal.style.display='flex';
+    document.getElementById('coupAmtClientName').textContent=name;
+    const inp=document.getElementById('coupAmtInput');
+    inp.value=coupPageClients[name]||'';
+    setTimeout(()=>inp.focus(),100);
+  }
+}
+
+function closeCoupAmtModal(){
+  const modal=document.getElementById('coupAmtModal');
+  if(modal)modal.style.display='none';
+  coupPageSelectedClient='';
+}
+
+function confirmCoupAmt(){
+  const amt=parseFloat(document.getElementById('coupAmtInput').value)||0;
+  if(amt<=0){alert('Entre un montant valide');return;}
+  coupPageClients[coupPageSelectedClient]=amt;
+  closeCoupAmtModal();
+  renderCoupPage();
+}
+
+function removeCoupPageClient(name){
+  delete coupPageClients[name];
+  renderCoupPage();
+}
+
+function applyCoupToShift(){
+  const today=new Date().toISOString().slice(0,10);
+  const total=parseFloat(Object.values(coupPageClients).reduce((a,v)=>a+v,0).toFixed(2));
+  const details=Object.entries(coupPageClients).map(([name,amt])=>({name,amt}));
+
+  // Chercher le quart du jour pour ce chauffeur
+  const allShifts=getArr();
+  const todayShifts=allShifts.filter(s=>s.driver===U.name&&s.date===today);
+
+  if(todayShifts.length===0){
+    // Pas de quart aujourd'hui — aller à la page quart avec les coupons pré-remplis
+    coupClients=[...details];
+    coupManualMode=false;
+    renderCoupList();
+    const fcoup=document.getElementById('fcoup');
+    if(fcoup)fcoup.value=total||'';
+    goPage('shift');
+    const el=document.getElementById('fcoup');
+    if(el)setTimeout(()=>el.scrollIntoView({behavior:'smooth',block:'center'}),300);
+    alert('✅ Coupons transférés dans le formulaire du quart !');
+    return;
+  }
+
+  // Mettre à jour le dernier quart du jour
+  const lastShift=todayShifts[todayShifts.length-1];
+  const existing=S[lastShift.id];
+  if(!existing){alert('Erreur: quart introuvable');return;}
+
+  // Fusionner les coupons existants avec les nouveaux
+  const existingDetails=existing.coupDetails||[];
+  const merged=[...existingDetails];
+  details.forEach(d=>{
+    const idx=merged.findIndex(e=>e.name===d.name);
+    if(idx>=0)merged[idx].amt+=d.amt;
+    else merged.push(d);
+  });
+  const newTotal=parseFloat(merged.reduce((a,d)=>a+d.amt,0).toFixed(2));
+
+  existing.coupDetails=merged;
+  existing.coup=newTotal;
+  // Recalculer la recette
+  existing.recette=parseFloat(((existing.comp||0)+(existing.card||0)+(existing.sts||0)+newTotal+(existing.ext||0)).toFixed(2));
+  // Recalculer l'écart
+  const attendu=parseFloat(((existing.taxf||0)-(existing.taxd||0)).toFixed(2));
+  existing.ecart=parseFloat((attendu-existing.recette).toFixed(2));
+
+  S[existing.id]=existing;
+  lSave();
+  audit('COUP_UPDATE',U.name+'/'+today+'/+'+fm(total));
+
+  // Réinitialiser
+  coupPageClients={};
+  renderCoupPage();
+
+  // Feedback visuel
+  const ok=document.getElementById('coupPageContent');
+  if(ok){
+    const msg=document.createElement('div');
+    msg.className='ial ials';
+    msg.style.cssText='margin-bottom:12px;';
+    msg.textContent='✅ '+fm(total)+' de coupons ajoutés au quart du '+today+' !';
+    ok.insertBefore(msg,ok.firstChild);
+    setTimeout(()=>msg.remove(),3000);
+  }
+}
+
+// ── VUE PATRON ──
+function renderCoupPageOwner(c){
+  const today=new Date().toISOString().slice(0,10);
+  // Sélecteur de période
+  const periods=[
+    {label:"Aujourd'hui",val:'today'},
+    {label:'Cette semaine',val:'week'},
+    {label:'Ce mois',val:'month'}
+  ];
+  const selPer=window._coupOwnerPer||'today';
+
+  let arr=getArr();
+  if(selPer==='today') arr=arr.filter(s=>s.date===today);
+  else if(selPer==='week') arr=arr.filter(s=>inWk(s.date,new Date()));
+  else arr=arr.filter(s=>s.date&&s.date.slice(0,7)===today.slice(0,7));
+
+  // Regrouper par chauffeur
+  const byDrv={};
+  arr.forEach(s=>{
+    if(!byDrv[s.driver])byDrv[s.driver]={total:0,clients:{}};
+    byDrv[s.driver].total+=pf(s.coup)||0;
+    (s.coupDetails||[]).forEach(d=>{
+      if(!byDrv[s.driver].clients[d.name])byDrv[s.driver].clients[d.name]=0;
+      byDrv[s.driver].clients[d.name]+=d.amt;
+    });
+  });
+
+  const grandTotal=Object.values(byDrv).reduce((a,d)=>a+d.total,0);
+
+  // Résumé global par client (tous chauffeurs confondus)
+  const allClients={};
+  Object.values(byDrv).forEach(d=>{
+    Object.entries(d.clients).forEach(([name,amt])=>{
+      if(!allClients[name])allClients[name]=0;
+      allClients[name]+=amt;
+    });
+  });
+
+  const drvRows=Object.entries(byDrv).filter(([,d])=>d.total>0).map(([name,d])=>{
+    const clientRows=Object.entries(d.clients).sort((a,b)=>b[1]-a[1]).map(([cn,ca])=>
+      '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04);">'
+      +'<div style="font-size:11px;color:var(--m3);">'+cn+'</div>'
+      +'<div style="font-size:11px;font-weight:700;color:var(--gold);">'+fm(ca)+'</div>'
+      +'</div>'
+    ).join('');
+    return '<div style="background:rgba(245,200,0,.05);border:1px solid rgba(245,200,0,.18);border-radius:13px;padding:13px;margin-bottom:10px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+      +'<div style="font-size:14px;font-weight:900;color:var(--txt);">🚗 '+name+'</div>'
+      +'<div style="font-size:17px;font-weight:900;color:var(--gold);">'+fm(d.total)+'</div>'
+      +'</div>'
+      +(Object.keys(d.clients).length?
+        '<div style="border-top:1px solid rgba(255,255,255,.06);padding-top:8px;">'+clientRows+'</div>':
+        '<div style="font-size:11px;color:var(--m2);">Aucun détail par client</div>'
+      )
+      +'</div>';
+  }).join('');
+
+  // Résumé tous clients confondus
+  const allClientRows=Object.entries(allClients).sort((a,b)=>b[1]-a[1]).map(([name,amt])=>
+    '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.04);">'
+    +'<div style="font-size:12px;color:var(--m3);">'+name+'</div>'
+    +'<div style="font-size:12px;font-weight:800;color:var(--gold);">'+fm(amt)+'</div>'
+    +'</div>'
+  ).join('');
+
+  c.innerHTML=
+    // Sélecteur période
+    '<div style="display:flex;gap:7px;margin-bottom:14px;">'
+    +periods.map(p=>'<button onclick="window._coupOwnerPer=\''+p.val+'\';renderCoupPage();" '
+      +'style="flex:1;background:'+(selPer===p.val?'var(--gold)':'rgba(255,255,255,.06)')+';'
+      +'border:1px solid '+(selPer===p.val?'var(--gold)':'var(--brd)')+';'
+      +'color:'+(selPer===p.val?'#000':'var(--m3)')+';'
+      +'border-radius:9px;padding:8px 4px;font-size:11px;font-weight:800;cursor:pointer;">'+p.label+'</button>'
+    ).join('')
+    +'</div>'
+
+    // Total global
+    +'<div style="background:linear-gradient(135deg,rgba(245,200,0,.12),rgba(245,200,0,.05));border:2px solid rgba(245,200,0,.3);border-radius:16px;padding:16px;margin-bottom:14px;text-align:center;">'
+    +'<div style="font-size:10px;color:var(--m2);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">Total coupons — '+(selPer==='today'?"Aujourd'hui":selPer==='week'?'Cette semaine':'Ce mois')+'</div>'
+    +'<div style="font-size:32px;font-weight:900;color:var(--gold);">'+fm(grandTotal)+'</div>'
+    +'</div>'
+
+    // Par chauffeur
+    +'<div style="font-size:11px;font-weight:800;color:var(--gold);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">Par chauffeur</div>'
+    +(drvRows||'<div style="text-align:center;padding:20px;color:var(--m2);">Aucun coupon pour cette période</div>')
+
+    // Résumé par client
+    +(Object.keys(allClients).length?
+      '<div style="background:rgba(10,8,0,.6);border:1px solid var(--brd2);border-radius:13px;padding:13px;margin-top:4px;margin-bottom:14px;">'
+      +'<div style="font-size:11px;font-weight:800;color:var(--pur);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;">📊 Total par client</div>'
+      +allClientRows
+      +'</div>':'')
+
+    // Bouton PDF
+    +(Object.keys(allClients).length?
+      '<button onclick="exportCoupPDF()" class="btn btn-gold" style="width:100%;margin-bottom:8px;">🖨️ Imprimer / Exporter PDF</button>':''
+    );
+}
+
+function exportCoupPDF(){
+  const today=new Date().toISOString().slice(0,10);
+  const selPer=window._coupOwnerPer||'today';
+  let arr=getArr();
+  if(selPer==='today') arr=arr.filter(s=>s.date===today);
+  else if(selPer==='week') arr=arr.filter(s=>inWk(s.date,new Date()));
+  else arr=arr.filter(s=>s.date&&s.date.slice(0,7)===today.slice(0,7));
+
+  // Regrouper par chauffeur
+  const byDrv={};
+  arr.forEach(s=>{
+    if(!byDrv[s.driver])byDrv[s.driver]={total:0,clients:{}};
+    byDrv[s.driver].total+=pf(s.coup)||0;
+    (s.coupDetails||[]).forEach(d=>{
+      if(!byDrv[s.driver].clients[d.name])byDrv[s.driver].clients[d.name]=0;
+      byDrv[s.driver].clients[d.name]+=d.amt;
+    });
+  });
+
+  // Résumé global par client
+  const allClients={};
+  Object.values(byDrv).forEach(d=>{
+    Object.entries(d.clients).forEach(([name,amt])=>{
+      if(!allClients[name])allClients[name]=0;
+      allClients[name]+=amt;
+    });
+  });
+
+  const grandTotal=Object.values(byDrv).reduce((a,d)=>a+d.total,0);
+  const periodLabel=selPer==='today'?today:selPer==='week'?'Semaine courante':'Mois de '+new Date().toLocaleDateString('fr-CA',{month:'long',year:'numeric'});
+  const now=new Date().toLocaleDateString('fr-CA',{year:'numeric',month:'long',day:'numeric'});
+
+  // Tableau par chauffeur
+  const drvTableRows=Object.entries(byDrv).filter(([,d])=>d.total>0).map(([name,d])=>{
+    const clientRows=Object.entries(d.clients).sort((a,b)=>b[1]-a[1]).map(([cn,ca])=>
+      '<tr><td style="padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">&nbsp;&nbsp;&nbsp;'+cn+'</td>'
+      +'<td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right;font-size:12px;">'+ca.toFixed(2)+' $</td></tr>'
+    ).join('');
+    return '<tr style="background:#fffbe6;"><td style="padding:8px 10px;font-weight:800;font-size:13px;border-bottom:2px solid #e0c050;">🚗 '+name+'</td>'
+      +'<td style="padding:8px 10px;text-align:right;font-weight:900;font-size:14px;border-bottom:2px solid #e0c050;">'+d.total.toFixed(2)+' $</td></tr>'
+      +clientRows;
+  }).join('');
+
+  // Tableau récapitulatif par client
+  const clientTableRows=Object.entries(allClients).sort((a,b)=>b[1]-a[1]).map(([name,amt],i)=>
+    '<tr style="background:'+(i%2===0?'#fafafa':'#fff')+'">'
+    +'<td style="padding:7px 10px;border-bottom:1px solid #eee;font-size:12px;">'+(i+1)+'. '+name+'</td>'
+    +'<td style="padding:7px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:800;font-size:13px;color:#b8860b;">'+amt.toFixed(2)+' $</td>'
+    +'</tr>'
+  ).join('');
+
+  const w=window.open('','_blank','width=850,height=1000');
+  if(!w){alert('Autorisez les popups pour imprimer');return;}
+  w.document.write('<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Rapport Coupons — TaxiPro</title>'
+    +'<style>'
+    +'body{font-family:Arial,sans-serif;padding:30px;font-size:13px;color:#111;max-width:780px;margin:0 auto;}'
+    +'h1{font-size:22px;margin:0 0 4px;color:#111;}'
+    +'.sub{font-size:12px;color:#555;margin-bottom:6px;}'
+    +'.badge{display:inline-block;background:#f5c800;color:#000;font-weight:900;font-size:11px;padding:3px 10px;border-radius:20px;margin-bottom:20px;}'
+    +'table{width:100%;border-collapse:collapse;margin-bottom:20px;}'
+    +'th{background:#f5c800;color:#000;padding:9px 10px;text-align:left;font-size:12px;font-weight:800;}'
+    +'th:last-child{text-align:right;}'
+    +'.total-row{background:#111;color:#f5c800;font-weight:900;font-size:14px;}'
+    +'.total-row td{padding:10px;}'
+    +'.section-title{font-size:15px;font-weight:800;margin:24px 0 10px;border-bottom:3px solid #f5c800;padding-bottom:5px;color:#111;}'
+    +'.sig-area{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px;}'
+    +'.sig-box{border-top:1.5px solid #999;padding-top:8px;font-size:11px;color:#666;}'
+    +'.footer{margin-top:30px;font-size:10px;color:#aaa;border-top:1px solid #ddd;padding-top:10px;text-align:center;}'
+    +'@media print{button{display:none!important;}}'
+    +'</style></head><body>'
+
+    // En-tête
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">'
+    +'<div>'
+    +'<h1>🎟️ Rapport de Remboursement Coupons</h1>'
+    +'<div class="sub">TaxiPro — Généré le '+now+'</div>'
+    +'<div class="sub">Période : <strong>'+periodLabel+'</strong></div>'
+    +'<span class="badge">DEMANDE DE CRÉDIT</span>'
+    +'</div>'
+    +'<button onclick="window.print()" style="background:#111;color:#f5c800;border:none;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:800;cursor:pointer;">🖨️ Imprimer / PDF</button>'
+    +'</div>'
+
+    // Résumé total
+    +'<div style="background:#fffbe6;border:2px solid #f5c800;border-radius:10px;padding:16px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">'
+    +'<div><div style="font-size:11px;color:#888;font-weight:700;text-transform:uppercase;letter-spacing:.5px;">Montant total à rembourser</div>'
+    +'<div style="font-size:30px;font-weight:900;color:#b8860b;">'+grandTotal.toFixed(2)+' $</div></div>'
+    +'<div style="text-align:right;font-size:12px;color:#555;">'
+    +Object.keys(allClients).length+' client(s)<br>'
+    +Object.keys(byDrv).filter(k=>byDrv[k].total>0).length+' chauffeur(s)'
+    +'</div></div>'
+
+    // Tableau récapitulatif par client
+    +'<div class="section-title">📊 Récapitulatif par client</div>'
+    +'<table><tr><th>Client</th><th style="text-align:right;">Montant</th></tr>'
+    +clientTableRows
+    +'<tr class="total-row"><td>TOTAL</td><td style="text-align:right;">'+grandTotal.toFixed(2)+' $</td></tr>'
+    +'</table>'
+
+    // Détail par chauffeur
+    +'<div class="section-title">🚗 Détail par chauffeur</div>'
+    +'<table><tr><th>Chauffeur / Client</th><th style="text-align:right;">Montant</th></tr>'
+    +drvTableRows
+    +'<tr class="total-row"><td>TOTAL GÉNÉRAL</td><td style="text-align:right;">'+grandTotal.toFixed(2)+' $</td></tr>'
+    +'</table>'
+
+    // Zone signature
+    +'<div class="sig-area">'
+    +'<div class="sig-box">Signature du responsable<br><br><br></div>'
+    +'<div class="sig-box">Date de remise : _______________</div>'
+    +'</div>'
+
+    +'<div class="footer">TaxiPro — Rapport généré automatiquement · '+new Date().toLocaleString('fr-CA')+'</div>'
+    +'<script>setTimeout(function(){window.print();},400);<\/script>'
+    +'</body></html>');
+  w.document.close();
+}
 </script>
 </body>
 </html>
