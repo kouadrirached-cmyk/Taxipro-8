@@ -2,6 +2,9 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -285,15 +288,6 @@ body{
 }
 .tb .ti{font-size:17px;}
 .tb.on{color:var(--gold);}
-.tb-badge{
-  position:absolute;top:5px;right:4px;
-  background:var(--red);color:#fff;
-  border-radius:50%;min-width:16px;height:16px;
-  font-size:9px;font-weight:900;
-  display:flex;align-items:center;justify-content:center;
-  border:1.5px solid var(--bg);
-  pointer-events:none;
-}
 .tb.on::after{
   content:'';position:absolute;bottom:0;left:10%;right:10%;height:3px;
   background:linear-gradient(90deg,var(--gold2),var(--gold3));
@@ -907,8 +901,6 @@ body{
     <button class="tb" id="tb-analyse" onclick="goPage('analyse')" style="display:none"><span class="ti">🏆</span><span>Analyse</span></button>
     <button class="tb" id="tb-paye" onclick="goPage('paye')" style="display:none"><span class="ti">💵</span><span>Paye</span></button>
     <button class="tb" id="tb-exp" onclick="goPage('exp')"><span class="ti">💸</span><span>Dépenses</span></button>
-    <button class="tb" id="tb-ecarts" onclick="goPage('ecarts')" style="position:relative;display:none;"><span class="ti">⚠️</span><span>Écarts</span><span id="ecartsBadge" class="tb-badge" style="display:none;"></span></button>
-    <button class="tb" id="tb-msgs" onclick="goPage('msgs')" style="position:relative;display:none;"><span class="ti">💬</span><span>Messages</span><span id="msgsBadge" class="tb-badge" style="display:none;"></span></button>
     <button class="tb" id="tb-team" onclick="goPage('team')" style="display:none"><span class="ti">👥</span><span>Équipe</span></button>
     <button class="tb" id="tb-sched" onclick="goPage('sched')" style="display:none"><span class="ti">📅</span><span>Horaire</span></button>
     <button class="tb" id="tb-set" onclick="goPage('set')" style="display:none"><span class="ti">⚙️</span><span>Réglages</span></button>
@@ -1080,23 +1072,6 @@ body{
       <div id="payeContent"></div>
     </div>
 
-    <!-- ══ ÉCARTS ══ -->
-    <div class="pg" id="pg-ecarts">
-      <div class="rsb" style="margin-bottom:13px;">
-        <div class="ptit" style="margin:0">⚠️ Contrôle des écarts</div>
-      </div>
-      <div id="ecartsContent"></div>
-    </div>
-
-    <!-- ══ MESSAGES ══ -->
-    <div class="pg" id="pg-msgs">
-      <div class="rsb" style="margin-bottom:13px;">
-        <div class="ptit" style="margin:0">💬 Messages</div>
-        <button id="newMsgBtn" class="btn bsuc bsm bnm" onclick="openNewMsg()" style="display:none;">✏️ Nouveau</button>
-      </div>
-      <div id="msgsContent"></div>
-    </div>
-
     <!-- ══ HORAIRE ══ -->
     <div class="pg" id="pg-sched">
       <!-- Mode patron : éditeur par chauffeur -->
@@ -1209,7 +1184,6 @@ body{
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn bblu bsm" onclick="backupData()">📦 Exporter JSON</button>
           <button class="btn bsec bsm" onclick="restoreData()">📥 Restaurer</button>
-          <button class="btn bsm" style="background:rgba(255,107,0,.2);border:1px solid #ff6b00;color:#ff6b00;" onclick="recupererLocalStorage()">🔴 Récupérer données perdues</button>
         </div>
         <div class="tmut mt8" id="bkupInfo"></div>
       </div>
@@ -1288,30 +1262,27 @@ body{
     const db=firebase.firestore();
 
     window._fb={
-      async save(C,S,EX,AU,MSG){
+      async save(C,S,EX,AU){
         try{
           await db.collection('taxipro').doc('config').set(C);
           await db.collection('taxipro').doc('shifts').set({data:S});
           await db.collection('taxipro').doc('expenses').set({data:EX});
           await db.collection('taxipro').doc('audit').set({data:AU.slice(-1000)});
-          if(MSG)await db.collection('taxipro').doc('messages').set({data:MSG});
         }catch(e){console.warn('FB save err',e);}
       },
       async load(){
         try{
-          const [c,s,e,a,m]=await Promise.all([
+          const [c,s,e,a]=await Promise.all([
             db.collection('taxipro').doc('config').get(),
             db.collection('taxipro').doc('shifts').get(),
             db.collection('taxipro').doc('expenses').get(),
             db.collection('taxipro').doc('audit').get(),
-            db.collection('taxipro').doc('messages').get(),
           ]);
           return{
             C:c.exists?c.data():null,
             S:s.exists?(s.data().data||{}):{},
             EX:e.exists?(e.data().data||{}):{},
             AU:a.exists?(a.data().data||[]):[],
-            MSG:m.exists?(m.data().data||[]):[],
           };
         }catch(e){console.warn('FB load err',e);return null;}
       },
@@ -1325,10 +1296,7 @@ body{
         const u3=db.collection('taxipro').doc('expenses').onSnapshot(snap=>{
           if(snap.exists)onUpdate('expenses',snap.data().data||{});
         });
-        const u4=db.collection('taxipro').doc('messages').onSnapshot(snap=>{
-          if(snap.exists)onUpdate('messages',snap.data().data||[]);
-        });
-        return()=>{u1();u2();u3();u4();};
+        return()=>{u1();u2();u3();};
       }
     };
     window._fbReady=true;
@@ -1344,7 +1312,6 @@ body{
 // DATA & STATE
 // ═══════════════════════════════
 const SK='txpro_v4';
-let MSG=[]; // messages internes
 const DEF={
   ownerShare:60,
   emailjsServiceId:'',
@@ -1462,7 +1429,6 @@ function applyDefaults(C){
   if(!C.schedules)C.schedules={};
   if(!C.fixedCosts)C.fixedCosts={insurance:880,carRental:850,otherLabel:'',other:0};
   if(!C.payes)C.payes={};
-  if(!C.ecartsRegles)C.ecartsRegles={};
   if(!C.objectifs)C.objectifs={patron:10000};
   return C;
 }
@@ -1475,8 +1441,6 @@ function lLoadLocal(){
     S=s?JSON.parse(s):{};
     EX=e?JSON.parse(e):{};
     AU=a?JSON.parse(a):[];
-    const mg=localStorage.getItem(SK+'_msg');
-    MSG=mg?JSON.parse(mg):[];
     applyDefaults(C);
   }catch(err){C=JSON.parse(JSON.stringify(DEF));S={};EX={};AU=[];}
 }
@@ -1487,14 +1451,13 @@ function lSaveLocal(){
     localStorage.setItem(SK+'_s',JSON.stringify(S));
     localStorage.setItem(SK+'_e',JSON.stringify(EX));
     localStorage.setItem(SK+'_a',JSON.stringify(AU.slice(-1000)));
-    localStorage.setItem(SK+'_msg',JSON.stringify(MSG.slice(-500)));
   }catch(e){}
 }
 
 // Main save — Firebase + local backup simultaneously
 function lSave(){
   lSaveLocal();
-  if(window._fb)window._fb.save(C,S,EX,AU,MSG);
+  if(window._fb)window._fb.save(C,S,EX,AU);
 }
 
 function audit(action,detail=''){
@@ -1518,13 +1481,6 @@ function startRealtimeSync(){
   if(_unlistenFb)_unlistenFb();
   _unlistenFb=window._fb.listen((type,data)=>{
     if(!U)return; // not logged in, ignore
-    if(type==='messages'){
-      MSG=data;
-      updateMsgBadge();
-      const cur=document.querySelector('.pg.on');
-      if(cur&&cur.id==='pg-msgs')renderMsgs();
-      return;
-    }
     if(type==='shifts'){
       S=data;
       // Refresh current visible page silently
@@ -1575,7 +1531,6 @@ function initApp(){
         S=fbData.S||{};
         EX=fbData.EX||{};
         AU=fbData.AU||[];
-        if(fbData.MSG)MSG=fbData.MSG;
         lSaveLocal();
         setSyncStatus('ok');
         // Si login pas encore affiché, le montrer maintenant
@@ -1625,13 +1580,6 @@ function doLogin(){
     document.getElementById(t).style.display=U.role==='owner'?'flex':'none';
   });
   document.getElementById('tb-sched').style.display='flex';
-  document.getElementById('tb-ecarts').style.display='flex';
-  document.getElementById('tb-msgs').style.display='flex';
-  if(U.role==='owner')document.getElementById('newMsgBtn').style.display='flex';
-  updateEcartsBadge();
-  updateMsgBadge();
-  // Popup écarts au login si manques
-  setTimeout(showEcartsPopup, 800);
   audit('LOGIN');
   initShiftForm();
   initCoupSel();
@@ -1973,7 +1921,7 @@ function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn
   audit('ADD',driver+'/'+s.vehicle+'/'+s.date+'/'+fm(rec));
   const ok=document.getElementById('shiftOk');
   ok.style.display='block';setTimeout(function(){ok.style.display='none';},2000);
-  resetForm();calc();renderWkList();renderSoldeBar();updateEcartsBadge();updateMsgBadge();
+  resetForm();calc();renderWkList();renderSoldeBar();
 }
 
 function showManqueConfirm(manque, attendu, remis, onConfirm){
@@ -2084,8 +2032,6 @@ function goPage(name){
   if(name==='profit')renderProfit();
   if(name==='analyse')renderAnalyse();
   if(name==='paye')renderPaye();
-  if(name==='ecarts')renderEcarts();
-  if(name==='msgs'){renderMsgs();markMsgsRead();}
   if(name==='exp')renderExp();
   if(name==='team')renderTeam();
   if(name==='sched')renderSched();
@@ -2731,189 +2677,6 @@ function renderAnalyse(){
   c.innerHTML=html;
 }
 
-// ═══ ÉCARTS ═══
-function updateEcartsBadge(){
-  const badge=document.getElementById('ecartsBadge');
-  if(!badge)return;
-  if(!C.ecartsRegles)C.ecartsRegles={};
-  const arr=U.role==='owner'?getArr():getArr().filter(s=>s.driver===U.name);
-  const manques=arr.filter(s=>calcEcart(s)>0.5&&!C.ecartsRegles[s.id]);
-  if(manques.length>0){
-    badge.textContent=manques.length>9?'9+':manques.length;
-    badge.style.display='flex';
-  } else {
-    badge.style.display='none';
-  }
-}
-
-function reglerEcart(shiftId){
-  if(!C.ecartsRegles)C.ecartsRegles={};
-  C.ecartsRegles[shiftId]={ts:new Date().toISOString(),by:U.name};
-  lSave();
-  renderEcarts();
-  updateEcartsBadge();
-}
-
-function dereglerEcart(shiftId){
-  if(!C.ecartsRegles)C.ecartsRegles={};
-  delete C.ecartsRegles[shiftId];
-  lSave();
-  renderEcarts();
-  updateEcartsBadge();
-}
-
-function renderEcarts(){
-  const c=document.getElementById('ecartsContent');
-  const isOwner=U.role==='owner';
-  if(!C.ecartsRegles)C.ecartsRegles={};
-  let arr=getArr();
-  if(!isOwner)arr=arr.filter(s=>s.driver===U.name);
-
-  // Filtre affichage (patron seulement)
-  const showRegle=document.getElementById('ecartFiltreRegle');
-  const voirRegles=isOwner&&showRegle&&showRegle.checked;
-
-  // Séparer manques non réglés et réglés
-  const tousManques=arr.filter(s=>calcEcart(s)>0.5).sort((a,b)=>b.date.localeCompare(a.date));
-  const manques=tousManques.filter(s=>!C.ecartsRegles[s.id]);
-  const regles=tousManques.filter(s=>!!C.ecartsRegles[s.id]);
-  const surplus=arr.filter(s=>calcEcart(s)<-0.5).sort((a,b)=>b.date.localeCompare(a.date));
-  const totalManque=manques.reduce((a,s)=>a+calcEcart(s),0);
-  const totalSurplus=surplus.reduce((a,s)=>a+Math.abs(calcEcart(s)),0);
-  const netEcart=totalManque-totalSurplus;
-
-  let html='';
-
-  // ── Filtre (patron seulement) ──
-  if(isOwner){
-    html+='<div style="display:flex;align-items:center;gap:10px;background:rgba(17,14,0,.8);border:1px solid var(--brd);border-radius:12px;padding:10px 14px;margin-bottom:14px;">'
-      +'<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:700;color:var(--m2);">'
-      +'<input type="checkbox" id="ecartFiltreRegle" onchange="renderEcarts()" style="width:16px;height:16px;accent-color:var(--grn);"> '
-      +'Afficher aussi les écarts réglés '+(regles.length>0?'<span style="background:rgba(57,211,83,.15);color:var(--grn);border-radius:20px;padding:1px 7px;font-size:10px;">'+regles.length+' réglé'+(regles.length>1?'s':'')+'</span>':'')
-      +'</label></div>';
-  }
-
-  // ── Bannière résumé ──
-  if(manques.length===0&&surplus.length===0&&!voirRegles){
-    html+='<div class="bn bn-grn" style="font-size:14px;padding:18px;">&#10003; Aucun écart en attente !</div>';
-    if(regles.length>0&&isOwner){
-      html+='<div style="font-size:11px;color:var(--m2);text-align:center;margin-top:8px;">'+regles.length+' écart'+(regles.length>1?'s':'')+' déjà réglé'+(regles.length>1?'s':'')+' — cochez la case pour les voir</div>';
-    }
-    c.innerHTML=html;
-    updateEcartsBadge();return;
-  }
-
-  // KPI résumé
-  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px;">';
-  html+='<div style="background:rgba(255,58,58,.08);border:1.5px solid rgba(255,58,58,.3);border-radius:14px;padding:13px;text-align:center;">'
-    +'<div style="font-size:9px;color:var(--red);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">&#128248; Manques actifs</div>'
-    +'<div style="font-size:24px;font-weight:900;color:var(--red);letter-spacing:-1px;">'+fm(totalManque)+'</div>'
-    +'<div style="font-size:10px;color:var(--m2);margin-top:2px;">'+manques.length+' quart'+(manques.length>1?'s':'')+'</div>'
-    +'</div>';
-  html+='<div style="background:rgba(57,211,83,.08);border:1.5px solid rgba(57,211,83,.3);border-radius:14px;padding:13px;text-align:center;">'
-    +'<div style="font-size:9px;color:var(--grn);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">&#10003; Réglés</div>'
-    +'<div style="font-size:24px;font-weight:900;color:var(--grn);letter-spacing:-1px;">'+regles.length+'</div>'
-    +'<div style="font-size:10px;color:var(--m2);margin-top:2px;">quart'+(regles.length>1?'s':'')+' réglé'+(regles.length>1?'s':'')+'</div>'
-    +'</div>';
-  html+='</div>';
-
-  // ── Par chauffeur (patron seulement) — manques actifs ──
-  if(isOwner&&manques.length>0){
-    const byD={};
-    manques.forEach(s=>{
-      if(!byD[s.driver])byD[s.driver]={manque:0,n:0,shifts:[]};
-      byD[s.driver].manque+=calcEcart(s);
-      byD[s.driver].n++;
-      byD[s.driver].shifts.push(s);
-    });
-    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--red);margin:16px 0 9px;">&#128248; Manques à régler</div>';
-    Object.entries(byD).sort((a,b)=>b[1].manque-a[1].manque).forEach(([name,d])=>{
-      html+='<div style="background:rgba(17,14,0,.9);border:1.5px solid rgba(255,58,58,.25);border-radius:14px;padding:13px;margin-bottom:9px;">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
-        +'<div><div style="font-weight:900;font-size:14px;">&#128663; '+name+'</div>'
-        +'<div style="font-size:10px;color:var(--m2);">'+d.n+' quart'+(d.n>1?'s':'')+' avec manque</div></div>'
-        +'<div style="text-align:right;">'
-        +'<div style="font-size:22px;font-weight:900;color:var(--red);">&#8722;'+fm(d.manque)+'</div>'
-        +'<div style="font-size:10px;color:var(--m2);">à récupérer</div></div>'
-        +'</div>'
-        +d.shifts.map(s=>{
-          const ec=calcEcart(s);
-          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(255,58,58,.05);border:1px solid rgba(255,58,58,.12);border-radius:10px;margin-bottom:5px;">'
-            +'<div style="flex:1;">'
-            +'<div style="font-size:12px;font-weight:700;color:var(--txt);">'+s.date+' &#183; '+s.vehicle+'</div>'
-            +'<div style="font-size:10px;color:var(--m2);">Attendu: '+fm(pf(s.taxf)-pf(s.taxd)+pf(s.pourboire))+' &#183; Remis: '+fm(s.recette)+'</div></div>'
-            +'<div style="display:flex;align-items:center;gap:8px;">'
-            +'<div style="font-size:16px;font-weight:900;color:var(--red);">&#8722;'+fm(ec)+'</div>'
-            +'<button class="ecartRegleBtn" data-sid="'+s.id+'" style="background:rgba(57,211,83,.15);border:1.5px solid rgba(57,211,83,.35);color:var(--grn);border-radius:9px;padding:5px 10px;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap;">&#10003; Réglé</button>'
-            +'</div></div>';
-        }).join('')
-        +'</div>';
-    });
-  }
-
-  // ── Manques (vue chauffeur) ──
-  if(!isOwner&&manques.length>0){
-    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--red);margin:16px 0 9px;">&#128248; Mes manques</div>';
-    manques.forEach(s=>{
-      const ec=calcEcart(s);
-      html+='<div style="background:rgba(255,58,58,.06);border:1.5px solid rgba(255,58,58,.25);border-radius:13px;padding:12px;margin-bottom:8px;">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;">'
-        +'<div><div style="font-weight:800;font-size:13px;">'+s.date+' &#183; '+s.vehicle+'</div>'
-        +'<div style="font-size:10px;color:var(--m2);">Attendu: '+fm(pf(s.taxf)-pf(s.taxd)+pf(s.pourboire))+' &#183; Remis: '+fm(s.recette)+'</div></div>'
-        +'<div style="font-size:20px;font-weight:900;color:var(--red);">&#8722;'+fm(ec)+'</div>'
-        +'</div></div>';
-    });
-  }
-
-  // ── Écarts réglés (si filtre activé) ──
-  if(isOwner&&voirRegles&&regles.length>0){
-    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--grn);margin:16px 0 9px;">&#10003; Écarts réglés</div>';
-    regles.forEach(s=>{
-      const ec=calcEcart(s);
-      const r=C.ecartsRegles[s.id];
-      const rDate=r?new Date(r.ts).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}):'';
-      html+='<div style="background:rgba(57,211,83,.04);border:1.5px solid rgba(57,211,83,.2);border-radius:13px;padding:12px;margin-bottom:8px;">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;">'
-        +'<div style="flex:1;">'
-        +'<div style="font-weight:800;font-size:13px;color:var(--m3);">'+s.driver+' &#183; '+s.date+' &#183; '+s.vehicle+'</div>'
-        +'<div style="font-size:10px;color:var(--m2);">&#8722;'+fm(ec)+' &#183; Réglé le '+rDate+'</div>'
-        +'</div>'
-        +'<button class="ecartDeRegleBtn" data-sid="'+s.id+'" style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.2);color:var(--red);border-radius:9px;padding:5px 10px;font-size:10px;font-weight:800;cursor:pointer;">Annuler</button>'
-        +'</div></div>';
-    });
-  }
-
-  // ── Surplus ──
-  if(surplus.length>0){
-    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--pur);margin:16px 0 9px;">&#128176; Surplus</div>';
-    surplus.forEach(s=>{
-      const ec=Math.abs(calcEcart(s));
-      html+='<div style="background:rgba(192,132,252,.06);border:1.5px solid rgba(192,132,252,.2);border-radius:13px;padding:12px;margin-bottom:8px;">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;">'
-        +'<div><div style="font-weight:800;font-size:13px;">'+(isOwner?s.driver+' &#183; ':'')+s.date+' &#183; '+s.vehicle+'</div>'
-        +'<div style="font-size:10px;color:var(--m2);">Attendu: '+fm(pf(s.taxf)-pf(s.taxd)+pf(s.pourboire))+' &#183; Remis: '+fm(s.recette)+'</div></div>'
-        +'<div style="font-size:20px;font-weight:900;color:var(--pur);">+'+fm(ec)+'</div>'
-        +'</div></div>';
-    });
-  }
-
-  c.innerHTML=html;
-
-  // Event delegation — boutons Réglé et Annuler
-  c.querySelectorAll('.ecartRegleBtn').forEach(function(btn){
-    btn.onclick=function(){reglerEcart(this.dataset.sid);};
-  });
-  c.querySelectorAll('.ecartDeRegleBtn').forEach(function(btn){
-    btn.onclick=function(){dereglerEcart(this.dataset.sid);};
-  });
-
-  // Restaurer état checkbox
-  const cb=document.getElementById('ecartFiltreRegle');
-  if(cb&&voirRegles)cb.checked=true;
-
-  updateEcartsBadge();
-}
-
 // ═══ PAYE ═══
 // Paye payments stored in C.payes = { "wkKey_driverName": {paid:true, ts:'...'} }
 function payeDeductToggle(wkKey,drvName){
@@ -3062,215 +2825,6 @@ function renderPaye(){
   });
 
   c.innerHTML=html||'<div class="empty"><div class="ei">💵</div>Aucune paye à afficher.</div>';
-}
-
-// ═══ MESSAGERIE INTERNE ═══
-function updateMsgBadge(){
-  const badge=document.getElementById('msgsBadge');
-  if(!badge||!U)return;
-  const unread=MSG.filter(m=>{
-    if(m.to!=='all'&&m.to!==U.name&&m.from!==U.name)return false;
-    if(m.from===U.name)return false;
-    const reads=m.reads||{};
-    return !reads[U.name];
-  });
-  if(unread.length>0){
-    badge.textContent=unread.length>9?'9+':unread.length;
-    badge.style.display='flex';
-  } else {
-    badge.style.display='none';
-  }
-}
-
-function markMsgsRead(){
-  if(!U)return;
-  let changed=false;
-  MSG.forEach(m=>{
-    if(m.to==='all'||(m.to===U.name||m.from===U.name)){
-      if(!m.reads)m.reads={};
-      if(!m.reads[U.name]){m.reads[U.name]=new Date().toISOString();changed=true;}
-    }
-  });
-  if(changed){lSave();updateMsgBadge();}
-}
-
-function closeEcartsPopup(){var p=document.getElementById('ecartsPopup');if(p)p.remove();}
-function closeEcartsPopupGo(){closeEcartsPopup();goPage('ecarts');}
-function closeNewMsgModal(){var m=document.getElementById('newMsgModal');if(m)m.remove();}
-function closeReplyModal(){var m=document.getElementById('replyModal');if(m)m.remove();}
-function showEcartsPopup(){
-  if(!U)return;
-  if(U.role==='owner')return; // patron ne voit pas ce popup
-  if(!C.ecartsRegles)C.ecartsRegles={};
-  const arr=getArr().filter(s=>s.driver===U.name&&calcEcart(s)>0.5&&!C.ecartsRegles[s.id]);
-  if(!arr.length)return;
-  const total=arr.reduce((a,s)=>a+calcEcart(s),0);
-  const existing=document.getElementById('ecartsPopup');if(existing)existing.remove();
-  const modal=document.createElement('div');
-  modal.id='ecartsPopup';
-  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
-  const inner=document.createElement('div');
-  inner.style.cssText='background:linear-gradient(145deg,#1a0a0a,#120808);border:2px solid rgba(255,58,58,.5);border-radius:20px;padding:24px;max-width:340px;width:100%;text-align:center;';
-  inner.innerHTML=
-    '<div style="font-size:40px;margin-bottom:10px;">&#9888;&#65039;</div>'
-    +'<div style="font-size:18px;font-weight:900;color:var(--red);margin-bottom:6px;">MANQUE D&#39;ARGENT</div>'
-    +'<div style="font-size:13px;color:var(--m2);margin-bottom:16px;">Tu as '+arr.length+' quart'+(arr.length>1?'s':'')+' avec un manque</div>'
-    +'<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.3);border-radius:14px;padding:16px;margin-bottom:16px;">'
-    +'<div style="font-size:11px;color:var(--m2);margin-bottom:6px;">Total manquant</div>'
-    +'<div style="font-size:36px;font-weight:900;color:var(--red);letter-spacing:-1px;">&#8722;'+fm(total)+'</div>'
-    +'</div>'
-    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
-    +'<button id="popupBtnLater" style="background:rgba(255,255,255,.06);border:1px solid var(--brd);color:var(--txt);border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Plus tard</button>'
-    +'<button id="popupBtnDetails" style="background:linear-gradient(135deg,var(--red),#c00);border:none;color:#fff;border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Voir d&#233;tails</button>'
-    +'</div>';
-  modal.appendChild(inner);
-  document.body.appendChild(modal);
-  document.getElementById('popupBtnLater').addEventListener('click',function(){modal.remove();});
-  document.getElementById('popupBtnDetails').addEventListener('click',function(){modal.remove();goPage('ecarts');});
-}
-
-function openNewMsg(){
-  const old=document.getElementById('newMsgModal');if(old)old.remove();
-  const drivers=C.drivers.filter(d=>d.role!=='owner'&&d.active!==false);
-  const modal=document.createElement('div');
-  modal.id='newMsgModal';
-  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:flex-end;padding:8px;';
-  modal.innerHTML=
-    '<div style="width:100%;max-width:500px;margin:0 auto;background:linear-gradient(180deg,rgba(17,14,0,.99),rgba(12,10,0,.99));border:1.5px solid var(--brd2);border-radius:22px 22px 16px 16px;padding:22px;max-height:90dvh;overflow-y:auto;">'
-    +'<div style="font-size:18px;font-weight:900;color:var(--gold3);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">✏️ Nouveau message<button onclick="closeNewMsgModal()" style="background:rgba(27,21,0,.9);border:1px solid var(--brd2);color:var(--m2);width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer;">✕</button></div>'
-    +'<div class="fsm"><label>Destinataire</label><div class="sw"><select id="nmTo"><option value="all">📢 Tous les chauffeurs</option>'+drivers.map(d=>'<option value="'+d.name+'">🚗 '+d.name+'</option>').join('')+'</select></div></div>'
-    +'<div class="fsm"><label>Message</label><textarea id="nmBody" rows="4" placeholder="Écris ton message..." style="width:100%;background:rgba(24,18,0,.9);border:1.5px solid var(--brd);border-radius:12px;color:var(--txt);font-size:15px;padding:12px;font-family:inherit;"></textarea></div>'
-    +'<button onclick="sendMsg()" style="width:100%;padding:15px;background:linear-gradient(135deg,var(--gold3),var(--gold));color:#0a0800;border:none;border-radius:12px;font-size:15px;font-weight:900;cursor:pointer;">📤 Envoyer</button>'
-    +'</div>';
-  document.body.appendChild(modal);
-}
-
-function sendMsg(){
-  const to=document.getElementById('nmTo').value;
-  const body=(document.getElementById('nmBody').value||'').trim();
-  if(!body){alert('Écris un message');return;}
-  const msg={
-    id:uid(),
-    from:U.name,
-    to:to,
-    body:body,
-    ts:new Date().toISOString(),
-    reads:{[U.name]:new Date().toISOString()}
-  };
-  MSG.push(msg);
-  lSave();
-  closeNewMsgModal();
-  renderMsgs();
-  updateMsgBadge();
-}
-
-function replyMsg(threadId){
-  const thread=MSG.find(m=>m.id===threadId);
-  if(!thread)return;
-  const old=document.getElementById('replyModal');if(old)old.remove();
-  const modal=document.createElement('div');
-  modal.id='replyModal';
-  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:flex-end;padding:8px;';
-  const destName=thread.from===U.name?(thread.to==='all'?'Tous':thread.to):thread.from;
-  modal.innerHTML=
-    '<div style="width:100%;max-width:500px;margin:0 auto;background:linear-gradient(180deg,rgba(17,14,0,.99),rgba(12,10,0,.99));border:1.5px solid var(--brd2);border-radius:22px 22px 16px 16px;padding:22px;">'
-    +'<div style="font-size:16px;font-weight:900;color:var(--gold3);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">↩️ Répondre à '+destName+'<button onclick="closeReplyModal()" style="background:rgba(27,21,0,.9);border:1px solid var(--brd2);color:var(--m2);width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer;">✕</button></div>'
-    +'<div style="background:rgba(10,8,0,.5);border:1px solid var(--brd);border-radius:10px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--m2);">'+thread.body.substring(0,80)+(thread.body.length>80?'...':'')+'</div>'
-    +'<textarea id="replyBody" rows="3" placeholder="Ta réponse..." style="width:100%;background:rgba(24,18,0,.9);border:1.5px solid var(--brd);border-radius:12px;color:var(--txt);font-size:15px;padding:12px;font-family:inherit;margin-bottom:12px;"></textarea>'
-    +'<button id="replySubmitBtn" style="width:100%;padding:14px;background:linear-gradient(135deg,var(--gold3),var(--gold));color:#0a0800;border:none;border-radius:12px;font-size:15px;font-weight:900;cursor:pointer;">&#128228; Envoyer</button>'
-    +'</div>';
-  document.body.appendChild(modal);
-  document.getElementById('replySubmitBtn').onclick=function(){sendReply(threadId);};
-  setTimeout(()=>document.getElementById('replyBody').focus(),100);
-}
-
-function sendReply(threadId){
-  const body=(document.getElementById('replyBody').value||'').trim();
-  if(!body)return;
-  const thread=MSG.find(m=>m.id===threadId);
-  if(!thread)return;
-  if(!thread.replies)thread.replies=[];
-  thread.replies.push({
-    from:U.name,
-    body:body,
-    ts:new Date().toISOString()
-  });
-  // Marquer comme lu pour l'expéditeur de la réponse
-  if(!thread.reads)thread.reads={};
-  thread.reads[U.name]=new Date().toISOString();
-  lSave();
-  closeReplyModal();
-  renderMsgs();
-}
-
-function renderMsgs(){
-  const c=document.getElementById('msgsContent');
-  if(!c||!U)return;
-  const isOwner=U.role==='owner';
-
-  // Filtrer les messages visibles
-  const visible=MSG.filter(m=>{
-    if(isOwner)return true; // patron voit tout
-    return m.to==='all'||m.to===U.name||m.from===U.name;
-  }).sort((a,b)=>b.ts.localeCompare(a.ts));
-
-  if(!visible.length){
-    c.innerHTML='<div style="text-align:center;padding:40px 20px;"><div style="font-size:40px;margin-bottom:10px;">💬</div><div style="color:var(--m2);font-size:13px;">Aucun message pour l&#39;instant</div></div>';
-    return;
-  }
-
-  let html='';
-  visible.forEach(m=>{
-    const isMine=m.from===U.name;
-    const reads=m.reads||{};
-    const isUnread=!isMine&&!reads[U.name];
-    const destLabel=m.to==='all'?'📢 Tous les chauffeurs':'🚗 '+m.to;
-    const timeLabel=new Date(m.ts).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-    const replies=m.replies||[];
-    const bgColor=isUnread?'rgba(245,200,0,.06)':'rgba(17,14,0,.8)';
-    const borderColor=isUnread?'rgba(245,200,0,.4)':'var(--brd)';
-
-    html+='<div style="background:'+bgColor+';border:1.5px solid '+borderColor+';border-radius:16px;padding:14px;margin-bottom:10px;">';
-    // Header
-    html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">'
-      +'<div>'
-      +(isUnread?'<span style="background:var(--gold);color:#000;font-size:9px;font-weight:900;border-radius:20px;padding:2px 8px;margin-right:6px;">NOUVEAU</span>':'')
-      +'<span style="font-size:11px;font-weight:800;color:'+(isMine?'var(--grn)':'var(--gold)')+';">'+(isMine?'Moi → '+destLabel:m.from+' → '+destLabel)+'</span>'
-      +'</div>'
-      +'<span style="font-size:10px;color:var(--m2);">'+timeLabel+'</span>'
-      +'</div>';
-    // Corps
-    html+='<div style="font-size:13px;color:var(--txt);line-height:1.5;margin-bottom:10px;white-space:pre-wrap;">'+m.body+'</div>';
-    // Réponses
-    if(replies.length>0){
-      html+='<div style="border-top:1px solid var(--brd);padding-top:8px;margin-bottom:8px;">';
-      replies.forEach(r=>{
-        const rTime=new Date(r.ts).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-        const isMyReply=r.from===U.name;
-        html+='<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px;'+(isMyReply?'flex-direction:row-reverse;':'')+'">'
-          +'<div style="background:'+(isMyReply?'rgba(57,211,83,.12)':'rgba(96,165,250,.1)')+';border:1px solid '+(isMyReply?'rgba(57,211,83,.2)':'rgba(96,165,250,.2)')+';border-radius:10px;padding:7px 10px;max-width:85%;">'
-          +'<div style="font-size:10px;font-weight:700;color:'+(isMyReply?'var(--grn)':'var(--blu)')+';">'+r.from+' · '+rTime+'</div>'
-          +'<div style="font-size:12px;color:var(--txt);margin-top:3px;white-space:pre-wrap;">'+r.body+'</div>'
-          +'</div></div>';
-      });
-      html+='</div>';
-    }
-    // Bouton répondre
-    html+='<button class="msgReplyBtn" data-mid="'+m.id+'" style="background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.2);color:var(--blu);border-radius:9px;padding:7px 14px;font-size:11px;font-weight:800;cursor:pointer;">&#8617; R&#233;pondre</button>';
-    // Bouton supprimer (patron seulement sur ses propres msgs)
-    if(isOwner&&isMine){
-      html+=' <button class="msgDelBtn" data-mid="'+m.id+'" style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.2);color:var(--red);border-radius:9px;padding:7px 14px;font-size:11px;font-weight:800;cursor:pointer;margin-left:6px;">&#128465;</button>';
-    }
-    html+='</div>';
-  });
-
-  c.innerHTML=html;
-}
-
-function deleteMsg(id){
-  if(!confirm('Supprimer ce message ?'))return;
-  const idx=MSG.findIndex(m=>m.id===id);
-  if(idx>=0){MSG.splice(idx,1);lSave();renderMsgs();updateMsgBadge();}
 }
 
 // ═══ EXPENSES ═══
@@ -4250,94 +3804,22 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 (function(){
-  // VERSION auto-générée à partir du contenu de la page — change automatiquement à chaque upload
-  async function getPageVersion(){
-    const html=document.documentElement.outerHTML;
-    const encoder=new TextEncoder();
-    const data=encoder.encode(html.slice(0,8000)); // empreinte sur les premiers 8000 chars
-    const hashBuffer=await crypto.subtle.digest('SHA-256',data);
-    const hashArray=Array.from(new Uint8Array(hashBuffer));
-    return hashArray.slice(0,6).map(b=>b.toString(16).padStart(2,'0')).join('');
-  }
-  getPageVersion().then(function(VERSION){
-    const stored=localStorage.getItem('taxipro_version');
-    if(stored!==VERSION){
-      localStorage.setItem('taxipro_version',VERSION);
-      if(stored!==null){
-        // Vider tous les caches du navigateur pour ce site
-        if('caches' in window){
-          caches.keys().then(function(names){
-            names.forEach(function(name){caches.delete(name);});
-          });
-        }
-        // Forcer rechargement sans cache
-        setTimeout(function(){window.location.reload(true);},300);
+  const VERSION='2025-06-15-v3';
+  const stored=localStorage.getItem('taxipro_version');
+  if(stored!==VERSION){
+    localStorage.setItem('taxipro_version',VERSION);
+    if(stored!==null){
+      // Vider tous les caches du navigateur pour ce site
+      if('caches' in window){
+        caches.keys().then(function(names){
+          names.forEach(function(name){caches.delete(name);});
+        });
       }
+      // Forcer rechargement sans cache
+      window.location.reload(true);
     }
-  });
+  }
 })();
-
-// ═══ RÉCUPÉRATION D'URGENCE localStorage ═══
-function recupererLocalStorage(){
-  try {
-    var SK2='txpro_v4';
-    var keys=['_c','_s','_e','_a','_msg'];
-    var found={};
-    // Check all possible keys
-    var allKeys=[];
-    for(var i=0;i<localStorage.length;i++) allKeys.push(localStorage.key(i));
-    
-    var result='📦 Contenu localStorage:\n\n';
-    var hasData=false;
-    
-    allKeys.forEach(function(k){
-      var val=localStorage.getItem(k);
-      if(val && val.length>10){
-        try {
-          var parsed=JSON.parse(val);
-          if(k.includes('txpro') || k.includes('taxi')){
-            result+=k+': '+val.length+' caractères\n';
-            hasData=true;
-            found[k]=parsed;
-          }
-        } catch(e) {}
-      }
-    });
-    
-    // Try to find shifts specifically
-    var sc=localStorage.getItem(SK2+'_c');
-    var ss=localStorage.getItem(SK2+'_s');
-    
-    if(ss){
-      var shifts=JSON.parse(ss);
-      var nb=Object.keys(shifts).length;
-      result+='\n✅ Quarts trouvés: '+nb;
-      if(nb>0){
-        hasData=true;
-        // Restore!
-        if(confirm('✅ '+nb+' quarts trouvés dans la mémoire locale!\n\nVoulez-vous les restaurer maintenant?')){
-          S=shifts;
-          if(sc){ C=applyDefaults(JSON.parse(sc)); }
-          lSaveLocal();
-          if(window._fb){ window._fb.save(C,S,EX,AU); }
-          alert('✅ Données restaurées! '+nb+' quarts récupérés.');
-          location.reload();
-        }
-        return;
-      }
-    }
-    
-    if(!hasData){
-      result+='\n❌ Aucune donnée trouvée dans la mémoire locale.';
-      result+='\n\nTous les clés: '+allKeys.join(', ');
-    }
-    
-    alert(result);
-  } catch(e){
-    alert('Erreur: '+e.message);
-  }
-}
-
 </script>
 </body>
 </html>
