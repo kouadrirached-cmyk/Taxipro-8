@@ -1461,6 +1461,7 @@ function applyDefaults(C){
   if(!C.schedules)C.schedules={};
   if(!C.fixedCosts)C.fixedCosts={insurance:880,carRental:850,otherLabel:'',other:0};
   if(!C.payes)C.payes={};
+  if(!C.ecartsRegles)C.ecartsRegles={};
   if(!C.objectifs)C.objectifs={patron:10000};
   return C;
 }
@@ -1983,7 +1984,7 @@ function showManqueConfirm(manque, attendu, remis, onConfirm){
   modal.innerHTML=
     '<div style="background:linear-gradient(145deg,#1a0a0a,#120808);border:2px solid rgba(255,58,58,.4);border-radius:20px;padding:24px;max-width:340px;width:100%;text-align:center;">'
     +'<div style="font-size:40px;margin-bottom:10px;">⚠️</div>'
-    +'<div style="font-size:18px;font-weight:900;color:var(--red);margin-bottom:6px;">MANQUE D&#39;ARGENT</div>'
+    +'<div style="font-size:18px;font-weight:900;color:var(--red);margin-bottom:6px;">MANQUE D\'ARGENT</div>'
     +'<div style="font-size:13px;color:var(--m2);margin-bottom:16px;">Ce quart a un écart négatif</div>'
     +'<div style="background:rgba(255,58,58,.08);border:1px solid rgba(255,58,58,.2);border-radius:12px;padding:14px;margin-bottom:16px;">'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'
@@ -2733,8 +2734,9 @@ function renderAnalyse(){
 function updateEcartsBadge(){
   const badge=document.getElementById('ecartsBadge');
   if(!badge)return;
+  if(!C.ecartsRegles)C.ecartsRegles={};
   const arr=U.role==='owner'?getArr():getArr().filter(s=>s.driver===U.name);
-  const manques=arr.filter(s=>calcEcart(s)>0.5);
+  const manques=arr.filter(s=>calcEcart(s)>0.5&&!C.ecartsRegles[s.id]);
   if(manques.length>0){
     badge.textContent=manques.length>9?'9+':manques.length;
     badge.style.display='flex';
@@ -2743,14 +2745,37 @@ function updateEcartsBadge(){
   }
 }
 
+function reglerEcart(shiftId){
+  if(!C.ecartsRegles)C.ecartsRegles={};
+  C.ecartsRegles[shiftId]={ts:new Date().toISOString(),by:U.name};
+  lSave();
+  renderEcarts();
+  updateEcartsBadge();
+}
+
+function dereglerEcart(shiftId){
+  if(!C.ecartsRegles)C.ecartsRegles={};
+  delete C.ecartsRegles[shiftId];
+  lSave();
+  renderEcarts();
+  updateEcartsBadge();
+}
+
 function renderEcarts(){
   const c=document.getElementById('ecartsContent');
   const isOwner=U.role==='owner';
+  if(!C.ecartsRegles)C.ecartsRegles={};
   let arr=getArr();
   if(!isOwner)arr=arr.filter(s=>s.driver===U.name);
 
-  // Séparer manques et surplus
-  const manques=arr.filter(s=>calcEcart(s)>0.5).sort((a,b)=>b.date.localeCompare(a.date));
+  // Filtre affichage (patron seulement)
+  const showRegle=document.getElementById('ecartFiltreRegle');
+  const voirRegles=isOwner&&showRegle&&showRegle.checked;
+
+  // Séparer manques non réglés et réglés
+  const tousManques=arr.filter(s=>calcEcart(s)>0.5).sort((a,b)=>b.date.localeCompare(a.date));
+  const manques=tousManques.filter(s=>!C.ecartsRegles[s.id]);
+  const regles=tousManques.filter(s=>!!C.ecartsRegles[s.id]);
   const surplus=arr.filter(s=>calcEcart(s)<-0.5).sort((a,b)=>b.date.localeCompare(a.date));
   const totalManque=manques.reduce((a,s)=>a+calcEcart(s),0);
   const totalSurplus=surplus.reduce((a,s)=>a+Math.abs(calcEcart(s)),0);
@@ -2758,34 +2783,40 @@ function renderEcarts(){
 
   let html='';
 
+  // ── Filtre (patron seulement) ──
+  if(isOwner){
+    html+='<div style="display:flex;align-items:center;gap:10px;background:rgba(17,14,0,.8);border:1px solid var(--brd);border-radius:12px;padding:10px 14px;margin-bottom:14px;">'
+      +'<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:700;color:var(--m2);">'
+      +'<input type="checkbox" id="ecartFiltreRegle" onchange="renderEcarts()" style="width:16px;height:16px;accent-color:var(--grn);"> '
+      +'Afficher aussi les écarts réglés '+(regles.length>0?'<span style="background:rgba(57,211,83,.15);color:var(--grn);border-radius:20px;padding:1px 7px;font-size:10px;">'+regles.length+' réglé'+(regles.length>1?'s':'')+'</span>':'')
+      +'</label></div>';
+  }
+
   // ── Bannière résumé ──
-  if(manques.length===0&&surplus.length===0){
-    html='<div class="bn bn-grn" style="font-size:14px;padding:18px;">✅ Aucun écart — tout est équilibré !</div>';
-    c.innerHTML=html;return;
+  if(manques.length===0&&surplus.length===0&&!voirRegles){
+    html+='<div class="bn bn-grn" style="font-size:14px;padding:18px;">&#10003; Aucun écart en attente !</div>';
+    if(regles.length>0&&isOwner){
+      html+='<div style="font-size:11px;color:var(--m2);text-align:center;margin-top:8px;">'+regles.length+' écart'+(regles.length>1?'s':'')+' déjà réglé'+(regles.length>1?'s':'')+' — cochez la case pour les voir</div>';
+    }
+    c.innerHTML=html;
+    updateEcartsBadge();return;
   }
 
   // KPI résumé
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px;">';
   html+='<div style="background:rgba(255,58,58,.08);border:1.5px solid rgba(255,58,58,.3);border-radius:14px;padding:13px;text-align:center;">'
-    +'<div style="font-size:9px;color:var(--red);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">💸 Total manques</div>'
+    +'<div style="font-size:9px;color:var(--red);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">&#128248; Manques actifs</div>'
     +'<div style="font-size:24px;font-weight:900;color:var(--red);letter-spacing:-1px;">'+fm(totalManque)+'</div>'
     +'<div style="font-size:10px;color:var(--m2);margin-top:2px;">'+manques.length+' quart'+(manques.length>1?'s':'')+'</div>'
     +'</div>';
-  html+='<div style="background:rgba(192,132,252,.08);border:1.5px solid rgba(192,132,252,.3);border-radius:14px;padding:13px;text-align:center;">'
-    +'<div style="font-size:9px;color:var(--pur);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">💰 Total surplus</div>'
-    +'<div style="font-size:24px;font-weight:900;color:var(--pur);letter-spacing:-1px;">'+fm(totalSurplus)+'</div>'
-    +'<div style="font-size:10px;color:var(--m2);margin-top:2px;">'+surplus.length+' quart'+(surplus.length>1?'s':'')+'</div>'
+  html+='<div style="background:rgba(57,211,83,.08);border:1.5px solid rgba(57,211,83,.3);border-radius:14px;padding:13px;text-align:center;">'
+    +'<div style="font-size:9px;color:var(--grn);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">&#10003; Réglés</div>'
+    +'<div style="font-size:24px;font-weight:900;color:var(--grn);letter-spacing:-1px;">'+regles.length+'</div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-top:2px;">quart'+(regles.length>1?'s':'')+' réglé'+(regles.length>1?'s':'')+'</div>'
     +'</div>';
   html+='</div>';
 
-  // Net
-  html+='<div style="background:'+(netEcart>0?'rgba(255,58,58,.06)':'rgba(57,211,83,.06)')+';border:1.5px solid '+(netEcart>0?'rgba(255,58,58,.3)':'rgba(57,211,83,.3)')+';border-radius:14px;padding:13px;display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'
-    +'<div><div style="font-size:10px;color:var(--m2);font-weight:700;text-transform:uppercase;margin-bottom:2px;">Solde net des écarts</div>'
-    +'<div style="font-size:11px;color:var(--m2);">'+(netEcart>0?'Le chauffeur doit au patron':'Patron doit au chauffeur')+'</div></div>'
-    +'<div style="font-size:28px;font-weight:900;color:'+(netEcart>0?'var(--red)':'var(--grn)')+';">'+fm(Math.abs(netEcart))+'</div>'
-    +'</div>';
-
-  // ── Par chauffeur (patron seulement) ──
+  // ── Par chauffeur (patron seulement) — manques actifs ──
   if(isOwner&&manques.length>0){
     const byD={};
     manques.forEach(s=>{
@@ -2794,24 +2825,26 @@ function renderEcarts(){
       byD[s.driver].n++;
       byD[s.driver].shifts.push(s);
     });
-    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--m2);margin:16px 0 9px;display:flex;align-items:center;gap:7px;">👤 Manques par chauffeur<span style="flex:1;height:1px;background:var(--brd);display:block;"></span></div>';
+    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--red);margin:16px 0 9px;">&#128248; Manques à régler</div>';
     Object.entries(byD).sort((a,b)=>b[1].manque-a[1].manque).forEach(([name,d])=>{
       html+='<div style="background:rgba(17,14,0,.9);border:1.5px solid rgba(255,58,58,.25);border-radius:14px;padding:13px;margin-bottom:9px;">'
         +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
-        +'<div><div style="font-weight:900;font-size:14px;">🚗 '+name+'</div>'
+        +'<div><div style="font-weight:900;font-size:14px;">&#128663; '+name+'</div>'
         +'<div style="font-size:10px;color:var(--m2);">'+d.n+' quart'+(d.n>1?'s':'')+' avec manque</div></div>'
         +'<div style="text-align:right;">'
-        +'<div style="font-size:22px;font-weight:900;color:var(--red);">−'+fm(d.manque)+'</div>'
+        +'<div style="font-size:22px;font-weight:900;color:var(--red);">&#8722;'+fm(d.manque)+'</div>'
         +'<div style="font-size:10px;color:var(--m2);">à récupérer</div></div>'
         +'</div>'
-        // Liste des quarts avec manque
         +d.shifts.map(s=>{
           const ec=calcEcart(s);
-          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:rgba(255,58,58,.05);border:1px solid rgba(255,58,58,.12);border-radius:10px;margin-bottom:5px;">'
-            +'<div><div style="font-size:12px;font-weight:700;color:var(--txt);">'+s.date+' · '+s.vehicle+'</div>'
-            +'<div style="font-size:10px;color:var(--m2);">Attendu: '+fm(pf(s.taxf)-pf(s.taxd)+pf(s.pourboire))+' · Remis: '+fm(s.recette)+'</div></div>'
-            +'<div style="font-size:16px;font-weight:900;color:var(--red);">−'+fm(ec)+'</div>'
-            +'</div>';
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:rgba(255,58,58,.05);border:1px solid rgba(255,58,58,.12);border-radius:10px;margin-bottom:5px;">'
+            +'<div style="flex:1;">'
+            +'<div style="font-size:12px;font-weight:700;color:var(--txt);">'+s.date+' &#183; '+s.vehicle+'</div>'
+            +'<div style="font-size:10px;color:var(--m2);">Attendu: '+fm(pf(s.taxf)-pf(s.taxd)+pf(s.pourboire))+' &#183; Remis: '+fm(s.recette)+'</div></div>'
+            +'<div style="display:flex;align-items:center;gap:8px;">'
+            +'<div style="font-size:16px;font-weight:900;color:var(--red);">&#8722;'+fm(ec)+'</div>'
+            +'<button class="ecartRegleBtn" data-sid="'+s.id+'" style="background:rgba(57,211,83,.15);border:1.5px solid rgba(57,211,83,.35);color:var(--grn);border-radius:9px;padding:5px 10px;font-size:10px;font-weight:800;cursor:pointer;white-space:nowrap;">&#10003; Réglé</button>'
+            +'</div></div>';
         }).join('')
         +'</div>';
     });
@@ -2819,35 +2852,64 @@ function renderEcarts(){
 
   // ── Manques (vue chauffeur) ──
   if(!isOwner&&manques.length>0){
-    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--red);margin:16px 0 9px;">💸 Mes manques</div>';
+    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--red);margin:16px 0 9px;">&#128248; Mes manques</div>';
     manques.forEach(s=>{
       const ec=calcEcart(s);
       html+='<div style="background:rgba(255,58,58,.06);border:1.5px solid rgba(255,58,58,.25);border-radius:13px;padding:12px;margin-bottom:8px;">'
         +'<div style="display:flex;justify-content:space-between;align-items:center;">'
-        +'<div><div style="font-weight:800;font-size:13px;">'+s.date+' · '+s.vehicle+'</div>'
-        +'<div style="font-size:10px;color:var(--m2);">Attendu: '+fm(pf(s.taxf)-pf(s.taxd)+pf(s.pourboire))+' · Remis: '+fm(s.recette)+'</div></div>'
-        +'<div style="font-size:20px;font-weight:900;color:var(--red);">−'+fm(ec)+'</div>'
+        +'<div><div style="font-weight:800;font-size:13px;">'+s.date+' &#183; '+s.vehicle+'</div>'
+        +'<div style="font-size:10px;color:var(--m2);">Attendu: '+fm(pf(s.taxf)-pf(s.taxd)+pf(s.pourboire))+' &#183; Remis: '+fm(s.recette)+'</div></div>'
+        +'<div style="font-size:20px;font-weight:900;color:var(--red);">&#8722;'+fm(ec)+'</div>'
+        +'</div></div>';
+    });
+  }
+
+  // ── Écarts réglés (si filtre activé) ──
+  if(isOwner&&voirRegles&&regles.length>0){
+    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--grn);margin:16px 0 9px;">&#10003; Écarts réglés</div>';
+    regles.forEach(s=>{
+      const ec=calcEcart(s);
+      const r=C.ecartsRegles[s.id];
+      const rDate=r?new Date(r.ts).toLocaleDateString('fr-CA',{month:'short',day:'numeric'}):'';
+      html+='<div style="background:rgba(57,211,83,.04);border:1.5px solid rgba(57,211,83,.2);border-radius:13px;padding:12px;margin-bottom:8px;">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+        +'<div style="flex:1;">'
+        +'<div style="font-weight:800;font-size:13px;color:var(--m3);">'+s.driver+' &#183; '+s.date+' &#183; '+s.vehicle+'</div>'
+        +'<div style="font-size:10px;color:var(--m2);">&#8722;'+fm(ec)+' &#183; Réglé le '+rDate+'</div>'
         +'</div>'
-        +'</div>';
+        +'<button class="ecartDeRegleBtn" data-sid="'+s.id+'" style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.2);color:var(--red);border-radius:9px;padding:5px 10px;font-size:10px;font-weight:800;cursor:pointer;">Annuler</button>'
+        +'</div></div>';
     });
   }
 
   // ── Surplus ──
   if(surplus.length>0){
-    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--pur);margin:16px 0 9px;">💰 Surplus</div>';
+    html+='<div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--pur);margin:16px 0 9px;">&#128176; Surplus</div>';
     surplus.forEach(s=>{
       const ec=Math.abs(calcEcart(s));
       html+='<div style="background:rgba(192,132,252,.06);border:1.5px solid rgba(192,132,252,.2);border-radius:13px;padding:12px;margin-bottom:8px;">'
         +'<div style="display:flex;justify-content:space-between;align-items:center;">'
-        +'<div><div style="font-weight:800;font-size:13px;">'+(isOwner?s.driver+' — ':'')+s.date+' · '+s.vehicle+'</div>'
-        +'<div style="font-size:10px;color:var(--m2);">Attendu: '+fm(pf(s.taxf)-pf(s.taxd)+pf(s.pourboire))+' · Remis: '+fm(s.recette)+'</div></div>'
+        +'<div><div style="font-weight:800;font-size:13px;">'+(isOwner?s.driver+' &#183; ':'')+s.date+' &#183; '+s.vehicle+'</div>'
+        +'<div style="font-size:10px;color:var(--m2);">Attendu: '+fm(pf(s.taxf)-pf(s.taxd)+pf(s.pourboire))+' &#183; Remis: '+fm(s.recette)+'</div></div>'
         +'<div style="font-size:20px;font-weight:900;color:var(--pur);">+'+fm(ec)+'</div>'
-        +'</div>'
-        +'</div>';
+        +'</div></div>';
     });
   }
 
   c.innerHTML=html;
+
+  // Event delegation — boutons Réglé et Annuler
+  c.querySelectorAll('.ecartRegleBtn').forEach(function(btn){
+    btn.onclick=function(){reglerEcart(this.dataset.sid);};
+  });
+  c.querySelectorAll('.ecartDeRegleBtn').forEach(function(btn){
+    btn.onclick=function(){dereglerEcart(this.dataset.sid);};
+  });
+
+  // Restaurer état checkbox
+  const cb=document.getElementById('ecartFiltreRegle');
+  if(cb&&voirRegles)cb.checked=true;
+
   updateEcartsBadge();
 }
 
@@ -3193,12 +3255,6 @@ function renderMsgs(){
   });
 
   c.innerHTML=html;
-  c.querySelectorAll('.msgReplyBtn').forEach(function(btn){
-    btn.onclick=function(){replyMsg(this.dataset.mid);};
-  });
-  c.querySelectorAll('.msgDelBtn').forEach(function(btn){
-    btn.onclick=function(){deleteMsg(this.dataset.mid);};
-  });
 }
 
 function deleteMsg(id){
