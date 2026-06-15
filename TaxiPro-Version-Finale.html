@@ -142,9 +142,9 @@ body{
 }
 .load-logo p{color:var(--m2);font-size:11px;margin-top:2px;letter-spacing:3px;text-transform:uppercase;}
 .load-bar{width:220px;height:4px;background:var(--s3);border-radius:4px;overflow:hidden;border:1px solid var(--brd);}
-.load-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--gold2),var(--gold3));
-  border-radius:4px;transition:width .4s ease;}
-
+.load-fill{height:100%;background:linear-gradient(90deg,var(--gold2),var(--gold3));
+  border-radius:4px;animation:loadfill 1.5s ease-in-out infinite;}
+@keyframes loadfill{0%{width:0%;margin-left:0}50%{width:70%}100%{width:0%;margin-left:100%}}
 
 /* ═══ LOGIN ═══ */
 #loginScreen{height:100dvh;overflow-y:auto;display:none;padding:0;position:relative;z-index:10;}
@@ -848,8 +848,7 @@ body{
     <h1>TaxiPro</h1>
     <p>Dispatch · Fleet · Finance</p>
   </div>
-  <div class="load-bar"><div class="load-fill" id="loadFill"></div></div>
-  <div id="loadMsg" style="font-size:11px;color:#a08930;letter-spacing:1px;text-transform:uppercase;margin-top:-10px;">Vérification mise à jour...</div>
+  <div class="load-bar"><div class="load-fill"></div></div>
 </div>
 
 <!-- LOGIN -->
@@ -1210,6 +1209,7 @@ body{
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn bblu bsm" onclick="backupData()">📦 Exporter JSON</button>
           <button class="btn bsec bsm" onclick="restoreData()">📥 Restaurer</button>
+          <button class="btn bsm" style="background:rgba(255,107,0,.2);border:1px solid #ff6b00;color:#ff6b00;" onclick="recupererLocalStorage()">🔴 Récupérer données perdues</button>
         </div>
         <div class="tmut mt8" id="bkupInfo"></div>
       </div>
@@ -1550,15 +1550,9 @@ function startRealtimeSync(){
   });
 }
 
-// ═══ INIT — MISE À JOUR EN PREMIER ═══
-var TAXIPRO_BUILD='20260615225644';
-
-function setLoadProgress(pct, msg){
-  var fill=document.getElementById('loadFill');
-  var txt=document.getElementById('loadMsg');
-  if(fill) fill.style.width=pct+'%';
-  if(txt) txt.textContent=msg||'';
-}
+// ═══ INIT — OUVERTURE INSTANTANÉE ═══
+// L'app s'ouvre TOUJOURS en moins d'1 seconde.
+// Firebase se connecte en arrière-plan sans jamais bloquer.
 
 function showLogin(){
   document.getElementById('loading').style.display='none';
@@ -1566,66 +1560,14 @@ function showLogin(){
   initLogin();
 }
 
-function checkUpdateThenStart(){
-  // Désinstaller anciens service workers
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.getRegistrations().then(function(regs){
-      regs.forEach(function(r){r.unregister();});
-    });
-  }
-
-  setLoadProgress(20,'Vérification de la mise à jour...');
-
-  var url=window.location.href.split('?')[0]+'?v='+Date.now();
-  var timeout=setTimeout(function(){
-    // Pas de réseau ou trop lent — ouvrir quand même
-    setLoadProgress(100,'Ouverture...');
-    setTimeout(startAppInit, 300);
-  }, 5000);
-
-  fetch(url,{cache:'no-store',headers:{'Cache-Control':'no-cache'}})
-    .then(function(r){return r.text();})
-    .then(function(html){
-      clearTimeout(timeout);
-      var m=html.match(/TAXIPRO_BUILD='([^']+)'/);
-      if(m && m[1] && m[1]!==TAXIPRO_BUILD){
-        // NOUVELLE VERSION DISPONIBLE
-        setLoadProgress(70,'Nouvelle version trouvée !');
-        setTimeout(function(){
-          setLoadProgress(90,'Mise à jour en cours...');
-          if('caches' in window){
-            caches.keys().then(function(keys){
-              Promise.all(keys.map(function(k){return caches.delete(k);})).then(function(){
-                setLoadProgress(100,'Redémarrage...');
-                setTimeout(function(){window.location.reload(true);},400);
-              });
-            });
-          } else {
-            setTimeout(function(){window.location.reload(true);},400);
-          }
-        }, 500);
-      } else {
-        // DÉJÀ À JOUR
-        setLoadProgress(80,'Application à jour ✓');
-        setTimeout(startAppInit, 400);
-      }
-    })
-    .catch(function(){
-      clearTimeout(timeout);
-      // Pas de réseau
-      setLoadProgress(100,'Mode hors ligne');
-      setTimeout(startAppInit, 500);
-    });
-}
-
-function startAppInit(){
-  setLoadProgress(90,'Chargement des données...');
-  // Charger données locales
+function initApp(){
+  // Étape 1 : charger données locales (instantané)
   lLoadLocal();
 
-  setLoadProgress(100,'Prêt !');
-  const loginTimer=setTimeout(showLogin, 300);
+  // Étape 2 : afficher login dans 800ms MAX — garanti
+  const loginTimer=setTimeout(showLogin, 200);
 
+  // Étape 3 : Firebase en arrière-plan (ne bloque JAMAIS l'app)
   if(window._fb){
     window._fb.load().then(function(fbData){
       if(fbData && fbData.C){
@@ -1636,9 +1578,11 @@ function startAppInit(){
         if(fbData.MSG)MSG=fbData.MSG;
         lSaveLocal();
         setSyncStatus('ok');
+        // Si login pas encore affiché, le montrer maintenant
         clearTimeout(loginTimer);
         showLogin();
       } else {
+        // Première fois — envoyer les données locales vers Firebase
         window._fb.save(C,S,EX,AU);
         setSyncStatus('ok');
         clearTimeout(loginTimer);
@@ -1651,9 +1595,10 @@ function startAppInit(){
       showLogin();
     });
   }
+  // Sans Firebase : loginTimer affiche le login après 800ms
 }
 
-window.addEventListener('load', checkUpdateThenStart);
+window.addEventListener('load', initApp);
 
 function initLogin(){
   const sel=document.getElementById('lu');
@@ -4302,5 +4247,97 @@ async function sendPayEmails(){
   });
 })();
 </script>
+<script>
+// ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
+(function(){
+  // VERSION auto-générée à partir du contenu de la page — change automatiquement à chaque upload
+  async function getPageVersion(){
+    const html=document.documentElement.outerHTML;
+    const encoder=new TextEncoder();
+    const data=encoder.encode(html.slice(0,8000)); // empreinte sur les premiers 8000 chars
+    const hashBuffer=await crypto.subtle.digest('SHA-256',data);
+    const hashArray=Array.from(new Uint8Array(hashBuffer));
+    return hashArray.slice(0,6).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+  getPageVersion().then(function(VERSION){
+    const stored=localStorage.getItem('taxipro_version');
+    if(stored!==VERSION){
+      localStorage.setItem('taxipro_version',VERSION);
+      if(stored!==null){
+        // Vider tous les caches du navigateur pour ce site
+        if('caches' in window){
+          caches.keys().then(function(names){
+            names.forEach(function(name){caches.delete(name);});
+          });
+        }
+        // Forcer rechargement sans cache
+        setTimeout(function(){window.location.reload(true);},300);
+      }
+    }
+  });
+})();
 
-</body></html>
+// ═══ RÉCUPÉRATION D'URGENCE localStorage ═══
+function recupererLocalStorage(){
+  try {
+    var SK2='txpro_v4';
+    var keys=['_c','_s','_e','_a','_msg'];
+    var found={};
+    // Check all possible keys
+    var allKeys=[];
+    for(var i=0;i<localStorage.length;i++) allKeys.push(localStorage.key(i));
+    
+    var result='📦 Contenu localStorage:\n\n';
+    var hasData=false;
+    
+    allKeys.forEach(function(k){
+      var val=localStorage.getItem(k);
+      if(val && val.length>10){
+        try {
+          var parsed=JSON.parse(val);
+          if(k.includes('txpro') || k.includes('taxi')){
+            result+=k+': '+val.length+' caractères\n';
+            hasData=true;
+            found[k]=parsed;
+          }
+        } catch(e) {}
+      }
+    });
+    
+    // Try to find shifts specifically
+    var sc=localStorage.getItem(SK2+'_c');
+    var ss=localStorage.getItem(SK2+'_s');
+    
+    if(ss){
+      var shifts=JSON.parse(ss);
+      var nb=Object.keys(shifts).length;
+      result+='\n✅ Quarts trouvés: '+nb;
+      if(nb>0){
+        hasData=true;
+        // Restore!
+        if(confirm('✅ '+nb+' quarts trouvés dans la mémoire locale!\n\nVoulez-vous les restaurer maintenant?')){
+          S=shifts;
+          if(sc){ C=applyDefaults(JSON.parse(sc)); }
+          lSaveLocal();
+          if(window._fb){ window._fb.save(C,S,EX,AU); }
+          alert('✅ Données restaurées! '+nb+' quarts récupérés.');
+          location.reload();
+        }
+        return;
+      }
+    }
+    
+    if(!hasData){
+      result+='\n❌ Aucune donnée trouvée dans la mémoire locale.';
+      result+='\n\nTous les clés: '+allKeys.join(', ');
+    }
+    
+    alert(result);
+  } catch(e){
+    alert('Erreur: '+e.message);
+  }
+}
+
+</script>
+</body>
+</html>
