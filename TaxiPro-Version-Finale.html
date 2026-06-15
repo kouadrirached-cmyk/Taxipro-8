@@ -4247,34 +4247,62 @@ async function sendPayEmails(){
 })();
 </script>
 <script>
-// ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
-(function(){
-  // VERSION auto-générée à partir du contenu de la page — change automatiquement à chaque upload
-  async function getPageVersion(){
-    const html=document.documentElement.outerHTML;
-    const encoder=new TextEncoder();
-    const data=encoder.encode(html.slice(0,8000)); // empreinte sur les premiers 8000 chars
-    const hashBuffer=await crypto.subtle.digest('SHA-256',data);
-    const hashArray=Array.from(new Uint8Array(hashBuffer));
-    return hashArray.slice(0,6).map(b=>b.toString(16).padStart(2,'0')).join('');
+// ═══ SERVICE WORKER — MISE À JOUR AUTOMATIQUE PWA ═══
+if('serviceWorker' in navigator){
+  // Le SW est injecté inline en blob pour éviter d'avoir un fichier séparé
+  const swCode=`
+const CACHE='taxipro-v20260615220806';
+self.addEventListener('install',function(e){
+  self.skipWaiting();
+});
+self.addEventListener('activate',function(e){
+  e.waitUntil(
+    caches.keys().then(function(keys){
+      return Promise.all(
+        keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);})
+      );
+    }).then(function(){return self.clients.claim();})
+  );
+});
+self.addEventListener('fetch',function(e){
+  if(e.request.mode==='navigate'){
+    e.respondWith(
+      fetch(e.request,{cache:'no-store'}).catch(function(){
+        return caches.match(e.request);
+      })
+    );
+    return;
   }
-  getPageVersion().then(function(VERSION){
-    const stored=localStorage.getItem('taxipro_version');
-    if(stored!==VERSION){
-      localStorage.setItem('taxipro_version',VERSION);
-      if(stored!==null){
-        // Vider tous les caches du navigateur pour ce site
-        if('caches' in window){
-          caches.keys().then(function(names){
-            names.forEach(function(name){caches.delete(name);});
-          });
+  e.respondWith(
+    fetch(e.request,{cache:'no-store'}).then(function(r){
+      return r;
+    }).catch(function(){
+      return caches.match(e.request);
+    })
+  );
+});
+`;
+  const swBlob=new Blob([swCode],{type:'application/javascript'});
+  const swUrl=URL.createObjectURL(swBlob);
+  navigator.serviceWorker.register(swUrl,{scope:'./'}).then(function(reg){
+    // Vérifier mise à jour toutes les 60 secondes quand app ouverte
+    setInterval(function(){reg.update();},60000);
+    reg.addEventListener('updatefound',function(){
+      const newSW=reg.installing;
+      newSW.addEventListener('statechange',function(){
+        if(newSW.state==='activated'){
+          window.location.reload(true);
         }
-        // Forcer rechargement sans cache
-        setTimeout(function(){window.location.reload(true);},300);
-      }
-    }
+      });
+    });
+  }).catch(function(err){
+    console.warn('SW non supporté:',err);
   });
-})();
+  // Écouter les messages du SW pour recharger
+  navigator.serviceWorker.addEventListener('controllerchange',function(){
+    window.location.reload(true);
+  });
+}
 </script>
 </body>
 </html>
