@@ -3031,6 +3031,10 @@ function markMsgsRead(){
   if(changed){lSave();updateMsgBadge();}
 }
 
+function closeNewMsgModal(){var m=document.getElementById('newMsgModal');if(m)m.remove();}
+function closeReplyModal(){var m=document.getElementById('replyModal');if(m)m.remove();}
+function closeEcartsPopup(){var p=document.getElementById('ecartsPopup');if(p)p.remove();}
+function closeEcartsPopupGo(){closeEcartsPopup();goPage('ecarts');}
 function showEcartsPopup(){
   if(!U)return;
   const arr=getArr().filter(s=>s.driver===U.name&&calcEcart(s)>0.5);
@@ -3043,15 +3047,15 @@ function showEcartsPopup(){
   modal.innerHTML=
     '<div style="background:linear-gradient(145deg,#1a0a0a,#120808);border:2px solid rgba(255,58,58,.5);border-radius:20px;padding:24px;max-width:340px;width:100%;text-align:center;">'
     +'<div style="font-size:40px;margin-bottom:10px;">⚠️</div>'
-    +'<div style="font-size:18px;font-weight:900;color:var(--red);margin-bottom:6px;">ATTENTION — MANQUE D'ARGENT</div>'
+    +'<div style="font-size:18px;font-weight:900;color:var(--red);margin-bottom:6px;">ATTENTION &#8212; MANQUE D&#39;ARGENT</div>'
     +'<div style="font-size:13px;color:var(--m2);margin-bottom:16px;">Tu as '+arr.length+' quart'+(arr.length>1?'s':'')+' avec un manque</div>'
     +'<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.3);border-radius:14px;padding:16px;margin-bottom:16px;">'
     +'<div style="font-size:11px;color:var(--m2);margin-bottom:6px;">Total manquant</div>'
     +'<div style="font-size:36px;font-weight:900;color:var(--red);letter-spacing:-1px;">−'+fm(total)+'</div>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
-    +'<button onclick="document.getElementById('ecartsPopup').remove()" style="background:rgba(255,255,255,.06);border:1px solid var(--brd);color:var(--m1);border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Plus tard</button>'
-    +'<button onclick="document.getElementById('ecartsPopup').remove();goPage('ecarts')" style="background:linear-gradient(135deg,var(--red),#c00);border:none;color:#fff;border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Voir détails</button>'
+    +'<button onclick="closeEcartsPopup()" style="background:rgba(255,255,255,.06);border:1px solid var(--brd);color:var(--m1);border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Plus tard</button>'
+    +'<button onclick="closeEcartsPopupGo()" style="background:linear-gradient(135deg,var(--red),#c00);border:none;color:#fff;border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Voir d&#233;tails</button>'
     +'</div>'
     +'</div>';
   document.body.appendChild(modal);
@@ -3065,7 +3069,7 @@ function openNewMsg(){
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:flex-end;padding:8px;';
   modal.innerHTML=
     '<div style="width:100%;max-width:500px;margin:0 auto;background:linear-gradient(180deg,rgba(17,14,0,.99),rgba(12,10,0,.99));border:1.5px solid var(--brd2);border-radius:22px 22px 16px 16px;padding:22px;max-height:90dvh;overflow-y:auto;">'
-    +'<div style="font-size:18px;font-weight:900;color:var(--gold3);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">✏️ Nouveau message<button onclick="document.getElementById('newMsgModal').remove()" style="background:rgba(27,21,0,.9);border:1px solid var(--brd2);color:var(--m2);width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer;">✕</button></div>'
+    +'<div style="font-size:18px;font-weight:900;color:var(--gold3);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">&#9999;&#65039; Nouveau message<button onclick="closeNewMsgModal()" style="background:rgba(27,21,0,.9);border:1px solid var(--brd2);color:var(--m2);width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer;">&#10005;</button></div>'
     +'<div class="fsm"><label>Destinataire</label><div class="sw"><select id="nmTo"><option value="all">📢 Tous les chauffeurs</option>'+drivers.map(d=>'<option value="'+d.name+'">🚗 '+d.name+'</option>').join('')+'</select></div></div>'
     +'<div class="fsm"><label>Message</label><textarea id="nmBody" rows="4" placeholder="Écris ton message..." style="width:100%;background:rgba(24,18,0,.9);border:1.5px solid var(--brd);border-radius:12px;color:var(--txt);font-size:15px;padding:12px;font-family:inherit;"></textarea></div>'
     +'<button onclick="sendMsg()" style="width:100%;padding:15px;background:linear-gradient(135deg,var(--gold3),var(--gold));color:#0a0800;border:none;border-radius:12px;font-size:15px;font-weight:900;cursor:pointer;">📤 Envoyer</button>'
@@ -3087,7 +3091,7 @@ function sendMsg(){
   };
   MSG.push(msg);
   lSave();
-  document.getElementById('newMsgModal').remove();
+  closeNewMsgModal();
   renderMsgs();
   updateMsgBadge();
 }
@@ -3102,12 +3106,13 @@ function replyMsg(threadId){
   const destName=thread.from===U.name?(thread.to==='all'?'Tous':thread.to):thread.from;
   modal.innerHTML=
     '<div style="width:100%;max-width:500px;margin:0 auto;background:linear-gradient(180deg,rgba(17,14,0,.99),rgba(12,10,0,.99));border:1.5px solid var(--brd2);border-radius:22px 22px 16px 16px;padding:22px;">'
-    +'<div style="font-size:16px;font-weight:900;color:var(--gold3);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">↩️ Répondre à '+destName+'<button onclick="document.getElementById('replyModal').remove()" style="background:rgba(27,21,0,.9);border:1px solid var(--brd2);color:var(--m2);width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer;">✕</button></div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--gold3);margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">&#8617;&#65039; R&#233;pondre &#224; '+destName+'<button onclick="closeReplyModal()" style="background:rgba(27,21,0,.9);border:1px solid var(--brd2);color:var(--m2);width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer;">&#10005;</button></div>'
     +'<div style="background:rgba(10,8,0,.5);border:1px solid var(--brd);border-radius:10px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--m2);">'+thread.body.substring(0,80)+(thread.body.length>80?'...':'')+'</div>'
     +'<textarea id="replyBody" rows="3" placeholder="Ta réponse..." style="width:100%;background:rgba(24,18,0,.9);border:1.5px solid var(--brd);border-radius:12px;color:var(--txt);font-size:15px;padding:12px;font-family:inherit;margin-bottom:12px;"></textarea>'
-    +'<button onclick="sendReply(''+threadId+'')" style="width:100%;padding:14px;background:linear-gradient(135deg,var(--gold3),var(--gold));color:#0a0800;border:none;border-radius:12px;font-size:15px;font-weight:900;cursor:pointer;">📤 Envoyer</button>'
+    +'<button id="replySubmitBtn" style="width:100%;padding:14px;background:linear-gradient(135deg,var(--gold3),var(--gold));color:#0a0800;border:none;border-radius:12px;font-size:15px;font-weight:900;cursor:pointer;">&#128228; Envoyer</button>'
     +'</div>';
   document.body.appendChild(modal);
+  document.getElementById('replySubmitBtn').onclick=function(){sendReply(threadId);};
   setTimeout(()=>document.getElementById('replyBody').focus(),100);
 }
 
@@ -3126,7 +3131,7 @@ function sendReply(threadId){
   if(!thread.reads)thread.reads={};
   thread.reads[U.name]=new Date().toISOString();
   lSave();
-  document.getElementById('replyModal').remove();
+  closeReplyModal();
   renderMsgs();
 }
 
@@ -3142,7 +3147,7 @@ function renderMsgs(){
   }).sort((a,b)=>b.ts.localeCompare(a.ts));
 
   if(!visible.length){
-    c.innerHTML='<div style="text-align:center;padding:40px 20px;"><div style="font-size:40px;margin-bottom:10px;">💬</div><div style="color:var(--m2);font-size:13px;">Aucun message pour l'instant</div></div>';
+    c.innerHTML='<div style="text-align:center;padding:40px 20px;"><div style="font-size:40px;margin-bottom:10px;">&#128172;</div><div style="color:var(--m2);font-size:13px;">Aucun message</div></div>';
     return;
   }
 
@@ -3183,15 +3188,22 @@ function renderMsgs(){
       html+='</div>';
     }
     // Bouton répondre
-    html+='<button onclick="replyMsg(''+m.id+'')" style="background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.2);color:var(--blu);border-radius:9px;padding:7px 14px;font-size:11px;font-weight:800;cursor:pointer;">↩️ Répondre</button>';
+    html+='<button class="msgReplyBtn" data-mid="'+m.id+'" style="background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.2);color:var(--blu);border-radius:9px;padding:7px 14px;font-size:11px;font-weight:800;cursor:pointer;">&#8617; R&#233;pondre</button>';
     // Bouton supprimer (patron seulement sur ses propres msgs)
     if(isOwner&&isMine){
-      html+=' <button onclick="deleteMsg(''+m.id+'')" style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.2);color:var(--red);border-radius:9px;padding:7px 14px;font-size:11px;font-weight:800;cursor:pointer;margin-left:6px;">🗑️</button>';
+      html+=' <button class="msgDelBtn" data-mid="'+m.id+'" style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.2);color:var(--red);border-radius:9px;padding:7px 14px;font-size:11px;font-weight:800;cursor:pointer;margin-left:6px;">&#128465;</button>';
     }
     html+='</div>';
   });
 
   c.innerHTML=html;
+  // Event delegation pour reply et delete
+  c.querySelectorAll('.msgReplyBtn').forEach(btn=>{
+    btn.onclick=function(){replyMsg(this.dataset.mid);};
+  });
+  c.querySelectorAll('.msgDelBtn').forEach(btn=>{
+    btn.onclick=function(){deleteMsg(this.dataset.mid);};
+  });
 }
 
 function deleteMsg(id){
