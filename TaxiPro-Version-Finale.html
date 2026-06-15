@@ -4249,21 +4249,31 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 (function(){
-  const VERSION='2025-06-15-v3';
-  const stored=localStorage.getItem('taxipro_version');
-  if(stored!==VERSION){
-    localStorage.setItem('taxipro_version',VERSION);
-    if(stored!==null){
-      // Vider tous les caches du navigateur pour ce site
-      if('caches' in window){
-        caches.keys().then(function(names){
-          names.forEach(function(name){caches.delete(name);});
-        });
-      }
-      // Forcer rechargement sans cache
-      window.location.reload(true);
-    }
+  // VERSION auto-générée à partir du contenu de la page — change automatiquement à chaque upload
+  async function getPageVersion(){
+    const html=document.documentElement.outerHTML;
+    const encoder=new TextEncoder();
+    const data=encoder.encode(html.slice(0,8000)); // empreinte sur les premiers 8000 chars
+    const hashBuffer=await crypto.subtle.digest('SHA-256',data);
+    const hashArray=Array.from(new Uint8Array(hashBuffer));
+    return hashArray.slice(0,6).map(b=>b.toString(16).padStart(2,'0')).join('');
   }
+  getPageVersion().then(function(VERSION){
+    const stored=localStorage.getItem('taxipro_version');
+    if(stored!==VERSION){
+      localStorage.setItem('taxipro_version',VERSION);
+      if(stored!==null){
+        // Vider tous les caches du navigateur pour ce site
+        if('caches' in window){
+          caches.keys().then(function(names){
+            names.forEach(function(name){caches.delete(name);});
+          });
+        }
+        // Forcer rechargement sans cache
+        setTimeout(function(){window.location.reload(true);},300);
+      }
+    }
+  });
 })();
 </script>
 </body>
