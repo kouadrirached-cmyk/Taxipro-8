@@ -3093,6 +3093,10 @@ function markMsgsRead(){
   if(changed){lSave();updateMsgBadge();}
 }
 
+function closeEcartsPopup(){var p=document.getElementById('ecartsPopup');if(p)p.remove();}
+function closeEcartsPopupGo(){closeEcartsPopup();goPage('ecarts');}
+function closeNewMsgModal(){var m=document.getElementById('newMsgModal');if(m)m.remove();}
+function closeReplyModal(){var m=document.getElementById('replyModal');if(m)m.remove();}
 function showEcartsPopup(){
   if(!U)return;
   const arr=getArr().filter(s=>s.driver===U.name&&calcEcart(s)>0.5);
