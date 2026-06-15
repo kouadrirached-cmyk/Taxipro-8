@@ -142,9 +142,9 @@ body{
 }
 .load-logo p{color:var(--m2);font-size:11px;margin-top:2px;letter-spacing:3px;text-transform:uppercase;}
 .load-bar{width:220px;height:4px;background:var(--s3);border-radius:4px;overflow:hidden;border:1px solid var(--brd);}
-.load-fill{height:100%;background:linear-gradient(90deg,var(--gold2),var(--gold3));
-  border-radius:4px;animation:loadfill 1.5s ease-in-out infinite;}
-@keyframes loadfill{0%{width:0%;margin-left:0}50%{width:70%}100%{width:0%;margin-left:100%}}
+.load-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--gold2),var(--gold3));
+  border-radius:4px;transition:width .4s ease;}
+
 
 /* ═══ LOGIN ═══ */
 #loginScreen{height:100dvh;overflow-y:auto;display:none;padding:0;position:relative;z-index:10;}
@@ -848,7 +848,8 @@ body{
     <h1>TaxiPro</h1>
     <p>Dispatch · Fleet · Finance</p>
   </div>
-  <div class="load-bar"><div class="load-fill"></div></div>
+  <div class="load-bar"><div class="load-fill" id="loadFill"></div></div>
+  <div id="loadMsg" style="font-size:11px;color:#a08930;letter-spacing:1px;text-transform:uppercase;margin-top:-10px;">Vérification mise à jour...</div>
 </div>
 
 <!-- LOGIN -->
@@ -1549,9 +1550,15 @@ function startRealtimeSync(){
   });
 }
 
-// ═══ INIT — OUVERTURE INSTANTANÉE ═══
-// L'app s'ouvre TOUJOURS en moins d'1 seconde.
-// Firebase se connecte en arrière-plan sans jamais bloquer.
+// ═══ INIT — MISE À JOUR EN PREMIER ═══
+var TAXIPRO_BUILD='20260615222329';
+
+function setLoadProgress(pct, msg){
+  var fill=document.getElementById('loadFill');
+  var txt=document.getElementById('loadMsg');
+  if(fill) fill.style.width=pct+'%';
+  if(txt) txt.textContent=msg||'';
+}
 
 function showLogin(){
   document.getElementById('loading').style.display='none';
@@ -1559,14 +1566,66 @@ function showLogin(){
   initLogin();
 }
 
-function initApp(){
-  // Étape 1 : charger données locales (instantané)
+function checkUpdateThenStart(){
+  // Désinstaller anciens service workers
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.getRegistrations().then(function(regs){
+      regs.forEach(function(r){r.unregister();});
+    });
+  }
+
+  setLoadProgress(20,'Vérification de la mise à jour...');
+
+  var url=window.location.href.split('?')[0]+'?v='+Date.now();
+  var timeout=setTimeout(function(){
+    // Pas de réseau ou trop lent — ouvrir quand même
+    setLoadProgress(100,'Ouverture...');
+    setTimeout(startAppInit, 300);
+  }, 5000);
+
+  fetch(url,{cache:'no-store',headers:{'Cache-Control':'no-cache'}})
+    .then(function(r){return r.text();})
+    .then(function(html){
+      clearTimeout(timeout);
+      var m=html.match(/TAXIPRO_BUILD='([^']+)'/);
+      if(m && m[1] && m[1]!==TAXIPRO_BUILD){
+        // NOUVELLE VERSION DISPONIBLE
+        setLoadProgress(70,'Nouvelle version trouvée !');
+        setTimeout(function(){
+          setLoadProgress(90,'Mise à jour en cours...');
+          if('caches' in window){
+            caches.keys().then(function(keys){
+              Promise.all(keys.map(function(k){return caches.delete(k);})).then(function(){
+                setLoadProgress(100,'Redémarrage...');
+                setTimeout(function(){window.location.reload(true);},400);
+              });
+            });
+          } else {
+            setTimeout(function(){window.location.reload(true);},400);
+          }
+        }, 500);
+      } else {
+        // DÉJÀ À JOUR
+        setLoadProgress(80,'Application à jour ✓');
+        setTimeout(startAppInit, 400);
+      }
+    })
+    .catch(function(){
+      clearTimeout(timeout);
+      // Pas de réseau
+      setLoadProgress(100,'Mode hors ligne');
+      setTimeout(startAppInit, 500);
+    });
+}
+
+function startAppInit(){
+  setLoadProgress(90,'Chargement des données...');
+  // Charger données locales
   lLoadLocal();
 
-  // Étape 2 : afficher login dans 800ms MAX — garanti
-  const loginTimer=setTimeout(showLogin, 200);
+  setLoadProgress(100,'Prêt !');
+  const loginTimer=setTimeout(showLogin, 300);
 
-  // Étape 3 : Firebase en arrière-plan (ne bloque JAMAIS l'app)
   if(window._fb){
     window._fb.load().then(function(fbData){
       if(fbData && fbData.C){
@@ -1577,11 +1636,9 @@ function initApp(){
         if(fbData.MSG)MSG=fbData.MSG;
         lSaveLocal();
         setSyncStatus('ok');
-        // Si login pas encore affiché, le montrer maintenant
         clearTimeout(loginTimer);
         showLogin();
       } else {
-        // Première fois — envoyer les données locales vers Firebase
         window._fb.save(C,S,EX,AU);
         setSyncStatus('ok');
         clearTimeout(loginTimer);
@@ -1594,10 +1651,9 @@ function initApp(){
       showLogin();
     });
   }
-  // Sans Firebase : loginTimer affiche le login après 800ms
 }
 
-window.addEventListener('load', initApp);
+window.addEventListener('load', checkUpdateThenStart);
 
 function initLogin(){
   const sel=document.getElementById('lu');
@@ -4246,63 +4302,5 @@ async function sendPayEmails(){
   });
 })();
 </script>
-<script>
-// ═══ SERVICE WORKER — MISE À JOUR AUTOMATIQUE PWA ═══
-if('serviceWorker' in navigator){
-  // Le SW est injecté inline en blob pour éviter d'avoir un fichier séparé
-  const swCode=`
-const CACHE='taxipro-v20260615220806';
-self.addEventListener('install',function(e){
-  self.skipWaiting();
-});
-self.addEventListener('activate',function(e){
-  e.waitUntil(
-    caches.keys().then(function(keys){
-      return Promise.all(
-        keys.filter(function(k){return k!==CACHE;}).map(function(k){return caches.delete(k);})
-      );
-    }).then(function(){return self.clients.claim();})
-  );
-});
-self.addEventListener('fetch',function(e){
-  if(e.request.mode==='navigate'){
-    e.respondWith(
-      fetch(e.request,{cache:'no-store'}).catch(function(){
-        return caches.match(e.request);
-      })
-    );
-    return;
-  }
-  e.respondWith(
-    fetch(e.request,{cache:'no-store'}).then(function(r){
-      return r;
-    }).catch(function(){
-      return caches.match(e.request);
-    })
-  );
-});
-`;
-  const swBlob=new Blob([swCode],{type:'application/javascript'});
-  const swUrl=URL.createObjectURL(swBlob);
-  navigator.serviceWorker.register(swUrl,{scope:'./'}).then(function(reg){
-    // Vérifier mise à jour toutes les 60 secondes quand app ouverte
-    setInterval(function(){reg.update();},60000);
-    reg.addEventListener('updatefound',function(){
-      const newSW=reg.installing;
-      newSW.addEventListener('statechange',function(){
-        if(newSW.state==='activated'){
-          window.location.reload(true);
-        }
-      });
-    });
-  }).catch(function(err){
-    console.warn('SW non supporté:',err);
-  });
-  // Écouter les messages du SW pour recharger
-  navigator.serviceWorker.addEventListener('controllerchange',function(){
-    window.location.reload(true);
-  });
-}
-</script>
-</body>
-</html>
+
+</body></html>
