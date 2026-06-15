@@ -3099,28 +3099,33 @@ function closeNewMsgModal(){var m=document.getElementById('newMsgModal');if(m)m.
 function closeReplyModal(){var m=document.getElementById('replyModal');if(m)m.remove();}
 function showEcartsPopup(){
   if(!U)return;
-  const arr=getArr().filter(s=>s.driver===U.name&&calcEcart(s)>0.5);
+  if(U.role==='owner')return; // patron ne voit pas ce popup
+  if(!C.ecartsRegles)C.ecartsRegles={};
+  const arr=getArr().filter(s=>s.driver===U.name&&calcEcart(s)>0.5&&!C.ecartsRegles[s.id]);
   if(!arr.length)return;
   const total=arr.reduce((a,s)=>a+calcEcart(s),0);
-  const old=document.getElementById('ecartsPopup');if(old)old.remove();
+  const existing=document.getElementById('ecartsPopup');if(existing)existing.remove();
   const modal=document.createElement('div');
   modal.id='ecartsPopup';
   modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
-  modal.innerHTML=
-    '<div style="background:linear-gradient(145deg,#1a0a0a,#120808);border:2px solid rgba(255,58,58,.5);border-radius:20px;padding:24px;max-width:340px;width:100%;text-align:center;">'
-    +'<div style="font-size:40px;margin-bottom:10px;">⚠️</div>'
-    +'<div style="font-size:18px;font-weight:900;color:var(--red);margin-bottom:6px;">ATTENTION &#8212; MANQUE D&#39;ARGENT</div>'
+  const inner=document.createElement('div');
+  inner.style.cssText='background:linear-gradient(145deg,#1a0a0a,#120808);border:2px solid rgba(255,58,58,.5);border-radius:20px;padding:24px;max-width:340px;width:100%;text-align:center;';
+  inner.innerHTML=
+    '<div style="font-size:40px;margin-bottom:10px;">&#9888;&#65039;</div>'
+    +'<div style="font-size:18px;font-weight:900;color:var(--red);margin-bottom:6px;">MANQUE D&#39;ARGENT</div>'
     +'<div style="font-size:13px;color:var(--m2);margin-bottom:16px;">Tu as '+arr.length+' quart'+(arr.length>1?'s':'')+' avec un manque</div>'
     +'<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.3);border-radius:14px;padding:16px;margin-bottom:16px;">'
     +'<div style="font-size:11px;color:var(--m2);margin-bottom:6px;">Total manquant</div>'
-    +'<div style="font-size:36px;font-weight:900;color:var(--red);letter-spacing:-1px;">−'+fm(total)+'</div>'
+    +'<div style="font-size:36px;font-weight:900;color:var(--red);letter-spacing:-1px;">&#8722;'+fm(total)+'</div>'
     +'</div>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
-    +'<button onclick="closeEcartsPopup()" style="background:rgba(255,255,255,.06);border:1px solid var(--brd);color:var(--m1);border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Plus tard</button>'
-    +'<button onclick="closeEcartsPopupGo()" style="background:linear-gradient(135deg,var(--red),#c00);border:none;color:#fff;border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Voir détails</button>'
-    +'</div>'
+    +'<button id="popupBtnLater" style="background:rgba(255,255,255,.06);border:1px solid var(--brd);color:var(--txt);border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Plus tard</button>'
+    +'<button id="popupBtnDetails" style="background:linear-gradient(135deg,var(--red),#c00);border:none;color:#fff;border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">Voir d&#233;tails</button>'
     +'</div>';
+  modal.appendChild(inner);
   document.body.appendChild(modal);
+  document.getElementById('popupBtnLater').addEventListener('click',function(){modal.remove();});
+  document.getElementById('popupBtnDetails').addEventListener('click',function(){modal.remove();goPage('ecarts');});
 }
 
 function openNewMsg(){
