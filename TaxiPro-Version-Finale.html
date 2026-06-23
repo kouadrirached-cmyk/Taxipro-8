@@ -903,6 +903,7 @@ body{
     <button class="tb" id="tb-exp" onclick="goPage('exp')"><span class="ti">💸</span><span>Dépenses</span></button>
     <button class="tb" id="tb-team" onclick="goPage('team')" style="display:none"><span class="ti">👥</span><span>Équipe</span></button>
     <button class="tb" id="tb-msg" onclick="goPage('msg')"><span class="ti">📨</span><span>Messages</span></button>
+    <button class="tb" id="tb-audit2" onclick="goPage('audit2')" style="display:none"><span class="ti">🔍</span><span>Audit</span></button>
     <button class="tb" id="tb-sched" onclick="goPage('sched')" style="display:none"><span class="ti">📅</span><span>Horaire</span></button>
     <button class="tb" id="tb-set" onclick="goPage('set')" style="display:none"><span class="ti">⚙️</span><span>Réglages</span></button>
   </div>
@@ -933,6 +934,21 @@ body{
       </div>
       <div class="fsec">
         <div class="fstit">🔢 Taximètre</div>
+        <!-- ══ SCAN BUTTONS ══ -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+          <button class="btn bblu" style="padding:13px 8px;" onclick="openScan('debut')">
+            <div style="font-size:20px;margin-bottom:3px;">📷</div>
+            <div style="font-size:12px;font-weight:900;">Scanner début</div>
+            <div style="font-size:9px;opacity:.7;">Taxim. + Courses + Km</div>
+          </button>
+          <button class="btn bsec" style="padding:13px 8px;" onclick="openScan('fin')">
+            <div style="font-size:20px;margin-bottom:3px;">📷</div>
+            <div style="font-size:12px;font-weight:900;">Scanner fin</div>
+            <div style="font-size:9px;opacity:.7;">Taxim. + Courses + Km</div>
+          </button>
+        </div>
+        <!-- Statut scan -->
+        <div id="scanStatus"></div>
         <div class="frow">
           <div class="fsm"><label>Début ($)</label><input type="number" inputmode="decimal" id="ftaxd" placeholder="0" oninput="calc()"></div>
           <div class="fsm"><label>Fin ($)</label><input type="number" inputmode="decimal" id="ftaxf" placeholder="0" oninput="calc()"></div>
@@ -942,6 +958,11 @@ body{
           <div class="fsm"><label>🏁 Fin courses</label><input type="number" inputmode="numeric" id="fcrsf" placeholder="0" oninput="autoCrs()"></div>
         </div>
         <div class="fsm"><label>Nb courses (auto-calculé)</label><input type="number" inputmode="numeric" id="fcrs" placeholder="0" oninput="calc()"></div>
+        <div class="frow">
+          <div class="fsm"><label>🚗 Km début</label><input type="number" inputmode="numeric" id="fkmd" placeholder="0"></div>
+          <div class="fsm"><label>🏁 Km fin</label><input type="number" inputmode="numeric" id="fkmf" placeholder="0"></div>
+        </div>
+        <div id="kmDiff" style="font-size:11px;color:var(--blu);font-weight:700;margin-top:3px;display:none;"></div>
       </div>
       <div class="fsec">
         <div class="fstit">💰 Recette du quart</div>
@@ -1064,6 +1085,14 @@ body{
         <div id="msgNewBtn"></div>
       </div>
       <div id="msgPageContent"></div>
+    </div>
+
+    <!-- ══ AUDIT VISUEL ══ -->
+    <div class="pg" id="pg-audit2">
+      <div class="rsb" style="margin-bottom:13px;">
+        <div class="ptit" style="margin:0">🔍 Audit visuel</div>
+      </div>
+      <div id="auditVisualContent"></div>
     </div>
 
     <!-- ══ PROFIT NET ══ -->
@@ -1225,6 +1254,7 @@ body{
           <button class="btn bblu bsm" style="padding:12px;" onclick="doRestore()">📥 Restaurer fichier</button>
         </div>
         <button class="btn bsec bsm" style="width:100%;padding:10px;" onclick="showWeeklyBackups()">🗓️ Voir backups hebdomadaires</button>
+        <button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:6px;" onclick="saveFraudSeuil()">🚨 Seuil écart suspect (actuel: <span id="fraudSeuilLbl"></span>)</button>
         <div class="tmut mt8" id="bkupInfo"></div>
       </div>
       <div style="height:16px"></div>
@@ -1276,6 +1306,58 @@ body{
   <div class="mact">
     <button class="btn bsec" style="flex:.4" onclick="closeM('emailMov')">Annuler</button>
     <button class="btn btn-gold" onclick="sendPayEmails()">📤 Envoyer tout</button>
+  </div>
+</div></div>
+
+<!-- ══ MODAL SCAN OCR ══ -->
+<div class="mov" id="scanMov"><div class="modal" style="max-width:420px;padding:0;overflow:hidden;border-radius:20px;">
+  <div style="padding:16px 18px;background:rgba(10,8,0,.95);border-bottom:1px solid var(--brd);">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div id="scanTitle" style="font-size:15px;font-weight:900;color:var(--gold);">📷 Scanner début de quart</div>
+      <button class="mclose" onclick="closeScan()">✕</button>
+    </div>
+    <div style="font-size:10px;color:var(--m2);margin-top:3px;">Pointez la caméra sur le taximètre, puis prenez la photo</div>
+  </div>
+  <!-- Caméra live -->
+  <div style="position:relative;background:#000;">
+    <video id="scanVideo" autoplay playsinline muted style="width:100%;max-height:280px;object-fit:cover;display:block;"></video>
+    <canvas id="scanCanvas" style="display:none;"></canvas>
+    <!-- Overlay guide -->
+    <div style="position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center;">
+      <div style="border:2px solid rgba(245,200,0,.7);border-radius:10px;width:75%;height:55%;box-shadow:0 0 0 9999px rgba(0,0,0,.4);"></div>
+    </div>
+    <!-- Photo preview -->
+    <img id="scanPreview" style="display:none;width:100%;max-height:280px;object-fit:cover;" />
+  </div>
+  <!-- Résultats OCR -->
+  <div style="padding:14px 16px;background:rgba(10,8,0,.98);">
+    <div id="scanOCRStatus" style="text-align:center;font-size:12px;color:var(--m2);margin-bottom:10px;"></div>
+    <div id="scanResults" style="display:none;">
+      <div style="font-size:10px;color:var(--gold);font-weight:700;text-transform:uppercase;margin-bottom:8px;">📊 Données lues par OCR — Vérifiez et corrigez</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:10px;">
+        <div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.2);border-radius:9px;padding:9px;text-align:center;">
+          <div style="font-size:9px;color:var(--m2);font-weight:700;margin-bottom:4px;">🔢 TAXIM.</div>
+          <input type="number" id="scanTax" inputmode="decimal" style="width:100%;background:transparent;border:none;color:var(--gold);font-size:15px;font-weight:900;text-align:center;outline:none;" placeholder="0.00">
+        </div>
+        <div style="background:rgba(96,165,250,.06);border:1px solid rgba(96,165,250,.2);border-radius:9px;padding:9px;text-align:center;">
+          <div style="font-size:9px;color:var(--m2);font-weight:700;margin-bottom:4px;">🚗 COURSES</div>
+          <input type="number" id="scanCrs" inputmode="numeric" style="width:100%;background:transparent;border:none;color:var(--blu);font-size:15px;font-weight:900;text-align:center;outline:none;" placeholder="0">
+        </div>
+        <div style="background:rgba(57,211,83,.06);border:1px solid rgba(57,211,83,.2);border-radius:9px;padding:9px;text-align:center;">
+          <div style="font-size:9px;color:var(--m2);font-weight:700;margin-bottom:4px;">📍 KM</div>
+          <input type="number" id="scanKm" inputmode="numeric" style="width:100%;background:transparent;border:none;color:var(--grn);font-size:15px;font-weight:900;text-align:center;outline:none;" placeholder="0">
+        </div>
+      </div>
+      <div id="scanGPS" style="font-size:10px;color:var(--m2);margin-bottom:10px;text-align:center;"></div>
+    </div>
+    <!-- Boutons -->
+    <div id="scanBtns" style="display:flex;gap:8px;">
+      <button id="scanCaptureBtn" class="btn btn-gold" onclick="capturePhoto()" style="flex:1;padding:13px;">📸 Prendre la photo</button>
+    </div>
+    <div id="scanBtns2" style="display:none;gap:8px;">
+      <button class="btn bsec" style="flex:.4;" onclick="retakeScan()">🔄 Reprendre</button>
+      <button class="btn bsuc" style="flex:1;" onclick="applyScan()">✅ Appliquer</button>
+    </div>
   </div>
 </div></div>
 
@@ -1735,7 +1817,7 @@ function doLogin(){
   document.getElementById('hico').textContent=U.role==='owner'?'👑':'🚗';
   document.getElementById('hname').textContent=U.name;
   document.getElementById('hrole').textContent=U.role==='owner'?'Patron — accès complet':'Chauffeur — '+U.pct+'%';
-  ['tb-stats','tb-team','tb-set','tb-profit','tb-analyse','tb-paye'].forEach(t=>{
+  ['tb-stats','tb-team','tb-set','tb-profit','tb-analyse','tb-paye','tb-audit2'].forEach(t=>{
     document.getElementById(t).style.display=U.role==='owner'?'flex':'none';
   });
   document.getElementById('tb-sched').style.display='flex';
@@ -2247,6 +2329,7 @@ function goPage(name){
   if(name==='exp')renderExp();
   if(name==='team')renderTeamWithMsgs();
   if(name==='msg')renderMsgPage();
+  if(name==='audit2')renderAuditVisual();
   if(name==='sched')renderSched();
   if(name==='set')renderSet();
 }
@@ -3340,7 +3423,360 @@ function renderMsgBanner(){
     }).join('')
     +'</div>';
 }
+// ═══════════════════════════════════════════════
+// SYSTÈME SCAN OCR — TESSERACT.JS
+// ═══════════════════════════════════════════════
+var scanMode=null; // 'debut' ou 'fin'
+var scanStream=null;
+var scanPhotoData=null;
+var scanGPSCoords=null;
+var SCAN_STATE={debut:null,fin:null}; // {tax,crs,km,gps,ts,photo}
+
+function openScan(mode){
+  scanMode=mode;
+  scanPhotoData=null;
+  scanGPSCoords=null;
+  document.getElementById('scanTitle').textContent=mode==='debut'?'📷 Scanner début de quart':'📷 Scanner fin de quart';
+  document.getElementById('scanOCRStatus').textContent='';
+  document.getElementById('scanResults').style.display='none';
+  document.getElementById('scanBtns').style.display='flex';
+  document.getElementById('scanBtns2').style.display='none';
+  document.getElementById('scanPreview').style.display='none';
+  document.getElementById('scanGPS').textContent='';
+  document.getElementById('scanMov').classList.add('on');
+  // Démarrer caméra
+  startCamera();
+  // GPS en arrière-plan
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(function(pos){
+      scanGPSCoords={lat:pos.coords.latitude.toFixed(6),lng:pos.coords.longitude.toFixed(6),acc:Math.round(pos.coords.accuracy)};
+      document.getElementById('scanGPS').innerHTML='📍 GPS: '+scanGPSCoords.lat+', '+scanGPSCoords.lng+' (±'+scanGPSCoords.acc+'m)';
+    },function(){
+      document.getElementById('scanGPS').textContent='📍 GPS non disponible';
+    },{timeout:8000,enableHighAccuracy:true});
+  }
+}
+
+function startCamera(){
+  const video=document.getElementById('scanVideo');
+  if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}
+  navigator.mediaDevices.getUserMedia({
+    video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}
+  }).then(function(stream){
+    scanStream=stream;
+    video.srcObject=stream;
+    video.style.display='block';
+  }).catch(function(err){
+    const isLocal=location.protocol==='file:'||location.hostname==='localhost';
+    document.getElementById('scanOCRStatus').innerHTML=
+      isLocal
+      ?'<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.3);border-radius:10px;padding:12px;text-align:left;">'
+        +'<div style="font-size:12px;font-weight:900;color:var(--red);margin-bottom:6px;">❌ Caméra bloquée — fichier local</div>'
+        +'<div style="font-size:11px;color:var(--m2);line-height:1.6;">Vous ouvrez l\'app depuis vos Downloads.<br>'
+        +'La caméra nécessite HTTPS.<br><br>'
+        +'<b style="color:var(--gold);">Solution :</b> uploadez le fichier sur GitHub puis ouvrez via :<br>'
+        +'<span style="color:var(--neon);word-break:break-all;">https://kouadrirached-cmyk.github.io/Taxipro-8/TaxiPro-Version-Finale.html</span></div>'
+        +'</div>'
+      :'<div style="background:rgba(255,165,0,.1);border:1px solid rgba(255,165,0,.3);border-radius:10px;padding:12px;">'
+        +'<div style="font-size:12px;font-weight:900;color:orange;margin-bottom:4px;">⚠️ Caméra non disponible</div>'
+        +'<div style="font-size:11px;color:var(--m2);">Autorisez la caméra dans Chrome ou entrez les valeurs manuellement.</div>'
+        +'</div>';
+    document.getElementById('scanCaptureBtn').style.display='none';
+    // Montrer option saisie manuelle
+    document.getElementById('scanResults').style.display='block';
+    document.getElementById('scanTax').value='';
+    document.getElementById('scanCrs').value='';
+    document.getElementById('scanKm').value='';
+    document.getElementById('scanBtns').style.display='none';
+    document.getElementById('scanBtns2').style.display='flex';
+  });
+}
+
+function closeScan(){
+  if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}
+  document.getElementById('scanMov').classList.remove('on');
+  document.getElementById('scanVideo').style.display='block';
+  document.getElementById('scanPreview').style.display='none';
+}
+
+function capturePhoto(){
+  const video=document.getElementById('scanVideo');
+  const canvas=document.getElementById('scanCanvas');
+  canvas.width=video.videoWidth||640;
+  canvas.height=video.videoHeight||480;
+  canvas.getContext('2d').drawImage(video,0,0);
+  scanPhotoData=canvas.toDataURL('image/jpeg',0.85);
+  // Arrêter caméra, montrer preview
+  if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null;}
+  video.style.display='none';
+  const prev=document.getElementById('scanPreview');
+  prev.src=scanPhotoData;prev.style.display='block';
+  // Lancer OCR
+  runOCR(scanPhotoData);
+}
+
+function retakeScan(){
+  document.getElementById('scanResults').style.display='none';
+  document.getElementById('scanBtns').style.display='flex';
+  document.getElementById('scanBtns2').style.display='none';
+  document.getElementById('scanPreview').style.display='none';
+  document.getElementById('scanVideo').style.display='block';
+  document.getElementById('scanOCRStatus').textContent='';
+  scanPhotoData=null;
+  startCamera();
+}
+
+function runOCR(imageData){
+  const status=document.getElementById('scanOCRStatus');
+  status.innerHTML='<div style="color:var(--gold);">🔍 Analyse OCR en cours...</div>';
+  // Charger Tesseract si pas encore chargé
+  if(!window.Tesseract){
+    const script=document.createElement('script');
+    script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.onload=function(){doOCR(imageData);};
+    script.onerror=function(){
+      status.innerHTML='<span style="color:var(--red);">❌ Impossible de charger Tesseract. Entrez les valeurs manuellement.</span>';
+      showOCRFields('','','');
+    };
+    document.head.appendChild(script);
+  }else{doOCR(imageData);}
+}
+
+function doOCR(imageData){
+  const status=document.getElementById('scanOCRStatus');
+  Tesseract.recognize(imageData,'eng',{
+    logger:m=>{
+      if(m.status==='recognizing text'){
+        status.innerHTML='<div style="color:var(--gold);">🔍 Lecture: '+Math.round(m.progress*100)+'%</div>';
+      }
+    }
+  }).then(function(result){
+    const text=result.data.text;
+    // Extraire les nombres du texte OCR
+    const nums=[];
+    const re=/\b\d{1,2}[.,]\d{1,2}\b|\b\d{3,6}\b/g;
+    let m;
+    while((m=re.exec(text))!==null){
+      const n=parseFloat(m[0].replace(',','.'));
+      if(!isNaN(n))nums.push(n);
+    }
+    // Heuristique : taxim = valeur avec décimales ou ~100-9999, km = grand nombre, courses = petit
+    let tax='',crs='',km='';
+    const withDec=nums.filter(n=>n!==Math.floor(n)&&n>10&&n<9999);
+    const bigNums=nums.filter(n=>n>=10000&&n<=999999);
+    const smallNums=nums.filter(n=>n>=1&&n<=9999&&n===Math.floor(n));
+    if(withDec.length>0)tax=withDec[0].toFixed(2);
+    else if(smallNums.length>0)tax=smallNums[0].toFixed(2);
+    if(bigNums.length>0)km=Math.round(bigNums[0]);
+    const remaining=smallNums.filter(n=>Math.abs(n-parseFloat(tax))>1&&Math.abs(n-km)>1);
+    if(remaining.length>0)crs=remaining[0];
+    status.innerHTML='<div style="color:var(--grn);">✅ OCR terminé — Vérifiez les valeurs ci-dessous</div>';
+    showOCRFields(tax,crs,km);
+  }).catch(function(err){
+    status.innerHTML='<span style="color:var(--red);">❌ Erreur OCR — Entrez les valeurs manuellement.</span>';
+    showOCRFields('','','');
+  });
+}
+
+function showOCRFields(tax,crs,km){
+  document.getElementById('scanTax').value=tax;
+  document.getElementById('scanCrs').value=crs;
+  document.getElementById('scanKm').value=km;
+  document.getElementById('scanResults').style.display='block';
+  document.getElementById('scanBtns').style.display='none';
+  document.getElementById('scanBtns2').style.display='flex';
+}
+
+function applyScan(){
+  const tax=parseFloat(document.getElementById('scanTax').value)||0;
+  const crs=parseInt(document.getElementById('scanCrs').value)||0;
+  const km=parseInt(document.getElementById('scanKm').value)||0;
+  if(tax===0&&crs===0&&km===0){
+    if(!confirm('Toutes les valeurs sont à 0. Continuer quand même ?'))return;
+  }
+  const ts=new Date().toISOString();
+  SCAN_STATE[scanMode]={tax,crs,km,gps:scanGPSCoords,ts,photo:scanPhotoData};
+  if(scanMode==='debut'){
+    document.getElementById('ftaxd').value=tax;
+    document.getElementById('fcrsd').value=crs;
+    document.getElementById('fkmd').value=km;
+    document.getElementById('ftaxd').readOnly=true;
+    document.getElementById('fcrsd').readOnly=true;
+    updateScanStatus();
+  }else{
+    document.getElementById('ftaxf').value=tax;
+    document.getElementById('fcrsf').value=crs;
+    document.getElementById('fkmf').value=km;
+    document.getElementById('ftaxf').readOnly=true;
+    document.getElementById('fcrsf').readOnly=true;
+    // Auto-calc km diff
+    const kmd=parseInt(document.getElementById('fkmd').value)||0;
+    if(kmd>0&&km>kmd){
+      const diff=km-kmd;
+      const kdEl=document.getElementById('kmDiff');
+      kdEl.textContent='🚗 Distance parcourue: '+diff+' km';
+      kdEl.style.display='block';
+    }
+    // Auto-calc courses
+    const crsd=parseInt(document.getElementById('fcrsd').value)||0;
+    if(crsd>0&&crs>crsd){
+      document.getElementById('fcrs').value=crs-crsd;
+    }
+    updateScanStatus();
+  }
+  calc();
+  closeScan();
+}
+
+function updateScanStatus(){
+  const el=document.getElementById('scanStatus');
+  if(!el)return;
+  let html='';
+  if(SCAN_STATE.debut){
+    html+='<div style="background:rgba(57,211,83,.08);border:1px solid rgba(57,211,83,.25);border-radius:10px;padding:9px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">';
+    html+='<div><div style="font-size:11px;font-weight:800;color:var(--grn);">✅ Scan début enregistré</div>';
+    html+='<div style="font-size:10px;color:var(--m2);">Taxim: '+SCAN_STATE.debut.tax+' · Crs: '+SCAN_STATE.debut.crs+' · Km: '+SCAN_STATE.debut.km+'</div>';
+    if(SCAN_STATE.debut.gps)html+='<div style="font-size:9px;color:var(--m2);">📍 GPS: '+SCAN_STATE.debut.gps.lat+', '+SCAN_STATE.debut.gps.lng+'</div>';
+    html+='</div>';
+    if(SCAN_STATE.debut.photo)html+='<img src="'+SCAN_STATE.debut.photo+'" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--brd);">';
+    html+='</div>';
+  }
+  if(SCAN_STATE.fin){
+    html+='<div style="background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.25);border-radius:10px;padding:9px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">';
+    html+='<div><div style="font-size:11px;font-weight:800;color:var(--blu);">✅ Scan fin enregistré</div>';
+    html+='<div style="font-size:10px;color:var(--m2);">Taxim: '+SCAN_STATE.fin.tax+' · Crs: '+SCAN_STATE.fin.crs+' · Km: '+SCAN_STATE.fin.km+'</div>';
+    if(SCAN_STATE.fin.gps)html+='<div style="font-size:9px;color:var(--m2);">📍 GPS: '+SCAN_STATE.fin.gps.lat+', '+SCAN_STATE.fin.gps.lng+'</div>';
+    html+='</div>';
+    if(SCAN_STATE.fin.photo)html+='<img src="'+SCAN_STATE.fin.photo+'" style="width:48px;height:48px;object-fit:cover;border-radius:6px;border:1px solid var(--brd);">';
+    html+='</div>';
+  }
+  el.innerHTML=html;
+}
+
+// ─── Modifier doSaveShift pour inclure scan data + verrouillage ───
+const _origDoSave=doSaveShift;
+doSaveShift=function(params){
+  _origDoSave(params);
+  // Attacher scan data au dernier shift créé
+  const keys=Object.keys(S).sort((a,b)=>S[b].ts.localeCompare(S[a].ts));
+  if(keys.length>0){
+    const last=S[keys[0]];
+    if(SCAN_STATE.debut||SCAN_STATE.fin){
+      last.scanDebut=SCAN_STATE.debut?{tax:SCAN_STATE.debut.tax,crs:SCAN_STATE.debut.crs,km:SCAN_STATE.debut.km,gps:SCAN_STATE.debut.gps,ts:SCAN_STATE.debut.ts,photo:SCAN_STATE.debut.photo}:null;
+      last.scanFin=SCAN_STATE.fin?{tax:SCAN_STATE.fin.tax,crs:SCAN_STATE.fin.crs,km:SCAN_STATE.fin.km,gps:SCAN_STATE.fin.gps,ts:SCAN_STATE.fin.ts,photo:SCAN_STATE.fin.photo}:null;
+      last.locked=(SCAN_STATE.debut||SCAN_STATE.fin)?true:false;
+      last.kmDebut=SCAN_STATE.debut?SCAN_STATE.debut.km:0;
+      last.kmFin=SCAN_STATE.fin?SCAN_STATE.fin.km:0;
+      last.kmTotal=last.kmFin&&last.kmDebut?last.kmFin-last.kmDebut:0;
+      // Écart suspect
+      const seuil=C.fraudSeuil||5;
+      if(Math.abs(last.ecart)>seuil){
+        last.ecartSuspect=true;
+        audit('FRAUD_ALERT',last.driver+' écart '+fm(last.ecart));
+      }
+      lSave();
+    }
+  }
+  // Reset scan state
+  SCAN_STATE={debut:null,fin:null};
+  updateScanStatus();
+  // Déverrouiller champs
+  ['ftaxd','ftaxf','fcrsd','fcrsf'].forEach(function(id){
+    const el=document.getElementById(id);if(el)el.readOnly=false;
+  });
+  document.getElementById('kmDiff').style.display='none';
+};
+
+// ─── Blocage modification quart verrouillé (non-owner) ───
+const _origOpenEdit=openEdit;
+openEdit=function(id){
+  const s=S[id];
+  if(s&&s.locked&&U&&U.role!=='owner'){
+    alert('🔒 Ce quart est verrouillé après scan.\nSeul le patron peut le modifier.');
+    return;
+  }
+  _origOpenEdit(id);
+};
+
 function renderTeamWithMsgs(){renderTeam();renderMsgBanner();}
+
+// ─── TABLEAU D'AUDIT VISUEL ───
+function renderAuditVisual(){
+  const el=document.getElementById('auditVisualContent');if(!el)return;
+  const allShifts=Object.values(S).filter(s=>s.scanDebut||s.scanFin).sort((a,b)=>b.ts.localeCompare(a.ts));
+  if(!allShifts.length){
+    el.innerHTML='<div class="empty"><div class="ei">🔍</div>Aucun quart avec scan disponible.<br><div style="font-size:11px;color:var(--m2);margin-top:8px;">Les quarts scannés apparaîtront ici.</div></div>';
+    return;
+  }
+  // Filtre par chauffeur
+  const drivers=[...new Set(allShifts.map(s=>s.driver))];
+  let filterHtml='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
+  filterHtml+='<button onclick="renderAuditVisual()" style="background:rgba(245,200,0,.15);border:1px solid rgba(245,200,0,.3);color:var(--gold);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;">Tous</button>';
+  drivers.forEach(d=>{filterHtml+='<button onclick="renderAuditFilter(\''+d+'\')" style="background:rgba(10,8,0,.8);border:1px solid var(--brd);color:var(--m2);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;">🚗 '+d+'</button>';});
+  filterHtml+='</div>';
+  el.innerHTML=filterHtml+renderAuditRows(allShifts);
+}
+function renderAuditFilter(driver){
+  const el=document.getElementById('auditVisualContent');if(!el)return;
+  const allShifts=Object.values(S).filter(s=>(s.scanDebut||s.scanFin)&&s.driver===driver).sort((a,b)=>b.ts.localeCompare(a.ts));
+  el.innerHTML=renderAuditRows(allShifts);
+}
+function renderAuditRows(shifts){
+  return shifts.map(s=>{
+    const dd=new Date(s.date).toLocaleDateString('fr-CA',{weekday:'short',month:'short',day:'numeric'});
+    const taxNet=pf(s.taxf)-pf(s.taxd)-pi(s.courses);
+    const suspect=s.ecartSuspect||Math.abs(s.ecart||0)>5;
+    return '<div style="background:rgba(10,8,0,.8);border:2px solid '+(suspect?'rgba(255,58,58,.4)':'var(--brd)')+';border-radius:15px;padding:14px;margin-bottom:10px;">'
+      // En-tête
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+      +'<div><div style="font-size:13px;font-weight:900;color:var(--m3);">'+s.driver+' — '+s.vehicle+'</div>'
+      +'<div style="font-size:10px;color:var(--m2);">📅 '+dd+(s.time?' · '+s.time:'')+'</div></div>'
+      +(suspect?'<div style="background:rgba(255,58,58,.15);border:1px solid rgba(255,58,58,.4);color:var(--red);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:900;">🚨 Suspect</div>':'<div style="background:rgba(57,211,83,.1);border:1px solid rgba(57,211,83,.25);color:var(--grn);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:700;">✅ OK</div>')
+      +'</div>'
+      // Photos côte à côte
+      +(s.scanDebut?.photo||s.scanFin?.photo
+        ?'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">'
+          +(s.scanDebut?.photo?'<div><div style="font-size:9px;color:var(--grn);font-weight:700;margin-bottom:4px;">📷 DÉBUT</div><img src="'+s.scanDebut.photo+'" style="width:100%;border-radius:9px;border:1px solid rgba(57,211,83,.3);" onclick="viewPhoto(this.src)"></div>':'<div style="background:rgba(17,14,0,.8);border:1px solid var(--brd);border-radius:9px;display:flex;align-items:center;justify-content:center;height:80px;"><span style="font-size:10px;color:var(--m2);">No photo</span></div>')
+          +(s.scanFin?.photo?'<div><div style="font-size:9px;color:var(--blu);font-weight:700;margin-bottom:4px;">📷 FIN</div><img src="'+s.scanFin.photo+'" style="width:100%;border-radius:9px;border:1px solid rgba(96,165,250,.3);" onclick="viewPhoto(this.src)"></div>':'<div style="background:rgba(17,14,0,.8);border:1px solid var(--brd);border-radius:9px;display:flex;align-items:center;justify-content:center;height:80px;"><span style="font-size:10px;color:var(--m2);">No photo</span></div>')
+          +'</div>'
+        :'')
+      // Données numériques
+      +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:8px;">'
+      +'<div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.15);border-radius:8px;padding:7px;text-align:center;">'
+      +'<div style="font-size:8px;color:var(--m2);font-weight:700;margin-bottom:2px;">TAXIM. NET</div>'
+      +'<div style="font-size:13px;font-weight:900;color:var(--gold);">'+fm(taxNet)+'</div></div>'
+      +'<div style="background:rgba(57,211,83,.06);border:1px solid rgba(57,211,83,.2);border-radius:8px;padding:7px;text-align:center;">'
+      +'<div style="font-size:8px;color:var(--m2);font-weight:700;margin-bottom:2px;">RECETTE</div>'
+      +'<div style="font-size:13px;font-weight:900;color:var(--grn);">'+fm(s.recette)+'</div></div>'
+      +'<div style="background:'+(suspect?'rgba(255,58,58,.08)':'rgba(10,8,0,.6)')+';border:1px solid '+(suspect?'rgba(255,58,58,.3)':'var(--brd)')+';border-radius:8px;padding:7px;text-align:center;">'
+      +'<div style="font-size:8px;color:var(--m2);font-weight:700;margin-bottom:2px;">ÉCART</div>'
+      +'<div style="font-size:13px;font-weight:900;color:'+(Math.abs(s.ecart||0)>0.5?(s.ecart>0?'var(--red)':'var(--pur)'):'var(--grn)')+';">'+fm(s.ecart||0)+'</div></div>'
+      +'</div>'
+      // Km + GPS
+      +(s.kmTotal?'<div style="font-size:10px;color:var(--blu);font-weight:700;margin-bottom:4px;">🚗 Distance: '+s.kmTotal+' km ('+( s.kmDebut||'?')+' → '+(s.kmFin||'?')+')</div>':'')
+      +(s.scanDebut?.gps?'<div style="font-size:9px;color:var(--m2);">📍 Début: '+s.scanDebut.gps.lat+', '+s.scanDebut.gps.lng+'</div>':'')
+      +(s.scanFin?.gps?'<div style="font-size:9px;color:var(--m2);">📍 Fin: '+s.scanFin.gps.lat+', '+s.scanFin.gps.lng+'</div>':'')
+      // Unlock patron
+      +(s.locked&&U.role==='owner'?'<button onclick="unlockShift(\''+s.id+'\')" style="margin-top:8px;background:rgba(255,165,0,.1);border:1px solid rgba(255,165,0,.3);color:orange;border-radius:8px;padding:5px 12px;font-size:10px;font-weight:700;cursor:pointer;">🔓 Déverrouiller (patron)</button>':'')
+      +'</div>';
+  }).join('');
+}
+function unlockShift(id){
+  if(!confirm('Déverrouiller ce quart ?\nLe chauffeur pourra le modifier.'))return;
+  if(S[id]){S[id].locked=false;lSave();renderAuditVisual();audit('UNLOCK',id);}
+}
+function viewPhoto(src){
+  const d=document.createElement('div');
+  d.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:9999;display:flex;align-items:center;justify-content:center;';
+  d.innerHTML='<img src="'+src+'" style="max-width:95vw;max-height:90vh;border-radius:12px;"><button onclick="this.parentElement.remove()" style="position:absolute;top:16px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;border-radius:50%;width:36px;height:36px;font-size:18px;cursor:pointer;">✕</button>';
+  document.body.appendChild(d);
+}
+
+// ─── Seuil fraude configurable ───
+function saveFraudSeuil(){
+  const v=parseFloat(prompt('Seuil écart suspect ($) — par défaut $5 :',C.fraudSeuil||5));
+  if(!isNaN(v)&&v>=0){C.fraudSeuil=v;lSave();alert('✅ Seuil mis à jour: '+fm(v));}
+}
 
 function renderMsgPage(){
   const c=document.getElementById('msgPageContent');
@@ -4381,7 +4817,7 @@ async function sendPayEmails(){
 }
 
 // ═══ MODAL CLOSE ON OVERLAY ═══
-['editMov','drvMov','vehMov','expMov','emailMov','msgMov'].forEach(function(id){
+['editMov','drvMov','vehMov','expMov','emailMov','msgMov','scanMov'].forEach(function(id){
   document.getElementById(id).addEventListener('click',function(e){if(e.target===this)closeM(id);});
 });
 
@@ -4451,7 +4887,7 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 (function(){
-  const VERSION='2026-06-22-v5';
+  const VERSION='2026-06-22-v7';
   const stored=localStorage.getItem('taxipro_version');
   if(stored!==VERSION){
     localStorage.setItem('taxipro_version',VERSION);
