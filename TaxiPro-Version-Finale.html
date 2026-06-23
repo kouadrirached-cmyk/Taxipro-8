@@ -3528,54 +3528,54 @@ function retakeScan(){
 
 function runOCR(imageData){
   const status=document.getElementById('scanOCRStatus');
-  status.innerHTML='<div style="color:var(--gold);">🔍 Analyse OCR en cours...</div>';
-  // Charger Tesseract si pas encore chargé
-  if(!window.Tesseract){
-    const script=document.createElement('script');
-    script.src='https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    script.onload=function(){doOCR(imageData);};
-    script.onerror=function(){
-      status.innerHTML='<span style="color:var(--red);">❌ Impossible de charger Tesseract. Entrez les valeurs manuellement.</span>';
-      showOCRFields('','','');
-    };
-    document.head.appendChild(script);
-  }else{doOCR(imageData);}
+  status.innerHTML='<div style="color:var(--gold);">🤖 Analyse IA en cours...</div>';
+  doClaudeVision(imageData);
 }
 
-function doOCR(imageData){
+async function doClaudeVision(imageData){
   const status=document.getElementById('scanOCRStatus');
-  Tesseract.recognize(imageData,'eng',{
-    logger:m=>{
-      if(m.status==='recognizing text'){
-        status.innerHTML='<div style="color:var(--gold);">🔍 Lecture: '+Math.round(m.progress*100)+'%</div>';
-      }
+  try{
+    // Convertir base64 pour l'API
+    const base64=imageData.split(',')[1];
+    const mediaType='image/jpeg';
+    status.innerHTML='<div style="color:var(--gold);">🤖 Claude analyse l\'image... <span style="font-size:10px;">(quelques secondes)</span></div>';
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:256,
+        messages:[{
+          role:'user',
+          content:[
+            {type:'image',source:{type:'base64',media_type:mediaType,data:base64}},
+            {type:'text',text:'Cette photo montre l\'affichage d\'un taximètre de taxi. Lis attentivement les chiffres affichés. Réponds UNIQUEMENT en JSON valide avec exactement ces 3 champs (utilise null si une valeur est illisible):\n{"taximetreAffiche": <nombre avec décimales ex: 93.80>, "nombreCourses": <entier>, "kilometrage": <entier>}\nPas de texte avant ou après le JSON.'}
+          ]
+        }]
+      })
+    });
+    if(!resp.ok){
+      const err=await resp.json();
+      throw new Error(err.error?.message||'API error '+resp.status);
     }
-  }).then(function(result){
-    const text=result.data.text;
-    // Extraire les nombres du texte OCR
-    const nums=[];
-    const re=/\b\d{1,2}[.,]\d{1,2}\b|\b\d{3,6}\b/g;
-    let m;
-    while((m=re.exec(text))!==null){
-      const n=parseFloat(m[0].replace(',','.'));
-      if(!isNaN(n))nums.push(n);
-    }
-    // Heuristique : taxim = valeur avec décimales ou ~100-9999, km = grand nombre, courses = petit
-    let tax='',crs='',km='';
-    const withDec=nums.filter(n=>n!==Math.floor(n)&&n>10&&n<9999);
-    const bigNums=nums.filter(n=>n>=10000&&n<=999999);
-    const smallNums=nums.filter(n=>n>=1&&n<=9999&&n===Math.floor(n));
-    if(withDec.length>0)tax=withDec[0].toFixed(2);
-    else if(smallNums.length>0)tax=smallNums[0].toFixed(2);
-    if(bigNums.length>0)km=Math.round(bigNums[0]);
-    const remaining=smallNums.filter(n=>Math.abs(n-parseFloat(tax))>1&&Math.abs(n-km)>1);
-    if(remaining.length>0)crs=remaining[0];
-    status.innerHTML='<div style="color:var(--grn);">✅ OCR terminé — Vérifiez les valeurs ci-dessous</div>';
-    showOCRFields(tax,crs,km);
-  }).catch(function(err){
-    status.innerHTML='<span style="color:var(--red);">❌ Erreur OCR — Entrez les valeurs manuellement.</span>';
+    const data=await resp.json();
+    const raw=data.content.map(b=>b.text||'').join('').trim();
+    // Parser JSON
+    const clean=raw.replace(/```json|```/g,'').trim();
+    const parsed=JSON.parse(clean);
+    const tax=parsed.taximetreAffiche!=null?parseFloat(parsed.taximetreAffiche):'';
+    const crs=parsed.nombreCourses!=null?parseInt(parsed.nombreCourses):'';
+    const km=parsed.kilometrage!=null?parseInt(parsed.kilometrage):'';
+    status.innerHTML='<div style="color:var(--grn);">✅ IA a lu l\'image — Vérifiez les valeurs</div>';
+    showOCRFields(tax!==''?tax.toFixed(2):'', crs!==''?crs:'', km!==''?km:'');
+  }catch(err){
+    console.error('Claude Vision error:',err);
+    status.innerHTML='<div style="background:rgba(255,165,0,.1);border:1px solid rgba(255,165,0,.3);border-radius:10px;padding:10px;">'
+      +'<div style="font-size:11px;color:orange;font-weight:800;margin-bottom:4px;">⚠️ Lecture automatique échouée</div>'
+      +'<div style="font-size:10px;color:var(--m2);">Entrez les valeurs manuellement ci-dessous.</div>'
+      +'</div>';
     showOCRFields('','','');
-  });
+  }
 }
 
 function showOCRFields(tax,crs,km){
@@ -4887,7 +4887,7 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 (function(){
-  const VERSION='2026-06-22-v7';
+  const VERSION='2026-06-22-v8';
   const stored=localStorage.getItem('taxipro_version');
   if(stored!==VERSION){
     localStorage.setItem('taxipro_version',VERSION);
