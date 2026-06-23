@@ -1326,14 +1326,17 @@ body{
     <div style="position:absolute;inset:0;pointer-events:none;display:flex;align-items:center;justify-content:center;">
       <div style="border:2px solid rgba(245,200,0,.7);border-radius:10px;width:75%;height:55%;box-shadow:0 0 0 9999px rgba(0,0,0,.4);"></div>
     </div>
-    <!-- Photo preview -->
-    <img id="scanPreview" style="display:none;width:100%;max-height:280px;object-fit:cover;" />
+    <!-- Photo preview — grande et tappable pour zoom -->
+    <img id="scanPreview" style="display:none;width:100%;max-height:320px;object-fit:contain;background:#000;cursor:zoom-in;" onclick="viewPhoto(this.src)" title="Tap pour agrandir" />
   </div>
   <!-- Résultats OCR -->
   <div style="padding:14px 16px;background:rgba(10,8,0,.98);">
     <div id="scanOCRStatus" style="text-align:center;font-size:12px;color:var(--m2);margin-bottom:10px;"></div>
     <div id="scanResults" style="display:none;">
-      <div style="font-size:10px;color:var(--gold);font-weight:700;text-transform:uppercase;margin-bottom:8px;">📊 Données lues par OCR — Vérifiez et corrigez</div>
+      <div style="font-size:11px;color:var(--gold);font-weight:700;margin-bottom:8px;">📸 Photo sauvegardée — Regardez l'écran et entrez les chiffres :</div>
+      <div style="background:rgba(245,200,0,.05);border:1px solid rgba(245,200,0,.15);border-radius:10px;padding:10px;margin-bottom:8px;font-size:10px;color:var(--m2);line-height:1.6;">
+        💡 Tap sur la photo pour l'agrandir si nécessaire
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;margin-bottom:10px;">
         <div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.2);border-radius:9px;padding:9px;text-align:center;">
           <div style="font-size:9px;color:var(--m2);font-weight:700;margin-bottom:4px;">🔢 TAXIM.</div>
@@ -3528,54 +3531,12 @@ function retakeScan(){
 
 function runOCR(imageData){
   const status=document.getElementById('scanOCRStatus');
-  status.innerHTML='<div style="color:var(--gold);">🤖 Analyse IA en cours...</div>';
-  doClaudeVision(imageData);
+  status.innerHTML='<div style="color:var(--grn);">✅ Photo prise — Entrez les valeurs que vous voyez</div>';
+  showOCRFields('','','');
 }
 
 async function doClaudeVision(imageData){
-  const status=document.getElementById('scanOCRStatus');
-  try{
-    // Convertir base64 pour l'API
-    const base64=imageData.split(',')[1];
-    const mediaType='image/jpeg';
-    status.innerHTML='<div style="color:var(--gold);">🤖 Claude analyse l\'image... <span style="font-size:10px;">(quelques secondes)</span></div>';
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-6',
-        max_tokens:256,
-        messages:[{
-          role:'user',
-          content:[
-            {type:'image',source:{type:'base64',media_type:mediaType,data:base64}},
-            {type:'text',text:'Cette photo montre l\'affichage d\'un taximètre de taxi. Lis attentivement les chiffres affichés. Réponds UNIQUEMENT en JSON valide avec exactement ces 3 champs (utilise null si une valeur est illisible):\n{"taximetreAffiche": <nombre avec décimales ex: 93.80>, "nombreCourses": <entier>, "kilometrage": <entier>}\nPas de texte avant ou après le JSON.'}
-          ]
-        }]
-      })
-    });
-    if(!resp.ok){
-      const err=await resp.json();
-      throw new Error(err.error?.message||'API error '+resp.status);
-    }
-    const data=await resp.json();
-    const raw=data.content.map(b=>b.text||'').join('').trim();
-    // Parser JSON
-    const clean=raw.replace(/```json|```/g,'').trim();
-    const parsed=JSON.parse(clean);
-    const tax=parsed.taximetreAffiche!=null?parseFloat(parsed.taximetreAffiche):'';
-    const crs=parsed.nombreCourses!=null?parseInt(parsed.nombreCourses):'';
-    const km=parsed.kilometrage!=null?parseInt(parsed.kilometrage):'';
-    status.innerHTML='<div style="color:var(--grn);">✅ IA a lu l\'image — Vérifiez les valeurs</div>';
-    showOCRFields(tax!==''?tax.toFixed(2):'', crs!==''?crs:'', km!==''?km:'');
-  }catch(err){
-    console.error('Claude Vision error:',err);
-    status.innerHTML='<div style="background:rgba(255,165,0,.1);border:1px solid rgba(255,165,0,.3);border-radius:10px;padding:10px;">'
-      +'<div style="font-size:11px;color:orange;font-weight:800;margin-bottom:4px;">⚠️ Lecture automatique échouée</div>'
-      +'<div style="font-size:10px;color:var(--m2);">Entrez les valeurs manuellement ci-dessous.</div>'
-      +'</div>';
-    showOCRFields('','','');
-  }
+  // Non utilisé — gardé pour référence future
 }
 
 function showOCRFields(tax,crs,km){
@@ -4887,7 +4848,7 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 (function(){
-  const VERSION='2026-06-22-v8';
+  const VERSION='2026-06-22-v9';
   const stored=localStorage.getItem('taxipro_version');
   if(stored!==VERSION){
     localStorage.setItem('taxipro_version',VERSION);
