@@ -1487,7 +1487,10 @@ function lSaveLocal(){
 // Main save — Firebase + local backup simultaneously
 function lSave(){
   lSaveLocal();
-  if(window._fb)window._fb.save(C,S,EX,AU);
+  // Protection : ne jamais envoyer des données vides à Firebase
+  if(window._fb && C && C.drivers && C.drivers.length>0){
+    window._fb.save(C,S,EX,AU);
+  }
 }
 
 function audit(action,detail=''){
@@ -1559,10 +1562,12 @@ function initApp(){
   }
   const loginTimer=setTimeout(doShowLogin, 200);
 
-  // Étape 3 : Firebase en arrière-plan (ne bloque JAMAIS l'app)
+  // Étape 3 : Firebase = SOURCE PRINCIPALE
+  // RÈGLE DE SÉCURITÉ : on n'écrase JAMAIS Firebase avec des données vides
   if(window._fb){
     window._fb.load().then(function(fbData){
-      if(fbData && fbData.C){
+      if(fbData && fbData.C && fbData.C.drivers && fbData.C.drivers.length>0){
+        // Firebase a des données réelles → on les utilise
         C=applyDefaults(fbData.C);
         S=fbData.S||{};
         EX=fbData.EX||{};
@@ -1570,8 +1575,14 @@ function initApp(){
         lSaveLocal();
         setSyncStatus('ok');
       } else {
-        window._fb.save(C,S,EX,AU);
-        setSyncStatus('ok');
+        // Firebase vide — envoyer local SEULEMENT si non-vide
+        var localHasData=C&&C.drivers&&C.drivers.length>0&&Object.keys(S||{}).length>0;
+        if(localHasData){
+          window._fb.save(C,S,EX,AU);
+          setSyncStatus('ok');
+        } else {
+          setSyncStatus('offline');
+        }
       }
       clearTimeout(loginTimer);
       doShowLogin();
@@ -4054,7 +4065,7 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 // ⚠️  CHANGER CETTE VALEUR À CHAQUE MISE À JOUR ⚠️
-const APP_VERSION = '2026-06-24-v9';
+const APP_VERSION = '2026-06-24-v10';
 window.APP_VERSION = APP_VERSION;
 
 function forceMiseAJour(){
