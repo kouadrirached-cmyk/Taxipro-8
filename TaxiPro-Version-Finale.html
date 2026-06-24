@@ -941,11 +941,6 @@ body{
           <div class="fsm"><label>🏁 Fin courses</label><input type="number" inputmode="numeric" id="fcrsf" placeholder="0" oninput="autoCrs()"></div>
         </div>
         <div class="fsm"><label>Nb courses (auto-calculé)</label><input type="number" inputmode="numeric" id="fcrs" placeholder="0" oninput="calc()"></div>
-        <div class="frow">
-          <div class="fsm"><label>🚗 Km début</label><input type="number" inputmode="numeric" id="fkmd" placeholder="0" oninput="calcKm()"></div>
-          <div class="fsm"><label>🏁 Km fin</label><input type="number" inputmode="numeric" id="fkmf" placeholder="0" oninput="calcKm()"></div>
-        </div>
-        <div id="kmDiffLbl" style="font-size:11px;color:var(--blu);font-weight:700;margin-top:3px;display:none;"></div>
       </div>
       <div class="fsec">
         <div class="fstit">💰 Recette du quart</div>
@@ -1155,21 +1150,6 @@ body{
         </div>
         <div class="tmut mt8" id="shareInfo"></div>
       </div>
-      <div class="card" style="border-color:rgba(245,200,0,.3);">
-        <div class="ctit"><span><span class="ci">🎁</span>Cartes cadeaux — Bonus performance</span></div>
-        <div style="font-size:11px;color:var(--m2);margin-bottom:11px;line-height:1.5;">Si le chauffeur atteint le seuil de taximètre net dans la semaine → bonus ajouté à sa paye.</div>
-        <div id="gcList"></div>
-        <div style="background:rgba(245,200,0,.05);border:1px solid rgba(245,200,0,.15);border-radius:12px;padding:12px;margin-top:8px;">
-          <div style="font-size:11px;font-weight:800;color:var(--gold);margin-bottom:9px;">➕ Nouvelle carte cadeau</div>
-          <div class="frow">
-            <div class="fsm"><label>💵 Bonus ($)</label><input type="number" inputmode="decimal" id="gc-amt" placeholder="50.00"></div>
-            <div class="fsm"><label>🔢 Seuil taxim. net ($)</label><input type="number" inputmode="decimal" id="gc-seuil" placeholder="2000.00"></div>
-          </div>
-          <div class="fsm"><label>Description</label><input type="text" id="gc-desc" placeholder="Ex: Carte IGA"></div>
-          <div class="fsm"><label>Pour</label><div class="sw"><select id="gc-drv"></select></div></div>
-          <button class="btn btn-gold mt8" onclick="addGiftCard()">🎁 Créer</button>
-        </div>
-      </div>
       <div class="card">
         <div class="ctit"><span><span class="ci">&#127919;</span>Objectifs hebdomadaires</span></div>
         <div style="font-size:11px;color:var(--m2);margin-bottom:12px;line-height:1.5;">Ces objectifs apparaissent comme barre de progression sur la page Quart.</div>
@@ -1199,12 +1179,11 @@ body{
           {{to_email}} · {{to_name}} · {{week_label}} · {{salaire_total}} · {{nb_quarts}} · {{nb_courses}} · {{recette_totale}} · {{cash_recu}} · {{pourcentage}} · {{details_quarts}}
         </div>
       </div>
-      <div class="card" style="border-color:rgba(57,211,83,.3);">
-        <div class="ctit"><span><span class="ci">🛡️</span>Protection & Sauvegarde</span></div>
-        <div style="background:rgba(57,211,83,.08);border:1px solid rgba(57,211,83,.2);border-radius:10px;padding:10px;margin-bottom:10px;font-size:10px;color:var(--m2);line-height:1.6;">✅ Firebase protégé contre écrasement<br>📦 Backup manuel disponible</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-          <button class="btn bsuc bsm" onclick="doBackup()">📦 Backup</button>
-          <button class="btn bblu bsm" onclick="doRestore()">📥 Restaurer</button>
+      <div class="card">
+        <div class="ctit"><span><span class="ci">💾</span>Sauvegarde des données</span></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn bblu bsm" onclick="backupData()">📦 Exporter JSON</button>
+          <button class="btn bsec bsm" onclick="restoreData()">📥 Restaurer</button>
         </div>
         <div class="tmut mt8" id="bkupInfo"></div>
       </div>
@@ -1285,11 +1264,6 @@ body{
     window._fb={
       async save(C,S,EX,AU){
         try{
-          const sc=Object.keys(S||{}).length;
-          const pc=parseInt(localStorage.getItem('txpro_sc')||'0');
-          if(sc===0&&pc>5){console.warn('PROTECTION bloquée');return;}
-          if(!C||!C.drivers||!C.drivers.length){return;}
-          if(sc>0)localStorage.setItem('txpro_sc',sc);
           await db.collection('taxipro').doc('config').set(C);
           await db.collection('taxipro').doc('shifts').set({data:S});
           await db.collection('taxipro').doc('expenses').set({data:EX});
@@ -1456,8 +1430,6 @@ function applyDefaults(C){
   if(!C.fixedCosts)C.fixedCosts={insurance:880,carRental:850,otherLabel:'',other:0};
   if(!C.payes)C.payes={};
   if(!C.objectifs)C.objectifs={patron:10000};
-  if(!C.messages)C.messages=[];
-  if(!C.giftCards)C.giftCards=[];
   return C;
 }
 
@@ -1543,7 +1515,6 @@ function showLogin(){
   document.getElementById('loginScreen').style.display='block';
   initLogin();
 }
-setTimeout(function(){var l=document.getElementById('loading');if(l&&l.style.display!=='none'){showLogin();}},4000);
 
 function initApp(){
   // Étape 1 : charger données locales (instantané)
@@ -1875,13 +1846,6 @@ function resetForm(){
   resetCoupClients();
   essType='carte';setEssType({preventDefault:function(){}}, 'carte');
 }
-function calcKm(){
-  var kmd=parseInt(document.getElementById('fkmd').value)||0;
-  var kmf=parseInt(document.getElementById('fkmf').value)||0;
-  var el=document.getElementById('kmDiffLbl');
-  if(kmd>0&&kmf>kmd){el.textContent='🚗 Distance: '+(kmf-kmd)+' km';el.style.display='block';}
-  else{el.style.display='none';}
-}
 function autoCrs(){
   const d=pi(gv('fcrsd')),f=pi(gv('fcrsf'));
   if(d>0&&f>0&&f>d)document.getElementById('fcrs').value=f-d;
@@ -2071,7 +2035,7 @@ function goPage(name){
   if(name==='exp')renderExp();
   if(name==='team')renderTeam();
   if(name==='sched')renderSched();
-  if(name==='set'){renderSet();renderGcList();initGcDrv();}
+  if(name==='set')renderSet();
 }
 function setPer(mode,el){
   perMode=mode;perOff=0;
@@ -2177,6 +2141,46 @@ function renderDash(){
       +'</div></div>'
       +'</div>'
       +payBreakHTML
+      // ════ TABLEAU RÉCAP 60% PAR CHAUFFEUR (semaine courante ou période sélectionnée) ════
+      +(Object.keys(byD).length?(function(){
+        var ownerPct=C.ownerShare||60;
+        var drvRows=Object.entries(byD).filter(function(e){var d=getDrv(e[0]);return d&&d.role!=='owner';})
+          .sort(function(a,b){return b[1].rec-a[1].rec;})
+          .map(function(e){
+            var nm=e[0],d=e[1];
+            // Calcul taximètre net réel depuis les shifts
+            var taxNet=d.shifts.reduce(function(a,s){return a+(pf(s.taxf)-pf(s.taxd)-pi(s.courses));},0);
+            var own60=taxNet*(ownerPct/100);
+            var recette=d.rec;
+            // Vérification : la recette doit couvrir le 60%
+            var ok=recette>=own60-0.5;
+            return '<div style="background:rgba(10,8,0,.6);border:1.5px solid '+(ok?'rgba(57,211,83,.25)':'rgba(255,58,58,.3)')+';border-radius:12px;padding:11px;margin-bottom:7px;">'
+              +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+              +'<div style="font-size:13px;font-weight:800;color:var(--txt);">🚗 '+nm+'</div>'
+              +'<div style="font-size:10px;font-weight:700;color:'+(ok?'var(--grn)':'var(--red)')+';">'+(ok?'✅ 60% OK':'⚠️ Vérifier')+'</div>'
+              +'</div>'
+              +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;">'
+              +'<div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.15);border-radius:9px;padding:8px;text-align:center;">'
+              +'<div style="font-size:8px;color:var(--m2);font-weight:700;text-transform:uppercase;margin-bottom:3px;">🔢 Taxim. net</div>'
+              +'<div style="font-size:14px;font-weight:900;color:var(--txt);">'+fm(taxNet)+'</div>'
+              +'</div>'
+              +'<div style="background:rgba(245,200,0,.12);border:1.5px solid rgba(245,200,0,.35);border-radius:9px;padding:8px;text-align:center;">'
+              +'<div style="font-size:8px;color:var(--gold);font-weight:700;text-transform:uppercase;margin-bottom:3px;">👑 Votre '+ownerPct+'%</div>'
+              +'<div style="font-size:15px;font-weight:900;color:var(--gold);">'+fm(own60)+'</div>'
+              +'</div>'
+              +'<div style="background:rgba(57,211,83,.06);border:1px solid rgba(57,211,83,.2);border-radius:9px;padding:8px;text-align:center;">'
+              +'<div style="font-size:8px;color:var(--grn);font-weight:700;text-transform:uppercase;margin-bottom:3px;">💼 Sal. chauf.</div>'
+              +'<div style="font-size:14px;font-weight:900;color:var(--grn);">'+fm(d.sal)+'</div>'
+              +'</div>'
+              +'</div>'
+              +'<div style="margin-top:6px;font-size:10px;color:var(--m2);">'+d.n+' quart'+(d.n>1?'s':'')+' · Recette: <span style="color:var(--gold);font-weight:700;">'+fm(recette)+'</span></div>'
+              +'</div>';
+          }).join('');
+        return '<div class="card" style="margin-bottom:11px;border-color:rgba(245,200,0,.3);">'
+          +'<div class="ctit"><span><span class="ci">👑</span>Mon '+(C.ownerShare||60)+'% — par chauffeur · '+perLabel()+'</span></div>'
+          +drvRows
+          +'</div>';
+      })():'')
       +(Object.keys(byD).length
         ?'<div style="font-size:10px;color:var(--m2);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:9px;">👥 Par chauffeur — cliquez pour détails</div>'
          +drvCards
@@ -2267,24 +2271,84 @@ function renderHist(){
       html+='<div><div style="font-size:9px;color:var(--m2);text-transform:uppercase;margin-bottom:3px;">Moy/jour</div><div style="font-size:14px;font-weight:900;color:var(--gold);">'+fm(avg)+'</div></div>';
       html+='<div><div style="font-size:9px;color:var(--m2);text-transform:uppercase;margin-bottom:3px;">Net patron</div><div style="font-size:14px;font-weight:900;color:var(--neon);">'+fm(d.profit)+'</div></div>';
       html+='</div>';
+      // ── Résumé hebdomadaire 60% pour ce chauffeur ──
+      var byWkHist={};
+      d.shifts.forEach(function(s){
+        var dp=parseLocalDate(s.date),ws=gwS(dp);
+        var wk=ws.toISOString().slice(0,10);
+        if(!byWkHist[wk]){var we=new Date(ws);we.setDate(we.getDate()+6);byWkHist[wk]={label:ws.toLocaleDateString('fr-CA',{month:'short',day:'numeric'})+' – '+we.toLocaleDateString('fr-CA',{month:'short',day:'numeric'}),taxNet:0,own60:0,sal:0,n:0};}
+        var taxNet=pf(s.taxf)-pf(s.taxd)-pi(s.courses);
+        byWkHist[wk].taxNet+=taxNet;
+        byWkHist[wk].own60+=taxNet*(C.ownerShare/100);
+        byWkHist[wk].sal+=calcSalary(s);
+        byWkHist[wk].n++;
+      });
+      var wkEntries=Object.entries(byWkHist).sort(function(a,b){return b[0].localeCompare(a[0]);});
+      if(wkEntries.length){
+        html+='<div style="background:rgba(245,200,0,.06);border:1.5px solid rgba(245,200,0,.2);border-radius:11px;padding:11px;margin-bottom:11px;">';
+        html+='<div style="font-size:9px;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;">📊 Résumé par semaine — Votre '+(C.ownerShare||60)+'%</div>';
+        html+='<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:4px;margin-bottom:5px;">';
+        html+='<div style="font-size:8px;color:var(--m2);font-weight:700;text-transform:uppercase;">Semaine</div>';
+        html+='<div style="font-size:8px;color:var(--m2);font-weight:700;text-transform:uppercase;text-align:right;">Taxim. net</div>';
+        html+='<div style="font-size:8px;color:var(--gold);font-weight:700;text-transform:uppercase;text-align:right;">Votre '+(C.ownerShare||60)+'%</div>';
+        html+='<div style="font-size:8px;color:var(--grn);font-weight:700;text-transform:uppercase;text-align:right;">Sal. chauf.</div>';
+        html+='</div>';
+        wkEntries.forEach(function(e){var wk=e[1];
+          html+='<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:4px;padding:6px 0;border-top:1px solid var(--brd);align-items:center;">';
+          html+='<div style="font-size:10px;color:var(--m3);">'+wk.label+'<br><span style="font-size:9px;color:var(--m2);">'+wk.n+' quart'+(wk.n>1?'s':'')+'</span></div>';
+          html+='<div style="font-size:11px;font-weight:800;color:var(--txt);text-align:right;">'+fm(wk.taxNet)+'</div>';
+          html+='<div style="font-size:12px;font-weight:900;color:var(--gold);text-align:right;">'+fm(wk.own60)+'</div>';
+          html+='<div style="font-size:11px;font-weight:800;color:var(--grn);text-align:right;">'+fm(wk.sal)+'</div>';
+          html+='</div>';
+        });
+        html+='</div>';
+      }
+      // ── Quarts détaillés ──
       var sorted=d.shifts.slice().sort(function(a,b){return new Date(b.date)-new Date(a.date);});
       var cmap=buildCumulMap(d.shifts,'recette');
       sorted.forEach(function(s){
         var sal=calcSalary(s);
         var ec=calcEcart(s);
+        var taxNet=pf(s.taxf)-pf(s.taxd)-pi(s.courses);
+        var own60=taxNet*(C.ownerShare/100);
         var dd=new Date(s.date);
         var dlbl=dd.toLocaleDateString('fr-CA',{weekday:'short',month:'short',day:'numeric'});
-        html+='<div class="sr" style="margin-bottom:8px;" onclick="event.stopPropagation();">';
-        html+='<div class="sr-left"><div class="sr-date">📅 '+dlbl+' · '+s.vehicle+'</div>';
-        html+='<div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses'+(s.remarque?' · 📝 '+s.remarque:'')+'</div></div>';
-        html+='<div class="sr-right"><div class="sr-amt">'+fm(s.recette)+'</div>';
-        html+='<div style="font-size:11px;color:var(--grn);font-weight:700;">Sal: '+fm(sal)+'</div>';
-        html+='<div class="sr-cumul">Cumul: '+fm(cmap[s.id])+'</div>';
-        if(Math.abs(ec)>0.5)html+='<div class="sr-ecart" style="color:'+(ec>0?'var(--red)':'var(--pur)')+';">'+(ec>0?'⚠️ −':'💰 +')+fm(Math.abs(ec))+'</div>';
-        html+='</div></div>';
-        html+='<div style="display:flex;gap:5px;margin-top:6px;padding-bottom:4px;" onclick="event.stopPropagation();">';
+        // Tags paiement
+        var ptags='';
+        if(s.comp>0)ptags+='<span style="font-size:9px;background:rgba(57,211,83,.15);color:var(--grn);border-radius:5px;padding:1px 5px;font-weight:700;">💵 '+fm(s.comp)+'</span> ';
+        if(s.card>0)ptags+='<span style="font-size:9px;background:rgba(96,165,250,.15);color:var(--blu);border-radius:5px;padding:1px 5px;font-weight:700;">💳 '+fm(s.card)+'</span> ';
+        if(s.sts>0)ptags+='<span style="font-size:9px;background:rgba(192,132,252,.15);color:var(--pur);border-radius:5px;padding:1px 5px;font-weight:700;">🚐 '+fm(s.sts)+'</span> ';
+        if(s.coup>0)ptags+='<span style="font-size:9px;background:rgba(255,107,0,.15);color:var(--neon);border-radius:5px;padding:1px 5px;font-weight:700;">🎟️ '+fm(s.coup)+'</span> ';
+        if(s.pourboire>0)ptags+='<span style="font-size:9px;background:rgba(245,200,0,.15);color:var(--gold);border-radius:5px;padding:1px 5px;font-weight:700;">🪙 '+fm(s.pourboire)+'</span> ';
+        html+='<div style="background:rgba(10,8,0,.5);border:1px solid var(--brd);border-radius:11px;padding:11px;margin-bottom:7px;" onclick="event.stopPropagation();">';
+        // Ligne 1: date + véhicule
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">';
+        html+='<div style="font-size:11px;font-weight:800;color:var(--m3);">📅 '+dlbl+'</div>';
+        html+='<div style="font-size:10px;font-weight:700;color:var(--m2);">🚗 '+s.vehicle+' · '+(s.time||'')+' · '+(s.courses||0)+' crs</div>';
+        html+='</div>';
+        // Ligne 2: grille financière 3 colonnes
+        html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:'+(ptags?'7px':'0')+';">';
+        html+='<div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.15);border-radius:8px;padding:7px;text-align:center;">';
+        html+='<div style="font-size:8px;color:var(--m2);font-weight:700;text-transform:uppercase;margin-bottom:2px;">🔢 Taxim. net</div>';
+        html+='<div style="font-size:13px;font-weight:900;color:var(--txt);">'+fm(taxNet)+'</div></div>';
+        html+='<div style="background:rgba(245,200,0,.1);border:1px solid rgba(245,200,0,.3);border-radius:8px;padding:7px;text-align:center;">';
+        html+='<div style="font-size:8px;color:var(--gold);font-weight:700;text-transform:uppercase;margin-bottom:2px;">👑 Votre '+(C.ownerShare||60)+'%</div>';
+        html+='<div style="font-size:13px;font-weight:900;color:var(--gold);">'+fm(own60)+'</div></div>';
+        html+='<div style="background:rgba(57,211,83,.06);border:1px solid rgba(57,211,83,.2);border-radius:8px;padding:7px;text-align:center;">';
+        html+='<div style="font-size:8px;color:var(--grn);font-weight:700;text-transform:uppercase;margin-bottom:2px;">💼 Sal. chauf.</div>';
+        html+='<div style="font-size:13px;font-weight:900;color:var(--grn);">'+fm(sal)+'</div></div>';
+        html+='</div>';
+        // Tags paiement
+        if(ptags)html+='<div style="margin-bottom:6px;">'+ptags+'</div>';
+        // Écart
+        if(Math.abs(ec)>0.5)html+='<div style="font-size:10px;font-weight:800;color:'+(ec>0?'var(--red)':'var(--pur)')+';margin-bottom:5px;">'+(ec>0?'⚠️ Manque: −':'💰 Surplus: +')+fm(Math.abs(ec))+'</div>';
+        // Remarque
+        if(s.remarque)html+='<div style="font-size:10px;color:var(--m2);margin-bottom:5px;">📝 '+s.remarque+'</div>';
+        // Actions
+        html+='<div style="display:flex;gap:5px;" onclick="event.stopPropagation();">';
         html+='<button class="bedt" data-eid="'+s.id+'" onclick="event.stopPropagation();openEdit(this.dataset.eid)">✏️ Modifier</button>';
         html+='<button class="bdlt" data-did="'+s.id+'" onclick="event.stopPropagation();delS(this.dataset.did)">🗑️ Supprimer</button>';
+        html+='</div>';
         html+='</div>';
       });
       html+='</div>';
@@ -3663,32 +3727,6 @@ function renderSoldeBar(){
       +'</div>'
       +(pctD2>=100?'<div style="font-size:10px;color:var(--grn);font-weight:700;margin-top:3px;">Objectif atteint!</div>':'<div style="font-size:10px;color:var(--m2);margin-top:2px;">Obj: '+fm(objD2)+' | Restant: '+fm(Math.max(0,objD2-myTaxi))+'</div>')
       +'</div>';
-    // Cartes cadeaux
-    if(C.giftCards&&C.giftCards.length){
-      var myDO=C.drivers.find(function(d){return d.name===U.name;});
-      var wkKey2=gwS(now).toISOString().slice(0,10);
-      var myTaxNet2=myShifts.reduce(function(a,s){return a+(pf(s.taxf)-pf(s.taxd)-pi(s.courses));},0);
-      var gcHTML='<div style="margin-top:10px;">';
-      gcHTML+='<div style="font-size:10px;color:var(--gold);font-weight:700;text-transform:uppercase;margin-bottom:7px;">🎁 Cartes cadeaux</div>';
-      C.giftCards.filter(function(gc){return gc.driverId==='TOUS'||(myDO&&gc.driverId===myDO.id);}).forEach(function(gc){
-        var ck=(myDO?myDO.id:'')+'_'+wkKey2;
-        var claimed=gc.claimedBy&&gc.claimedBy[ck];
-        var unlocked=myTaxNet2>=gc.seuil;
-        var prog=Math.min(100,Math.round(myTaxNet2/gc.seuil*100));
-        gcHTML+='<div style="background:'+(claimed?'rgba(57,211,83,.1)':unlocked?'rgba(245,200,0,.1)':'rgba(17,14,0,.8)')+';border:2px solid '+(claimed?'rgba(57,211,83,.4)':unlocked?'rgba(245,200,0,.5)':'var(--brd)')+';border-radius:13px;padding:12px;margin-bottom:8px;">';
-        gcHTML+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:'+((!claimed&&!unlocked)?'6px':'0')+';">';
-        gcHTML+='<div><div style="font-size:13px;font-weight:900;color:'+(claimed?'var(--grn)':unlocked?'var(--gold)':'var(--m2)')+';">🎁 '+fm(gc.amt)+(gc.desc?' — '+gc.desc:'')+'</div>';
-        gcHTML+='<div style="font-size:10px;color:var(--m2);">Seuil: '+fm(gc.seuil)+' taximètre net</div></div>';
-        gcHTML+=(claimed?'<div style="background:rgba(57,211,83,.2);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:800;color:var(--grn);">✅ Réclamée</div>':unlocked?'<button onclick="claimGiftCard(''+gc.id+'',''+wkKey2+'')" style="background:linear-gradient(135deg,var(--gold3),var(--gold));border:none;color:#0a0800;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:900;cursor:pointer;">🎁 Réclamer</button>':'<div style="font-size:10px;color:var(--m2);">🔒 '+prog+'%</div>');
-        gcHTML+='</div>';
-        if(!claimed&&!unlocked){
-          gcHTML+='<div style="background:rgba(0,0,0,.4);border-radius:5px;height:7px;overflow:hidden;margin-bottom:4px;"><div style="height:100%;border-radius:4px;background:linear-gradient(90deg,var(--blu),var(--gold));width:'+prog+'%;"></div></div>';
-          gcHTML+='<div style="font-size:10px;color:var(--m2);">'+fm(myTaxNet2)+' / '+fm(gc.seuil)+' — manque '+fm(Math.max(0,gc.seuil-myTaxNet2))+'</div>';
-        }
-        gcHTML+='</div>';
-      });
-      el.innerHTML+=gcHTML+'</div>';
-    }
   }
 }
 
@@ -3866,129 +3904,22 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 (function(){
-  const VERSION='2026-06-24-v3';
-  const SELF_URL='https://kouadrirached-cmyk.github.io/Taxipro-8/TaxiPro-Version-Finale.html';
-
-  function checkForUpdate(){
-    if(!navigator.onLine)return;
-    fetch(SELF_URL+'?_='+Date.now(),{cache:'no-store'})
-      .then(function(r){return r.text();})
-      .then(function(html){
-        var m=html.match(/const VERSION='([^']+)'/);
-        if(!m)return;
-        var remoteVersion=m[1];
-        var localVersion=localStorage.getItem('taxipro_version');
-        if(remoteVersion!==localVersion){
-          localStorage.setItem('taxipro_version',remoteVersion);
-          setTimeout(function(){
-            var ok=confirm('🔄 Nouvelle version TaxiPro disponible!\n\nMettre à jour maintenant?');
-            if(ok) window.location.href=SELF_URL+'?v='+remoteVersion;
-          },2000);
-        }
-      })
-      .catch(function(){});
-  }
-
-  var local=localStorage.getItem('taxipro_version');
-  if(local!==VERSION){
+  const VERSION='2026-06-24-v4';
+  const stored=localStorage.getItem('taxipro_version');
+  if(stored!==VERSION){
     localStorage.setItem('taxipro_version',VERSION);
-  }
-
-  if(window.location.href.indexOf('github.io')!==-1){
-    setTimeout(checkForUpdate,5000);
+    if(stored!==null){
+      // Vider tous les caches du navigateur pour ce site
+      if('caches' in window){
+        caches.keys().then(function(names){
+          names.forEach(function(name){caches.delete(name);});
+        });
+      }
+      // Forcer rechargement sans cache
+      window.location.reload(true);
+    }
   }
 })();
-
-// ═══ CARTES CADEAUX ═══
-function renderGcList(){
-  var el=document.getElementById('gcList');if(!el)return;
-  if(!C.giftCards||!C.giftCards.length){el.innerHTML='<div style="font-size:11px;color:var(--m2);padding:8px 0;">Aucune carte créée.</div>';return;}
-  el.innerHTML=C.giftCards.map(function(gc){
-    var drv=gc.driverId==='TOUS'?'Tous':(C.drivers.find(function(d){return d.id===gc.driverId;})||{name:gc.driverId}).name;
-    return '<div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.2);border-radius:10px;padding:10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">'
-      +'<div><div style="font-size:13px;font-weight:900;color:var(--gold);">🎁 '+fm(gc.amt)+'</div>'
-      +'<div style="font-size:10px;color:var(--m2);">Seuil: '+fm(gc.seuil)+' · '+drv+(gc.desc?' · '+gc.desc:'')+'</div></div>'
-      +'<button onclick="delGc(''+gc.id+'')" style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.25);color:var(--red);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;">🗑️</button>'
-      +'</div>';
-  }).join('');
-}
-function initGcDrv(){
-  var el=document.getElementById('gc-drv');if(!el)return;
-  el.innerHTML='<option value="TOUS">👥 Tous</option>'+C.drivers.filter(function(d){return d.role!=='owner'&&d.active!==false;}).map(function(d){return '<option value="'+d.id+'">🚗 '+d.name+'</option>';}).join('');
-}
-function addGiftCard(){
-  var amt=parseFloat(document.getElementById('gc-amt').value);
-  var seuil=parseFloat(document.getElementById('gc-seuil').value);
-  var desc=(document.getElementById('gc-desc').value||'').trim();
-  var driverId=document.getElementById('gc-drv').value;
-  if(!amt||amt<=0||!seuil||seuil<=0){alert('Montant et seuil requis.');return;}
-  if(!C.giftCards)C.giftCards=[];
-  C.giftCards.push({id:uid(),amt:amt,seuil:seuil,desc:desc,driverId:driverId,ts:new Date().toISOString(),claimedBy:{}});
-  lSave();renderGcList();
-  document.getElementById('gc-amt').value='';document.getElementById('gc-seuil').value='';document.getElementById('gc-desc').value='';
-  alert('✅ Carte cadeau créée!');
-}
-function delGc(id){
-  if(!confirm('Supprimer cette carte?'))return;
-  C.giftCards=C.giftCards.filter(function(gc){return gc.id!==id;});
-  lSave();renderGcList();
-}
-function claimGiftCard(gcId,wkKey){
-  var gc=C.giftCards&&C.giftCards.find(function(x){return x.id===gcId;});
-  if(!gc)return;
-  if(!gc.claimedBy)gc.claimedBy={};
-  var k=U.id+'_'+wkKey;
-  if(gc.claimedBy[k]){alert('Déjà réclamée.');return;}
-  if(!confirm('🎁 Réclamer '+fm(gc.amt)+' de bonus?'))return;
-  gc.claimedBy[k]={ts:new Date().toISOString()};
-  lSave();renderSoldeBar();
-  var p=document.createElement('div');
-  p.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
-  p.innerHTML='<div style="background:#1a1200;border:2px solid rgba(245,200,0,.5);border-radius:20px;padding:28px;max-width:320px;width:100%;text-align:center;">'
-    +'<div style="font-size:52px;margin-bottom:8px;">🎁</div>'
-    +'<div style="font-size:20px;font-weight:900;color:var(--gold);margin-bottom:6px;">Félicitations!</div>'
-    +'<div style="font-size:40px;font-weight:900;color:var(--grn);margin-bottom:16px;">+'+fm(gc.amt)+'</div>'
-    +'<button onclick="this.closest('[style*=fixed]').remove()" style="background:linear-gradient(135deg,var(--gold3),var(--gold));border:none;color:#0a0800;border-radius:12px;padding:13px 24px;font-size:15px;font-weight:900;cursor:pointer;width:100%;">🎉 Super!</button>'
-    +'</div>';
-  document.body.appendChild(p);
-}
-function getGcBonus(drvObj,wkKey){
-  if(!C.giftCards||!drvObj)return 0;
-  return C.giftCards.reduce(function(a,gc){var k=drvObj.id+'_'+wkKey;return a+(gc.claimedBy&&gc.claimedBy[k]?gc.amt:0);},0);
-}
-
-// ═══ BACKUP & RESTAURATION ═══
-function doBackup(){
-  var cnt=Object.keys(S||{}).length;
-  var data={v:'backup',ts:new Date().toISOString(),cfg:C,shifts:S,expenses:EX};
-  var blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
-  var url=URL.createObjectURL(blob);
-  var a=document.createElement('a');
-  a.href=url;a.download='taxipro_backup_'+new Date().toISOString().slice(0,10)+'.json';
-  document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
-  audit('BACKUP',cnt+' quarts');
-  alert('✅ Backup téléchargé! '+cnt+' quarts.');
-}
-function doRestore(){
-  if(!confirm('⚠️ Restaurer un backup?\nCeci remplace TOUTES les données actuelles.'))return;
-  var inp=document.createElement('input');inp.type='file';inp.accept='.json';
-  inp.onchange=function(e){
-    var file=e.target.files[0];if(!file)return;
-    var reader=new FileReader();
-    reader.onload=function(ev){
-      try{
-        var data=JSON.parse(ev.target.result);
-        if(!data.cfg||!data.cfg.drivers||!data.cfg.drivers.length){alert('❌ Fichier invalide.');return;}
-        var cnt=Object.keys(data.shifts||{}).length;
-        if(!confirm('Fichier valide ✅\n'+cnt+' quarts trouvés\nConfirmer?'))return;
-        C=applyDefaults(data.cfg);S=data.shifts||{};EX=data.expenses||{};
-        lSave();alert('✅ '+cnt+' quarts restaurés!');location.reload();
-      }catch(err){alert('❌ Erreur: '+err.message);}
-    };
-    reader.readAsText(file);
-  };
-  document.body.appendChild(inp);inp.click();document.body.removeChild(inp);
-}
 </script>
 </body>
 </html>
