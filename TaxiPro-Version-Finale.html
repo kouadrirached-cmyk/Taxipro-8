@@ -1450,20 +1450,25 @@ function buildCumulMap(arr,field){
 // ═══ STORAGE — Firebase + localStorage fallback ═══
 
 function applyDefaults(C){
+  if(!C)C=JSON.parse(JSON.stringify(DEF));
+  if(!C.drivers||!Array.isArray(C.drivers))C.drivers=JSON.parse(JSON.stringify(DEF.drivers));
   C.drivers.forEach(d=>{
     if(!d.pct)d.pct=d.role==='owner'?100:40;
     if(!d.phone)d.phone='';
     if(!d.email)d.email='';
     if(d.active===undefined)d.active=true;
   });
-  if(!C.vehicles)C.vehicles=JSON.parse(JSON.stringify(DEF.vehicles));
+  if(!C.vehicles||!Array.isArray(C.vehicles)||C.vehicles.length===0)C.vehicles=JSON.parse(JSON.stringify(DEF.vehicles));
   if(!C.emailjsServiceId)C.emailjsServiceId='';
   if(!C.emailjsTemplateId)C.emailjsTemplateId='';
   if(!C.emailjsPublicKey)C.emailjsPublicKey='';
   if(!C.schedules)C.schedules={};
   if(!C.fixedCosts)C.fixedCosts={insurance:880,carRental:850,otherLabel:'',other:0};
+  if(C.fixedCosts.insurance==null)C.fixedCosts.insurance=880;
+  if(C.fixedCosts.carRental==null)C.fixedCosts.carRental=850;
   if(!C.payes)C.payes={};
   if(!C.objectifs)C.objectifs={patron:10000};
+  if(C.ownerShare==null)C.ownerShare=60;
   return C;
 }
 
@@ -1471,12 +1476,15 @@ function lLoadLocal(){
   try{
     const c=localStorage.getItem(SK+'_c'),s=localStorage.getItem(SK+'_s'),
           e=localStorage.getItem(SK+'_e'),a=localStorage.getItem(SK+'_a');
-    C=c?JSON.parse(c):JSON.parse(JSON.stringify(DEF));
-    S=s?JSON.parse(s):{};
-    EX=e?JSON.parse(e):{};
-    AU=a?JSON.parse(a):[];
+    try{C=c?JSON.parse(c):JSON.parse(JSON.stringify(DEF));}catch(e1){C=JSON.parse(JSON.stringify(DEF));}
+    try{S=s?JSON.parse(s):{};}catch(e2){S={};}
+    try{EX=e?JSON.parse(e):{};}catch(e3){EX={};}
+    try{AU=a?JSON.parse(a):[];}catch(e4){AU=[];}
     applyDefaults(C);
-  }catch(err){C=JSON.parse(JSON.stringify(DEF));S={};EX={};AU=[];}
+  }catch(err){
+    console.warn('lLoadLocal error:',err);
+    C=JSON.parse(JSON.stringify(DEF));S={};EX={};AU=[];
+  }
 }
 
 function lSaveLocal(){
@@ -3164,6 +3172,7 @@ function togDrv(id){const d=C.drivers.find(x=>x.id===id);if(!d||d.role==='owner'
 
 // ═══ SETTINGS ═══
 function renderSet(){try{
+  if(!C||!C.drivers){document.getElementById('setAlert').textContent='Erreur: données non chargées';document.getElementById('setAlert').style.display='block';return;}
   document.getElementById('sShare').value=C.ownerShare;
   document.getElementById('shareInfo').textContent='Chauffeur défaut: '+(100-C.ownerShare)+'% · Formule: (Fin−Début−Courses)×%';
   document.getElementById('spwU').innerHTML='<option value="">Choisir...</option>'+C.drivers.map(d=>'<option value="'+d.id+'">'+d.name+'</option>').join('');
@@ -4091,7 +4100,7 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 // ⚠️  CHANGER CETTE VALEUR À CHAQUE MISE À JOUR ⚠️
-const APP_VERSION = '2026-06-24-v14';
+const APP_VERSION = '2026-06-24-v15';
 window.APP_VERSION = APP_VERSION;
 
 function forceMiseAJour(){
