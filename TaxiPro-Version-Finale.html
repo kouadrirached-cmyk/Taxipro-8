@@ -941,6 +941,11 @@ body{
           <div class="fsm"><label>🏁 Fin courses</label><input type="number" inputmode="numeric" id="fcrsf" placeholder="0" oninput="autoCrs()"></div>
         </div>
         <div class="fsm"><label>Nb courses (auto-calculé)</label><input type="number" inputmode="numeric" id="fcrs" placeholder="0" oninput="calc()"></div>
+        <div class="frow">
+          <div class="fsm"><label>🚗 Km début</label><input type="number" inputmode="numeric" id="fkmd" placeholder="0" oninput="calcKm()"></div>
+          <div class="fsm"><label>🏁 Km fin</label><input type="number" inputmode="numeric" id="fkmf" placeholder="0" oninput="calcKm()"></div>
+        </div>
+        <div id="kmDiffLbl" style="font-size:11px;color:var(--blu);font-weight:700;margin-top:3px;display:none;"></div>
       </div>
       <div class="fsec">
         <div class="fstit">💰 Recette du quart</div>
@@ -1150,6 +1155,21 @@ body{
         </div>
         <div class="tmut mt8" id="shareInfo"></div>
       </div>
+      <div class="card" style="border-color:rgba(245,200,0,.3);">
+        <div class="ctit"><span><span class="ci">🎁</span>Cartes cadeaux — Bonus performance</span></div>
+        <div style="font-size:11px;color:var(--m2);margin-bottom:11px;line-height:1.5;">Si le chauffeur atteint le seuil de taximètre net dans la semaine → bonus ajouté à sa paye.</div>
+        <div id="gcList"></div>
+        <div style="background:rgba(245,200,0,.05);border:1px solid rgba(245,200,0,.15);border-radius:12px;padding:12px;margin-top:8px;">
+          <div style="font-size:11px;font-weight:800;color:var(--gold);margin-bottom:9px;">➕ Nouvelle carte cadeau</div>
+          <div class="frow">
+            <div class="fsm"><label>💵 Bonus ($)</label><input type="number" inputmode="decimal" id="gc-amt" placeholder="50.00"></div>
+            <div class="fsm"><label>🔢 Seuil taxim. net ($)</label><input type="number" inputmode="decimal" id="gc-seuil" placeholder="2000.00"></div>
+          </div>
+          <div class="fsm"><label>Description</label><input type="text" id="gc-desc" placeholder="Ex: Carte IGA"></div>
+          <div class="fsm"><label>Pour</label><div class="sw"><select id="gc-drv"></select></div></div>
+          <button class="btn btn-gold mt8" onclick="addGiftCard()">🎁 Créer</button>
+        </div>
+      </div>
       <div class="card">
         <div class="ctit"><span><span class="ci">&#127919;</span>Objectifs hebdomadaires</span></div>
         <div style="font-size:11px;color:var(--m2);margin-bottom:12px;line-height:1.5;">Ces objectifs apparaissent comme barre de progression sur la page Quart.</div>
@@ -1181,9 +1201,7 @@ body{
       </div>
       <div class="card" style="border-color:rgba(57,211,83,.3);">
         <div class="ctit"><span><span class="ci">🛡️</span>Protection & Sauvegarde</span></div>
-        <div style="background:rgba(57,211,83,.08);border:1px solid rgba(57,211,83,.2);border-radius:10px;padding:10px;margin-bottom:10px;font-size:10px;color:var(--m2);line-height:1.6;">
-          🛡️ Firebase protégé contre écrasement vide<br>💾 Backup manuel disponible
-        </div>
+        <div style="background:rgba(57,211,83,.08);border:1px solid rgba(57,211,83,.2);border-radius:10px;padding:10px;margin-bottom:10px;font-size:10px;color:var(--m2);line-height:1.6;">✅ Firebase protégé contre écrasement<br>📦 Backup manuel disponible</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
           <button class="btn bsuc bsm" onclick="doBackup()">📦 Backup</button>
           <button class="btn bblu bsm" onclick="doRestore()">📥 Restaurer</button>
@@ -1267,12 +1285,11 @@ body{
     window._fb={
       async save(C,S,EX,AU){
         try{
-          const shiftsCount=Object.keys(S||{}).length;
-          const hasDrivers=C&&C.drivers&&C.drivers.length>0;
-          const prevCount=parseInt(localStorage.getItem('txpro_lastCount')||'0');
-          if(shiftsCount===0&&prevCount>5){console.warn('PROTECTION: écrasement bloqué');return;}
-          if(!hasDrivers){console.warn('PROTECTION: pas de chauffeurs');return;}
-          if(shiftsCount>0)localStorage.setItem('txpro_lastCount',shiftsCount);
+          const sc=Object.keys(S||{}).length;
+          const pc=parseInt(localStorage.getItem('txpro_sc')||'0');
+          if(sc===0&&pc>5){console.warn('PROTECTION bloquée');return;}
+          if(!C||!C.drivers||!C.drivers.length){return;}
+          if(sc>0)localStorage.setItem('txpro_sc',sc);
           await db.collection('taxipro').doc('config').set(C);
           await db.collection('taxipro').doc('shifts').set({data:S});
           await db.collection('taxipro').doc('expenses').set({data:EX});
@@ -1526,7 +1543,7 @@ function showLogin(){
   document.getElementById('loginScreen').style.display='block';
   initLogin();
 }
-setTimeout(function(){var l=document.getElementById('loading');if(l&&l.style.display!=='none')showLogin();},3000);
+setTimeout(function(){var l=document.getElementById('loading');if(l&&l.style.display!=='none'){showLogin();}},4000);
 
 function initApp(){
   // Étape 1 : charger données locales (instantané)
@@ -1858,6 +1875,13 @@ function resetForm(){
   resetCoupClients();
   essType='carte';setEssType({preventDefault:function(){}}, 'carte');
 }
+function calcKm(){
+  var kmd=parseInt(document.getElementById('fkmd').value)||0;
+  var kmf=parseInt(document.getElementById('fkmf').value)||0;
+  var el=document.getElementById('kmDiffLbl');
+  if(kmd>0&&kmf>kmd){el.textContent='🚗 Distance: '+(kmf-kmd)+' km';el.style.display='block';}
+  else{el.style.display='none';}
+}
 function autoCrs(){
   const d=pi(gv('fcrsd')),f=pi(gv('fcrsf'));
   if(d>0&&f>0&&f>d)document.getElementById('fcrs').value=f-d;
@@ -2047,7 +2071,7 @@ function goPage(name){
   if(name==='exp')renderExp();
   if(name==='team')renderTeam();
   if(name==='sched')renderSched();
-  if(name==='set')renderSet();
+  if(name==='set'){renderSet();renderGcList();initGcDrv();}
 }
 function setPer(mode,el){
   perMode=mode;perOff=0;
@@ -2101,7 +2125,7 @@ function renderDash(){
       const cmap=buildCumulMap(d.shifts,'recette');
       const detailRows=dSorted.map(s=>{
         const ec=calcEcart(s);const hasEc=Math.abs(ec)>0.5;
-        return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses</div></div><div class="sr-right"><div class="sr-amt">'+fm(s.recette)+'</div><div class="sr-cumul">Cumul: '+fm(cmap[s.id])+'</div>'+(hasEc?'<div class="sr-ecart" style="color:'+(ec<0?'var(--red)':'var(--pur)')+';">'+(ec<0?'⚠️ ':'+$')+fm(Math.abs(ec))+'</div>':'')+'</div></div>'
+        return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses</div></div><div class="sr-right"><div class="sr-amt">'+fm(s.recette)+'</div><div class="sr-cumul">Cumul: '+fm(cmap[s.id])+'</div>'+(hasEc?'<div class="sr-ecart" style="color:'+(ec>0?'var(--red)':'var(--pur)')+';">'+(ec>0?'⚠️ −':'💰 +')+fm(Math.abs(ec))+'</div>':'')+'</div></div>'
           +'<div style="display:flex;gap:5px;margin-top:6px;padding-bottom:2px;"><button class="bedt" onclick="event.stopPropagation();openEdit(\''+s.id+'\')">✏️</button><button class="bdlt" onclick="event.stopPropagation();delS(\''+s.id+'\')">🗑️ Supprimer</button></div>';
       }).join('');
       return '<div class="dsc'+(isExp?' expanded':'')+'" id="dsc-'+nm.replace(/\s/g,'_')+'">'
@@ -2256,7 +2280,7 @@ function renderHist(){
         html+='<div class="sr-right"><div class="sr-amt">'+fm(s.recette)+'</div>';
         html+='<div style="font-size:11px;color:var(--grn);font-weight:700;">Sal: '+fm(sal)+'</div>';
         html+='<div class="sr-cumul">Cumul: '+fm(cmap[s.id])+'</div>';
-        if(Math.abs(ec)>0.5)html+='<div class="sr-ecart" style="color:'+(ec<0?'var(--red)':'var(--pur)')+';">'+(ec<0?'⚠️ ':'+$')+fm(Math.abs(ec))+'</div>';
+        if(Math.abs(ec)>0.5)html+='<div class="sr-ecart" style="color:'+(ec>0?'var(--red)':'var(--pur)')+';">'+(ec>0?'⚠️ −':'💰 +')+fm(Math.abs(ec))+'</div>';
         html+='</div></div>';
         html+='<div style="display:flex;gap:5px;margin-top:6px;padding-bottom:4px;" onclick="event.stopPropagation();">';
         html+='<button class="bedt" data-eid="'+s.id+'" onclick="event.stopPropagation();openEdit(this.dataset.eid)">✏️ Modifier</button>';
@@ -3639,6 +3663,32 @@ function renderSoldeBar(){
       +'</div>'
       +(pctD2>=100?'<div style="font-size:10px;color:var(--grn);font-weight:700;margin-top:3px;">Objectif atteint!</div>':'<div style="font-size:10px;color:var(--m2);margin-top:2px;">Obj: '+fm(objD2)+' | Restant: '+fm(Math.max(0,objD2-myTaxi))+'</div>')
       +'</div>';
+    // Cartes cadeaux
+    if(C.giftCards&&C.giftCards.length){
+      var myDO=C.drivers.find(function(d){return d.name===U.name;});
+      var wkKey2=gwS(now).toISOString().slice(0,10);
+      var myTaxNet2=myShifts.reduce(function(a,s){return a+(pf(s.taxf)-pf(s.taxd)-pi(s.courses));},0);
+      var gcHTML='<div style="margin-top:10px;">';
+      gcHTML+='<div style="font-size:10px;color:var(--gold);font-weight:700;text-transform:uppercase;margin-bottom:7px;">🎁 Cartes cadeaux</div>';
+      C.giftCards.filter(function(gc){return gc.driverId==='TOUS'||(myDO&&gc.driverId===myDO.id);}).forEach(function(gc){
+        var ck=(myDO?myDO.id:'')+'_'+wkKey2;
+        var claimed=gc.claimedBy&&gc.claimedBy[ck];
+        var unlocked=myTaxNet2>=gc.seuil;
+        var prog=Math.min(100,Math.round(myTaxNet2/gc.seuil*100));
+        gcHTML+='<div style="background:'+(claimed?'rgba(57,211,83,.1)':unlocked?'rgba(245,200,0,.1)':'rgba(17,14,0,.8)')+';border:2px solid '+(claimed?'rgba(57,211,83,.4)':unlocked?'rgba(245,200,0,.5)':'var(--brd)')+';border-radius:13px;padding:12px;margin-bottom:8px;">';
+        gcHTML+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:'+((!claimed&&!unlocked)?'6px':'0')+';">';
+        gcHTML+='<div><div style="font-size:13px;font-weight:900;color:'+(claimed?'var(--grn)':unlocked?'var(--gold)':'var(--m2)')+';">🎁 '+fm(gc.amt)+(gc.desc?' — '+gc.desc:'')+'</div>';
+        gcHTML+='<div style="font-size:10px;color:var(--m2);">Seuil: '+fm(gc.seuil)+' taximètre net</div></div>';
+        gcHTML+=(claimed?'<div style="background:rgba(57,211,83,.2);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:800;color:var(--grn);">✅ Réclamée</div>':unlocked?'<button onclick="claimGiftCard(''+gc.id+'',''+wkKey2+'')" style="background:linear-gradient(135deg,var(--gold3),var(--gold));border:none;color:#0a0800;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:900;cursor:pointer;">🎁 Réclamer</button>':'<div style="font-size:10px;color:var(--m2);">🔒 '+prog+'%</div>');
+        gcHTML+='</div>';
+        if(!claimed&&!unlocked){
+          gcHTML+='<div style="background:rgba(0,0,0,.4);border-radius:5px;height:7px;overflow:hidden;margin-bottom:4px;"><div style="height:100%;border-radius:4px;background:linear-gradient(90deg,var(--blu),var(--gold));width:'+prog+'%;"></div></div>';
+          gcHTML+='<div style="font-size:10px;color:var(--m2);">'+fm(myTaxNet2)+' / '+fm(gc.seuil)+' — manque '+fm(Math.max(0,gc.seuil-myTaxNet2))+'</div>';
+        }
+        gcHTML+='</div>';
+      });
+      el.innerHTML+=gcHTML+'</div>';
+    }
   }
 }
 
@@ -3816,22 +3866,96 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 (function(){
-  const VERSION='2026-06-22-v1';
-  const stored=localStorage.getItem('taxipro_version');
-  if(stored!==VERSION){
+  const VERSION='2026-06-24-v1';
+  const SELF_URL='https://kouadrirached-cmyk.github.io/Taxipro-8/TaxiPro-Version-Finale.html';
+
+  function checkForUpdate(){
+    if(!navigator.onLine)return;
+    fetch(SELF_URL+'?_='+Date.now(),{cache:'no-store'})
+      .then(function(r){return r.text();})
+      .then(function(html){
+        var m=html.match(/const VERSION='([^']+)'/);
+        if(!m)return;
+        var remoteVersion=m[1];
+        var localVersion=localStorage.getItem('taxipro_version');
+        if(remoteVersion!==localVersion){
+          localStorage.setItem('taxipro_version',remoteVersion);
+          setTimeout(function(){
+            var ok=confirm('🔄 Nouvelle version TaxiPro disponible!\n\nMettre à jour maintenant?');
+            if(ok) window.location.href=SELF_URL+'?v='+remoteVersion;
+          },2000);
+        }
+      })
+      .catch(function(){});
+  }
+
+  var local=localStorage.getItem('taxipro_version');
+  if(local!==VERSION){
     localStorage.setItem('taxipro_version',VERSION);
-    if(stored!==null){
-      // Vider tous les caches du navigateur pour ce site
-      if('caches' in window){
-        caches.keys().then(function(names){
-          names.forEach(function(name){caches.delete(name);});
-        });
-      }
-      // Forcer rechargement sans cache
-      window.location.reload(true);
-    }
+  }
+
+  if(window.location.href.indexOf('github.io')!==-1){
+    setTimeout(checkForUpdate,5000);
   }
 })();
+
+// ═══ CARTES CADEAUX ═══
+function renderGcList(){
+  var el=document.getElementById('gcList');if(!el)return;
+  if(!C.giftCards||!C.giftCards.length){el.innerHTML='<div style="font-size:11px;color:var(--m2);padding:8px 0;">Aucune carte créée.</div>';return;}
+  el.innerHTML=C.giftCards.map(function(gc){
+    var drv=gc.driverId==='TOUS'?'Tous':(C.drivers.find(function(d){return d.id===gc.driverId;})||{name:gc.driverId}).name;
+    return '<div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.2);border-radius:10px;padding:10px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">'
+      +'<div><div style="font-size:13px;font-weight:900;color:var(--gold);">🎁 '+fm(gc.amt)+'</div>'
+      +'<div style="font-size:10px;color:var(--m2);">Seuil: '+fm(gc.seuil)+' · '+drv+(gc.desc?' · '+gc.desc:'')+'</div></div>'
+      +'<button onclick="delGc(''+gc.id+'')" style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.25);color:var(--red);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;">🗑️</button>'
+      +'</div>';
+  }).join('');
+}
+function initGcDrv(){
+  var el=document.getElementById('gc-drv');if(!el)return;
+  el.innerHTML='<option value="TOUS">👥 Tous</option>'+C.drivers.filter(function(d){return d.role!=='owner'&&d.active!==false;}).map(function(d){return '<option value="'+d.id+'">🚗 '+d.name+'</option>';}).join('');
+}
+function addGiftCard(){
+  var amt=parseFloat(document.getElementById('gc-amt').value);
+  var seuil=parseFloat(document.getElementById('gc-seuil').value);
+  var desc=(document.getElementById('gc-desc').value||'').trim();
+  var driverId=document.getElementById('gc-drv').value;
+  if(!amt||amt<=0||!seuil||seuil<=0){alert('Montant et seuil requis.');return;}
+  if(!C.giftCards)C.giftCards=[];
+  C.giftCards.push({id:uid(),amt:amt,seuil:seuil,desc:desc,driverId:driverId,ts:new Date().toISOString(),claimedBy:{}});
+  lSave();renderGcList();
+  document.getElementById('gc-amt').value='';document.getElementById('gc-seuil').value='';document.getElementById('gc-desc').value='';
+  alert('✅ Carte cadeau créée!');
+}
+function delGc(id){
+  if(!confirm('Supprimer cette carte?'))return;
+  C.giftCards=C.giftCards.filter(function(gc){return gc.id!==id;});
+  lSave();renderGcList();
+}
+function claimGiftCard(gcId,wkKey){
+  var gc=C.giftCards&&C.giftCards.find(function(x){return x.id===gcId;});
+  if(!gc)return;
+  if(!gc.claimedBy)gc.claimedBy={};
+  var k=U.id+'_'+wkKey;
+  if(gc.claimedBy[k]){alert('Déjà réclamée.');return;}
+  if(!confirm('🎁 Réclamer '+fm(gc.amt)+' de bonus?'))return;
+  gc.claimedBy[k]={ts:new Date().toISOString()};
+  lSave();renderSoldeBar();
+  var p=document.createElement('div');
+  p.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  p.innerHTML='<div style="background:#1a1200;border:2px solid rgba(245,200,0,.5);border-radius:20px;padding:28px;max-width:320px;width:100%;text-align:center;">'
+    +'<div style="font-size:52px;margin-bottom:8px;">🎁</div>'
+    +'<div style="font-size:20px;font-weight:900;color:var(--gold);margin-bottom:6px;">Félicitations!</div>'
+    +'<div style="font-size:40px;font-weight:900;color:var(--grn);margin-bottom:16px;">+'+fm(gc.amt)+'</div>'
+    +'<button onclick="this.closest('[style*=fixed]').remove()" style="background:linear-gradient(135deg,var(--gold3),var(--gold));border:none;color:#0a0800;border-radius:12px;padding:13px 24px;font-size:15px;font-weight:900;cursor:pointer;width:100%;">🎉 Super!</button>'
+    +'</div>';
+  document.body.appendChild(p);
+}
+function getGcBonus(drvObj,wkKey){
+  if(!C.giftCards||!drvObj)return 0;
+  return C.giftCards.reduce(function(a,gc){var k=drvObj.id+'_'+wkKey;return a+(gc.claimedBy&&gc.claimedBy[k]?gc.amt:0);},0);
+}
 
 // ═══ BACKUP & RESTAURATION ═══
 function doBackup(){
@@ -3842,13 +3966,11 @@ function doBackup(){
   var a=document.createElement('a');
   a.href=url;a.download='taxipro_backup_'+new Date().toISOString().slice(0,10)+'.json';
   document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
-  localStorage.setItem(SK+'_bkd',new Date().toISOString());
   audit('BACKUP',cnt+' quarts');
   alert('✅ Backup téléchargé! '+cnt+' quarts.');
 }
 function doRestore(){
-  if(!confirm('⚠️ Restaurer un backup?
-Ceci remplace TOUTES les données actuelles.'))return;
+  if(!confirm('⚠️ Restaurer un backup?\nCeci remplace TOUTES les données actuelles.'))return;
   var inp=document.createElement('input');inp.type='file';inp.accept='.json';
   inp.onchange=function(e){
     var file=e.target.files[0];if(!file)return;
@@ -3858,13 +3980,9 @@ Ceci remplace TOUTES les données actuelles.'))return;
         var data=JSON.parse(ev.target.result);
         if(!data.cfg||!data.cfg.drivers||!data.cfg.drivers.length){alert('❌ Fichier invalide.');return;}
         var cnt=Object.keys(data.shifts||{}).length;
-        if(!confirm('Fichier valide ✅
-'+cnt+' quarts trouvés
-Confirmer?'))return;
+        if(!confirm('Fichier valide ✅\n'+cnt+' quarts trouvés\nConfirmer?'))return;
         C=applyDefaults(data.cfg);S=data.shifts||{};EX=data.expenses||{};
-        lSave();
-        alert('✅ Restauration réussie! '+cnt+' quarts chargés.');
-        location.reload();
+        lSave();alert('✅ '+cnt+' quarts restaurés!');location.reload();
       }catch(err){alert('❌ Erreur: '+err.message);}
     };
     reader.readAsText(file);
