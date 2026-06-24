@@ -1536,8 +1536,14 @@ function initApp(){
   // Étape 1 : charger données locales (instantané)
   lLoadLocal();
 
-  // Étape 2 : afficher login dans 800ms MAX — garanti
-  const loginTimer=setTimeout(showLogin, 200);
+  // Étape 2 : afficher login dans 200ms MAX — garanti même sans Firebase
+  let loginShown=false;
+  function doShowLogin(){
+    if(loginShown)return;
+    loginShown=true;
+    showLogin();
+  }
+  const loginTimer=setTimeout(doShowLogin, 200);
 
   // Étape 3 : Firebase en arrière-plan (ne bloque JAMAIS l'app)
   if(window._fb){
@@ -1549,27 +1555,27 @@ function initApp(){
         AU=fbData.AU||[];
         lSaveLocal();
         setSyncStatus('ok');
-        // Si login pas encore affiché, le montrer maintenant
-        clearTimeout(loginTimer);
-        showLogin();
       } else {
-        // Première fois — envoyer les données locales vers Firebase
         window._fb.save(C,S,EX,AU);
         setSyncStatus('ok');
-        clearTimeout(loginTimer);
-        showLogin();
       }
+      clearTimeout(loginTimer);
+      doShowLogin();
       startRealtimeSync();
     }).catch(function(){
       setSyncStatus('offline');
       clearTimeout(loginTimer);
-      showLogin();
+      doShowLogin();
     });
   }
-  // Sans Firebase : loginTimer affiche le login après 800ms
 }
 
-window.addEventListener('load', initApp);
+// Lancer immédiatement si DOM prêt, sinon attendre
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded', initApp);
+} else {
+  initApp();
+}
 
 function initLogin(){
   const sel=document.getElementById('lu');
@@ -4034,7 +4040,7 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 // ⚠️  CHANGER CETTE VALEUR À CHAQUE MISE À JOUR ⚠️
-const APP_VERSION = '2026-06-24-v5';
+const APP_VERSION = '2026-06-24-v7';
 window.APP_VERSION = APP_VERSION;
 
 function forceMiseAJour(){
@@ -4048,33 +4054,27 @@ function forceMiseAJour(){
   setTimeout(function(){ window.location.reload(true); }, 800);
 }
 
-(function(){
+// Vérification version — s'exécute après le chargement complet de l'app
+window.addEventListener('load', function(){
   const stored = localStorage.getItem('taxipro_version');
-  if(stored !== APP_VERSION){
-    // Première visite OU nouvelle version détectée
-    const estNouvelle = stored !== null;
-    localStorage.setItem('taxipro_version', APP_VERSION);
-    if(estNouvelle){
-      // Vider le cache et afficher bandeau avant rechargement
-      if('caches' in window){
-        caches.keys().then(function(names){
-          names.forEach(function(name){caches.delete(name);});
-        });
-      }
-      // Afficher bandeau rouge avant rechargement
-      const banner = document.createElement('div');
-      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#e53935;color:#fff;text-align:center;padding:12px;font-weight:700;font-size:15px;';
-      banner.textContent = '🔄 Nouvelle version détectée — Rechargement en cours...';
-      document.body.appendChild(banner);
-      setTimeout(function(){ window.location.reload(true); }, 1200);
-    }
+  const el = document.getElementById('verInfo');
+  if(el) el.textContent = 'Version installée : ' + APP_VERSION;
+  if(stored === APP_VERSION) return; // Déjà à jour, rien à faire
+  const estNouvelle = stored !== null;
+  localStorage.setItem('taxipro_version', APP_VERSION);
+  if(!estNouvelle) return; // Première visite, pas de rechargement
+  // Nouvelle version détectée — vider cache et recharger
+  if('caches' in window){
+    caches.keys().then(function(names){
+      names.forEach(function(name){caches.delete(name);});
+    });
   }
-  // Afficher la version dans les réglages
-  window.addEventListener('DOMContentLoaded', function(){
-    const el = document.getElementById('verInfo');
-    if(el) el.textContent = 'Version installée : ' + APP_VERSION;
-  });
-})();
+  const banner = document.createElement('div');
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#e53935;color:#fff;text-align:center;padding:12px;font-weight:700;font-size:15px;';
+  banner.textContent = '🔄 Nouvelle version — Rechargement...';
+  document.body.appendChild(banner);
+  setTimeout(function(){ window.location.reload(true); }, 1500);
+});
 </script>
 </body>
 </html>
