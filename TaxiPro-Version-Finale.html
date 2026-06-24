@@ -2816,10 +2816,10 @@ function renderAnalyse(){
   const seuilKmPar=C.seuilDollarParKm||1.00;
 
   if(shiftsAvecKm.length===0){
-    html+='<div class="perf-card" style="text-align:center;padding:20px;color:var(--m2);font-size:13px;">'\
-      +'<div style="font-size:28px;margin-bottom:8px;">🛣️</div>'\
-      +'Aucun quart avec kilométrage enregistré.<br>'\
-      +'<span style="font-size:11px;">Remplis les champs Km début / Km fin dans chaque quart.</span>'\
+    html+='<div class="perf-card" style="text-align:center;padding:20px;color:var(--m2);font-size:13px;">'
+      +'<div style="font-size:28px;margin-bottom:8px;">🛣️</div>'
+      +'Aucun quart avec kilométrage enregistré.<br>'
+      +'<span style="font-size:11px;">Remplis les champs Km début / Km fin dans chaque quart.</span>'
       +'</div>';
   } else {
     // Seuil éditeur
@@ -4040,7 +4040,7 @@ async function sendPayEmails(){
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
 // ⚠️  CHANGER CETTE VALEUR À CHAQUE MISE À JOUR ⚠️
-const APP_VERSION = '2026-06-24-v7';
+const APP_VERSION = '2026-06-24-v8';
 window.APP_VERSION = APP_VERSION;
 
 function forceMiseAJour(){
