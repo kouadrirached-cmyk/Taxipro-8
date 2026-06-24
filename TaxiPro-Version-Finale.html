@@ -943,6 +943,17 @@ body{
         <div class="fsm"><label>Nb courses (auto-calculé)</label><input type="number" inputmode="numeric" id="fcrs" placeholder="0" oninput="calc()"></div>
       </div>
       <div class="fsec">
+        <div class="fstit">🛣️ Odomètre (km)</div>
+        <div class="frow">
+          <div class="fsm"><label>📍 Km début</label><input type="number" inputmode="numeric" id="fkmd" placeholder="ex: 125000" oninput="calcKm()"></div>
+          <div class="fsm"><label>🏁 Km fin</label><input type="number" inputmode="numeric" id="fkmf" placeholder="ex: 125350" oninput="calcKm()"></div>
+        </div>
+        <div class="fsm" id="kmCalcWrap" style="display:none">
+          <div style="background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.2);border-radius:9px;padding:8px 12px;font-size:13px;font-weight:700;color:var(--gold);">
+            🛣️ Distance: <span id="kmCalcVal">—</span> km
+          </div>
+        </div>
+      <div class="fsec">
         <div class="fstit">💰 Recette du quart</div>
         <div class="frow">
           <div class="fsm"><label>💵 Comptant</label><input type="number" inputmode="decimal" id="fcomp" placeholder="0.00" oninput="calc()"></div>
@@ -1186,6 +1197,11 @@ body{
           <button class="btn bsec bsm" onclick="restoreData()">📥 Restaurer</button>
         </div>
         <div class="tmut mt8" id="bkupInfo"></div>
+        <div style="margin-top:14px;border-top:1px solid var(--brd);padding-top:12px;">
+          <div class="ctit"><span><span class="ci">🔄</span>Mise à jour de l'application</span></div>
+          <div class="tmut" style="margin-bottom:8px;" id="verInfo"></div>
+          <button class="btn bblu bsm" onclick="forceMiseAJour()">🔄 Forcer la mise à jour</button>
+        </div>
       </div>
       <div style="height:16px"></div>
     </div>
@@ -1838,7 +1854,7 @@ function setEssType(e,type){
   calc();
 }
 function resetForm(){
-  ['ftaxd','ftaxf','fcrsd','fcrsf','fcrs','fcomp','fcard','fsts','fcoup','fext','fpour','fess'].forEach(function(id){
+  ['ftaxd','ftaxf','fcrsd','fcrsf','fcrs','fcomp','fcard','fsts','fcoup','fext','fpour','fess','fkmd','fkmf'].forEach(function(id){
     const e=document.getElementById(id);if(e)e.value='';
   });
   document.getElementById('frem').value='';
@@ -1850,6 +1866,16 @@ function autoCrs(){
   const d=pi(gv('fcrsd')),f=pi(gv('fcrsf'));
   if(d>0&&f>0&&f>d)document.getElementById('fcrs').value=f-d;
   calc();
+}
+function calcKm(){
+  const d=pi(gv('fkmd')),f=pi(gv('fkmf'));
+  const wrap=document.getElementById('kmCalcWrap');
+  if(d>0&&f>0&&f>d){
+    document.getElementById('kmCalcVal').textContent=(f-d);
+    wrap.style.display='block';
+  } else {
+    wrap.style.display='none';
+  }
 }
 function calc(){
   const taxd=pf(gv('ftaxd')),taxf=pf(gv('ftaxf')),crs=pi(gv('fcrs'));
@@ -1887,6 +1913,7 @@ function saveShift(){
   const taxd=pf(gv('ftaxd')),taxf=pf(gv('ftaxf')),crs=pi(gv('fcrs'));
   const comp=pf(gv('fcomp')),card=pf(gv('fcard')),sts=pf(gv('fsts'));
   const coup=pf(gv('fcoup')),ext=pf(gv('fext')),pour=pf(gv('fpour'));
+  const kmd=pi(gv('fkmd')),kmf=pi(gv('fkmf'));
   const rec=parseFloat((comp+card+sts+coup+ext).toFixed(2));
   const driver=gv('fdr')||U.name;
   const drv=getDrv(driver);
@@ -1901,20 +1928,21 @@ function saveShift(){
   // ── Si manque → popup de confirmation ──
   if(ecart>0.5){
     showManqueConfirm(fm(ecart), fm(taxBrut), fm(rec), function(){
-      doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart});
+      doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf});
     });
     return;
   }
-  doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart});
+  doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf});
 }
 
-function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart}){
+function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf}){
   const s={
     id:uid(),date:gv('fd'),time:gv('ft'),vehicle:'Prius '+selV,driver,
     isOwner:isOwn,drvPct:pct,taxd,taxf,crsd:gv('fcrsd'),crsf:gv('fcrsf'),
     courses:crs,comp,card,sts,coup,ext,pourboire:pour,
     coupDetails:[...coupClients],
     essence:pf(gv('fess')),essencePar:essType,remarque:gv('frem'),
+    kmd:kmd||0,kmf:kmf||0,
     recette:rec,salary,ecart,createdBy:U.name,ts:new Date().toISOString()
   };
   S[s.id]=s;lSave();
@@ -2774,6 +2802,98 @@ function renderAnalyse(){
     html+='</div>';
   }
 
+  // ════ SECTION KM: Analyse kilométrage & rentabilité ════
+  const shiftsAvecKm=allArr.filter(s=>s.kmd>0&&s.kmf>0&&s.kmf>s.kmd);
+  html+='<div class="analyse-section-title">🛣️ Analyse kilométrage & anti-fraude</div>';
+
+  // Seuil configurable stocké dans C
+  const seuilKmPar=C.seuilDollarParKm||1.00;
+
+  if(shiftsAvecKm.length===0){
+    html+='<div class="perf-card" style="text-align:center;padding:20px;color:var(--m2);font-size:13px;">'\
+      +'<div style="font-size:28px;margin-bottom:8px;">🛣️</div>'\
+      +'Aucun quart avec kilométrage enregistré.<br>'\
+      +'<span style="font-size:11px;">Remplis les champs Km début / Km fin dans chaque quart.</span>'\
+      +'</div>';
+  } else {
+    // Seuil éditeur
+    html+='<div style="background:rgba(10,8,0,.6);border:1px solid var(--brd);border-radius:12px;padding:12px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
+      +'<span style="font-size:11px;color:var(--m2);font-weight:700;">⚙️ Seuil alerte fraude :</span>'
+      +'<input type="number" id="seuilKmInput" value="'+seuilKmPar+'" step="0.10" min="0.10" style="width:80px;background:var(--bg2);border:1px solid var(--brd);border-radius:7px;color:var(--m1);padding:5px 8px;font-size:13px;font-weight:700;">'
+      +'<span style="font-size:11px;color:var(--m2);">$ taximètre / km</span>'
+      +'<button class="btn bsm bblu" onclick="savSeuilKm()">✓ Appliquer</button>'
+      +'<span style="font-size:10px;color:var(--m2);">En dessous = 🚨 alerte rouge</span>'
+      +'</div>';
+
+    // Stats par chauffeur avec km
+    const kmByD={};
+    shiftsAvecKm.forEach(s=>{
+      const km=s.kmf-s.kmd;
+      const taxBrut=pf(s.taxf)-pf(s.taxd);
+      if(!kmByD[s.driver])kmByD[s.driver]={kmTotal:0,taxTotal:0,n:0,shifts:[],alertes:0};
+      kmByD[s.driver].kmTotal+=km;
+      kmByD[s.driver].taxTotal+=taxBrut;
+      kmByD[s.driver].n++;
+      kmByD[s.driver].shifts.push({date:s.date,km,taxBrut,vehicle:s.vehicle,kmd:s.kmd,kmf:s.kmf});
+      const ratio=km>0?taxBrut/km:0;
+      if(ratio<seuilKmPar&&taxBrut>0)kmByD[s.driver].alertes++;
+    });
+
+    Object.entries(kmByD).forEach(([drvName,dk])=>{
+      const ratioMoyen=dk.kmTotal>0?dk.taxTotal/dk.kmTotal:0;
+      const estSuspect=ratioMoyen<seuilKmPar;
+      const couleur=estSuspect?'var(--red)':ratioMoyen<seuilKmPar*1.3?'var(--gold)':'var(--grn)';
+      const bordure=estSuspect?'rgba(255,58,58,.3)':'rgba(245,200,0,.15)';
+
+      html+='<div class="perf-card" style="border-color:'+bordure+';margin-bottom:12px;">'
+        // Header chauffeur
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+        +'<div>'
+        +'<div style="font-size:16px;font-weight:900;color:var(--m1);">🚗 '+drvName+'</div>'
+        +'<div style="font-size:11px;color:var(--m2);">'+dk.n+' quarts avec km · '+dk.kmTotal.toLocaleString('fr-CA')+' km total</div>'
+        +'</div>'
+        +'<div style="text-align:right;">'
+        +'<div style="font-size:22px;font-weight:900;color:'+couleur+';">'+ratioMoyen.toFixed(2)+'$</div>'
+        +'<div style="font-size:10px;color:var(--m2);font-weight:700;">par km</div>'
+        +(estSuspect?'<div style="font-size:10px;font-weight:900;color:var(--red);">🚨 SUSPECT</div>':'<div style="font-size:10px;font-weight:700;color:var(--grn);">✅ OK</div>')
+        +'</div>'
+        +'</div>'
+        // KPI grid
+        +'<div class="perf-kpi-grid" style="margin-bottom:10px;">'
+        +'<div class="perf-kpi"><div class="perf-kpi-lbl">Km total</div><div class="perf-kpi-val neon">'+dk.kmTotal.toLocaleString('fr-CA')+'</div></div>'
+        +'<div class="perf-kpi"><div class="perf-kpi-lbl">$ taximètre</div><div class="perf-kpi-val gold">'+fm(dk.taxTotal)+'</div></div>'
+        +'<div class="perf-kpi"><div class="perf-kpi-lbl">Alertes</div><div class="perf-kpi-val '+(dk.alertes>0?'red':'grn')+'">'+dk.alertes+'</div></div>'
+        +'</div>'
+        // Barre ratio
+        +'<div style="margin-bottom:10px;">'
+        +'<div style="display:flex;justify-content:space-between;font-size:9px;color:var(--m2);font-weight:700;margin-bottom:3px;">'
+        +'<span>Ratio $ / km</span><span style="color:'+couleur+';">'+ratioMoyen.toFixed(2)+'$ / km · seuil '+seuilKmPar.toFixed(2)+'$</span></div>'
+        +'<div style="background:rgba(255,255,255,.07);border-radius:5px;height:7px;overflow:hidden;">'
+        +'<div style="height:100%;border-radius:5px;background:'+couleur+';width:'+Math.min(100,ratioMoyen/Math.max(seuilKmPar*2,1)*100).toFixed(0)+'%;transition:width .4s;"></div>'
+        +'</div>'
+        +'</div>'
+        // Détail quarts
+        +'<div style="background:rgba(10,8,0,.5);border:1px solid var(--brd);border-radius:11px;padding:10px;">'
+        +'<div style="font-size:9px;color:var(--m2);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;">📋 Détail par quart</div>'
+        +dk.shifts.sort((a,b)=>b.date.localeCompare(a.date)).map(sh=>{
+          const r=sh.km>0?sh.taxBrut/sh.km:0;
+          const alerte=r<seuilKmPar&&sh.taxBrut>0;
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--brd);font-size:11px;">'
+            +'<div>'
+            +'<div style="font-weight:700;color:'+(alerte?'var(--red)':'var(--m1)')+';">'+(alerte?'🚨 ':'')+sh.date+' · '+sh.vehicle+'</div>'
+            +'<div style="font-size:10px;color:var(--m2);">'+sh.kmd.toLocaleString('fr-CA')+' → '+sh.kmf.toLocaleString('fr-CA')+' km</div>'
+            +'</div>'
+            +'<div style="text-align:right;">'
+            +'<div style="font-weight:900;color:var(--gold);">'+sh.km+' km</div>'
+            +'<div style="font-size:10px;font-weight:800;color:'+(alerte?'var(--red)':'var(--grn)')+';">'+r.toFixed(2)+'$ /km</div>'
+            +'</div>'
+            +'</div>';
+        }).join('')
+        +'</div>'
+        +'</div>';
+    });
+  }
+
   c.innerHTML=html;
 }
 
@@ -2993,6 +3113,7 @@ function renderSet(){
   document.getElementById('spwU').innerHTML='<option value="">Choisir...</option>'+C.drivers.map(d=>'<option value="'+d.id+'">'+d.name+'</option>').join('');
   const b=localStorage.getItem(SK+'_bkd');
   document.getElementById('bkupInfo').textContent=b?'Dernière: '+new Date(b).toLocaleString('fr-CA'):'';
+  const vi=document.getElementById('verInfo');if(vi)vi.textContent='Version installée : '+(window.APP_VERSION||'—');
   // Remplir objectifs
   if(!C.objectifs)C.objectifs={patron:10000};
   var opEl=document.getElementById('obj-patron-set');
@@ -3017,6 +3138,13 @@ function renderSet(){
   document.getElementById('vehListSet').innerHTML=C.vehicles.map(v=>
     '<div class="rsb" style="padding:9px 0;border-bottom:1px solid var(--brd);"><div><div style="font-weight:700">🚗 '+v.model+' '+v.num+'<span class="badge '+(v.active!==false?'bg':'br')+'" style="margin-left:6px;">'+(v.active!==false?'Active':'Inactive')+'</span></div>'+(v.notes?'<div class="tmut">'+v.notes+'</div>':'')+'</div><div style="display:flex;gap:5px;"><button class="bblu bsm btn" style="width:32px;height:32px;padding:0;" onclick="openEditVeh(\''+v.id+'\')">✏️</button><button class="bdng bsm btn" style="width:32px;height:32px;padding:0;" onclick="togVeh(\''+v.id+'\')">'+(v.active!==false?'🔒':'🔓')+'</button></div></div>'
   ).join('');
+}
+function savSeuilKm(){
+  const v=parseFloat(document.getElementById('seuilKmInput').value);
+  if(isNaN(v)||v<=0){alert('Valeur invalide');return;}
+  C.seuilDollarParKm=v;
+  lSave();
+  renderAnalyse();
 }
 function saveEmailJS(){
   C.emailjsServiceId=gv('ejs-svc').trim();
@@ -3063,6 +3191,7 @@ function openEdit(id){
     +'<div class="frow"><div class="fsm"><label>🚐 STS</label><input type="number" id="ests" value="'+(s.sts||0)+'"></div><div class="fsm"><label>🎟️ Coupons</label><input type="number" id="ecoup" value="'+(s.coup||0)+'"></div></div>'
     +'<div class="frow"><div class="fsm"><label>⭐ Extra</label><input type="number" id="eext" value="'+(s.ext||0)+'"></div><div class="fsm"><label>🪙 Pourboire</label><input type="number" id="epour" value="'+(s.pourboire||0)+'"></div></div>'
     +'<div class="fsm"><label>⛽ Essence</label><input type="number" id="eess" value="'+(s.essence||0)+'"></div>'
+    +'<div class="frow"><div class="fsm"><label>📍 Km début</label><input type="number" id="ekmd" value="'+(s.kmd||'')+'"></div><div class="fsm"><label>🏁 Km fin</label><input type="number" id="ekmf" value="'+(s.kmf||'')+'"></div></div>'
     +'<div class="fsm"><label>📝 Remarque</label><textarea id="erem" rows="2">'+(s.remarque||'')+'</textarea></div>';
   document.getElementById('editMov').classList.add('on');
 }
@@ -3073,13 +3202,14 @@ function saveEdit(){
   const taxd=pf(gv('etaxd')),taxf=pf(gv('etaxf')),crs=pi(gv('ecrs'));
   const comp=pf(gv('ecomp')),card=pf(gv('ecard')),sts=pf(gv('ests'));
   const coup=pf(gv('ecoup')),ext=pf(gv('eext')),pour=pf(gv('epour'));
+  const kmd=pi(gv('ekmd')),kmf=pi(gv('ekmf'));
   const rec=parseFloat((comp+card+sts+coup+ext).toFixed(2));
   const driver=gv('edr');const drv=getDrv(driver);
   const isOwn=drv&&drv.role==='owner';const pct=drv?drv.pct:40;
   const taxNet=taxf-taxd-crs;
   const salary=isOwn?rec:parseFloat((taxNet*(pct/100)).toFixed(2));
   const ecart=parseFloat((rec-(taxNet+pour)).toFixed(2));
-  S[editId]=Object.assign({},old,{date:gv('ed'),time:gv('et'),driver,vehicle:gv('ecar'),isOwner:isOwn,drvPct:pct,taxd,taxf,courses:crs,comp,card,sts,coup,ext,pourboire:pour,essence:pf(gv('eess')),remarque:gv('erem'),recette:rec,salary,ecart,editedBy:U.name,editedAt:new Date().toISOString()});
+  S[editId]=Object.assign({},old,{date:gv('ed'),time:gv('et'),driver,vehicle:gv('ecar'),isOwner:isOwn,drvPct:pct,taxd,taxf,courses:crs,comp,card,sts,coup,ext,pourboire:pour,essence:pf(gv('eess')),kmd:kmd||0,kmf:kmf||0,remarque:gv('erem'),recette:rec,salary,ecart,editedBy:U.name,editedAt:new Date().toISOString()});
   lSave();audit('EDIT',driver+'/'+gv('ed'));
   closeM('editMov');renderWkList();
   const cur=document.querySelector('.pg.on');
@@ -3903,22 +4033,47 @@ async function sendPayEmails(){
 </script>
 <script>
 // ═══ FORCE MISE À JOUR AUTOMATIQUE ═══
+// ⚠️  CHANGER CETTE VALEUR À CHAQUE MISE À JOUR ⚠️
+const APP_VERSION = '2026-06-24-v5';
+window.APP_VERSION = APP_VERSION;
+
+function forceMiseAJour(){
+  if('caches' in window){
+    caches.keys().then(function(names){
+      names.forEach(function(name){caches.delete(name);});
+    });
+  }
+  localStorage.removeItem('taxipro_version');
+  showSA('🔄 Mise à jour en cours...','s');
+  setTimeout(function(){ window.location.reload(true); }, 800);
+}
+
 (function(){
-  const VERSION='2026-06-24-v4';
-  const stored=localStorage.getItem('taxipro_version');
-  if(stored!==VERSION){
-    localStorage.setItem('taxipro_version',VERSION);
-    if(stored!==null){
-      // Vider tous les caches du navigateur pour ce site
+  const stored = localStorage.getItem('taxipro_version');
+  if(stored !== APP_VERSION){
+    // Première visite OU nouvelle version détectée
+    const estNouvelle = stored !== null;
+    localStorage.setItem('taxipro_version', APP_VERSION);
+    if(estNouvelle){
+      // Vider le cache et afficher bandeau avant rechargement
       if('caches' in window){
         caches.keys().then(function(names){
           names.forEach(function(name){caches.delete(name);});
         });
       }
-      // Forcer rechargement sans cache
-      window.location.reload(true);
+      // Afficher bandeau rouge avant rechargement
+      const banner = document.createElement('div');
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#e53935;color:#fff;text-align:center;padding:12px;font-weight:700;font-size:15px;';
+      banner.textContent = '🔄 Nouvelle version détectée — Rechargement en cours...';
+      document.body.appendChild(banner);
+      setTimeout(function(){ window.location.reload(true); }, 1200);
     }
   }
+  // Afficher la version dans les réglages
+  window.addEventListener('DOMContentLoaded', function(){
+    const el = document.getElementById('verInfo');
+    if(el) el.textContent = 'Version installée : ' + APP_VERSION;
+  });
 })();
 </script>
 </body>
