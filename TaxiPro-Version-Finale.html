@@ -3168,7 +3168,7 @@ function renderAnalyse(){
           const r=sh.km>0?sh.taxBrut/sh.km:0;
           const al=r<seuilKm&&sh.taxBrut>0;
           return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--brd);font-size:11px;">'
-            +'<div style="color:'+(al?'var(--red)':'var(--m1))+'">'+(al?'🚨 ':'')+sh.date+' · '+sh.vehicle+'<br>'
+            +'<div style="color:'+(al?'var(--red)':'var(--m1)')+'">'+(al?'🚨 ':'')+sh.date+' · '+sh.vehicle+'<br>'
             +'<span style="font-size:9px;color:var(--m2);">'+sh.km+' km</span></div>'
             +'<div style="text-align:right;font-weight:900;color:'+(al?'var(--red)':'var(--grn)')+';">'+r.toFixed(2)+'$/km</div>'
             +'</div>';
