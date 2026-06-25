@@ -2041,7 +2041,7 @@ function setEssType(e,type){
   calc();
 }
 function resetForm(){
-  ['ftaxd','ftaxf','fcrsd','fcrsf','fcrs','fcomp','fcard','fsts','fcoup','fext','fpour','fess'].forEach(function(id){
+  ['ftaxd','ftaxf','fcrsd','fcrsf','fcrs','fcomp','fcard','fsts','fcoup','fext','fpour','fess','fkmd','fkmf'].forEach(function(id){
     const e=document.getElementById(id);if(e)e.value='';
   });
   document.getElementById('frem').value='';
@@ -2103,21 +2103,24 @@ function saveShift(){
 
   // ── Si manque → popup de confirmation ──
   if(ecart>0.5){
+    const kmd=pi(gv('fkmd')),kmf=pi(gv('fkmf'));
     showManqueConfirm(fm(ecart), fm(taxBrut), fm(rec), function(){
-      doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart});
+      doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf});
     });
     return;
   }
-  doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart});
+  const kmd=pi(gv('fkmd')),kmf=pi(gv('fkmf'));
+  doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf});
 }
 
-function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart}){
+function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf}){
   const s={
     id:uid(),date:gv('fd'),time:gv('ft'),vehicle:'Prius '+selV,driver,
     isOwner:isOwn,drvPct:pct,taxd,taxf,crsd:gv('fcrsd'),crsf:gv('fcrsf'),
     courses:crs,comp,card,sts,coup,ext,pourboire:pour,
     coupDetails:[...coupClients],
     essence:pf(gv('fess')),essencePar:essType,remarque:gv('frem'),
+    kmd:kmd||0,kmf:kmf||0,
     recette:rec,salary,ecart,createdBy:U.name,ts:new Date().toISOString()
   };
   S[s.id]=s;lSave();
@@ -2203,7 +2206,16 @@ function shiftRow(s,cumulMap){
   const field=U.role==='owner'?s.recette:salary;
   const drvPct=s.drvPct||40;
   const ecartHTML=hasEcart?'<div class="sr-ecart" style="color:'+(ecart>0?'var(--red)':'var(--pur)')+';">'+(ecart>0?'⚠️ −':'💰 +')+fm(Math.abs(ecart))+'</div>':'';
-  return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses'+(s.remarque?' · 📝 '+s.remarque:'')+'</div></div><div class="sr-right"><div class="sr-amt">'+fm(field)+'</div>'+(cumul!==null?'<div class="sr-cumul">Cumul: '+fm(cumul)+'</div>':'')+(U.role!=='owner'?'<div style="font-size:10px;color:var(--gold)">'+drvPct+'%</div>':'')+ecartHTML+'</div></div>'
+  const kmTotal=(s.kmd>0&&s.kmf>0&&s.kmf>s.kmd)?(s.kmf-s.kmd):0;
+  const taxBrutKm=pf(s.taxf)-pf(s.taxd);
+  const ratioKm=kmTotal>0?(taxBrutKm/kmTotal):0;
+  const kmHTML=kmTotal>0
+    ?'<div style="font-size:10px;margin-top:2px;">'
+      +'🛣️ '+kmTotal+' km'
+      +(U.role==='owner'?' · <span style="color:'+(ratioKm<1?'var(--red)':'var(--grn)')+';">'+ratioKm.toFixed(2)+'$/km</span>':'')
+      +'</div>'
+    :'';
+  return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses'+(s.remarque?' · 📝 '+s.remarque:'')+'</div>'+kmHTML+'</div><div class="sr-right"><div class="sr-amt">'+fm(field)+'</div>'+(cumul!==null?'<div class="sr-cumul">Cumul: '+fm(cumul)+'</div>':'')+(U.role!=='owner'?'<div style="font-size:10px;color:var(--gold)">'+drvPct+'%</div>':'')+ecartHTML+'</div></div>'
     +'<div class="sr-acts"><button class="bedt" onclick="event.stopPropagation();openEdit(\''+s.id+'\')">✏️ Modifier</button><button class="bdlt" onclick="event.stopPropagation();delS(\''+s.id+'\')">🗑️ Supprimer</button></div>';
 }
 
@@ -2343,7 +2355,11 @@ function renderDash(){
       const cmap=buildCumulMap(d.shifts,'recette');
       const detailRows=dSorted.map(s=>{
         const ec=calcEcart(s);const hasEc=Math.abs(ec)>0.5;const regle=isEcartRegle(s.id);
-        return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses</div></div><div class="sr-right"><div class="sr-amt">'+fm(s.recette)+'</div><div class="sr-cumul">Cumul: '+fm(cmap[s.id])+'</div>'+(hasEc&&!regle?'<div class="sr-ecart" style="color:'+(ec<0?'var(--red)':'var(--pur)')+';">'+(ec<0?'⚠️ ':'+$')+fm(Math.abs(ec))+'<button onclick="event.stopPropagation();toggleEcartRegle(\''+s.id+'\')" style="margin-left:6px;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:5px;padding:2px 6px;font-size:9px;font-weight:800;cursor:pointer;">✅</button></div>':regle&&hasEc?'<div class="sr-ecart" style="color:var(--grn);">✅ Réglé</div>':'')+'</div></div>'
+        const kmT=(s.kmd>0&&s.kmf>0&&s.kmf>s.kmd)?(s.kmf-s.kmd):0;
+        const taxBK=pf(s.taxf)-pf(s.taxd);
+        const ratK=kmT>0?(taxBK/kmT):0;
+        const kmH=kmT>0?'<div style="font-size:10px;margin-top:2px;">🛣️ '+kmT+' km'+(U.role==='owner'?' · <span style="color:'+(ratK<1?'var(--red)':'var(--grn)')+';">'+ratK.toFixed(2)+'$/km</span>':'')+'</div>':'';
+        return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses</div>'+kmH+'</div><div class="sr-right"><div class="sr-amt">'+fm(s.recette)+'</div><div class="sr-cumul">Cumul: '+fm(cmap[s.id])+'</div>'+(hasEc&&!regle?'<div class="sr-ecart" style="color:'+(ec<0?'var(--red)':'var(--pur)')+';">'+(ec<0?'⚠️ ':'+$')+fm(Math.abs(ec))+'<button onclick="event.stopPropagation();toggleEcartRegle(\''+s.id+'\')" style="margin-left:6px;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:5px;padding:2px 6px;font-size:9px;font-weight:800;cursor:pointer;">✅</button></div>':regle&&hasEc?'<div class="sr-ecart" style="color:var(--grn);">✅ Réglé</div>':'')+'</div></div>'
           +'<div style="display:flex;gap:5px;margin-top:6px;padding-bottom:2px;"><button class="bedt" onclick="event.stopPropagation();openEdit(\''+s.id+'\')">✏️</button><button class="bdlt" onclick="event.stopPropagation();delS(\''+s.id+'\')">🗑️ Supprimer</button></div>';
       }).join('');
       return '<div class="dsc'+(isExp?' expanded':'')+'" id="dsc-'+nm.replace(/\s/g,'_')+'">'
@@ -3127,18 +3143,31 @@ function renderAnalyse(){
     html+='<div class="perf-card" style="text-align:center;padding:20px;color:var(--m2);font-size:13px;">🛣️ Aucun quart avec km enregistré.<br><span style="font-size:11px;">Remplis Km début / Km fin dans le formulaire.</span></div>';
   } else {
     const seuilKm=C.seuilDollarParKm||1.00;
+    const now2=new Date();
+    // Date helpers
+    function sameDay(ds){const d=parseLocalDate(ds);return d.toDateString()===now2.toDateString();}
+    function sameWeek(ds){const d=parseLocalDate(ds);const ms=new Date(now2);const day=ms.getDay();ms.setDate(ms.getDate()-day+(day===0?-6:1));ms.setHours(0,0,0,0);const me=new Date(ms);me.setDate(me.getDate()+6);me.setHours(23,59,59,999);return d>=ms&&d<=me;}
+    function sameMo(ds){return inMo(ds,now2);}
+
+    // Build per-driver stats: global + jour + semaine + mois
     const kmByD={};
     shiftsAvecKm.forEach(s=>{
       const km=s.kmf-s.kmd;
       const taxBrut=pf(s.taxf)-pf(s.taxd);
-      if(!kmByD[s.driver])kmByD[s.driver]={kmTotal:0,taxTotal:0,n:0,alertes:0,shifts:[]};
-      kmByD[s.driver].kmTotal+=km;
-      kmByD[s.driver].taxTotal+=taxBrut;
-      kmByD[s.driver].n++;
-      if(km>0&&taxBrut/km<seuilKm)kmByD[s.driver].alertes++;
-      kmByD[s.driver].shifts.push({date:s.date,km,taxBrut,vehicle:s.vehicle});
+      if(!kmByD[s.driver])kmByD[s.driver]={
+        kmTotal:0,taxTotal:0,n:0,alertes:0,shifts:[],
+        jour:{km:0,tax:0,n:0},sem:{km:0,tax:0,n:0},mois:{km:0,tax:0,n:0}
+      };
+      const d=kmByD[s.driver];
+      d.kmTotal+=km; d.taxTotal+=taxBrut; d.n++;
+      if(km>0&&taxBrut/km<seuilKm)d.alertes++;
+      d.shifts.push({date:s.date,km,taxBrut,vehicle:s.vehicle});
+      if(sameDay(s.date)){d.jour.km+=km;d.jour.tax+=taxBrut;d.jour.n++;}
+      if(sameWeek(s.date)){d.sem.km+=km;d.sem.tax+=taxBrut;d.sem.n++;}
+      if(sameMo(s.date)){d.mois.km+=km;d.mois.tax+=taxBrut;d.mois.n++;}
     });
-    // Seuil éditeur
+
+    // Seuil
     html+='<div style="background:rgba(10,8,0,.6);border:1px solid var(--brd);border-radius:12px;padding:10px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'
       +'<span style="font-size:11px;color:var(--m2);font-weight:700;">⚙️ Seuil alerte :</span>'
       +'<input type="number" id="seuilKmInput" value="'+seuilKm+'" step="0.10" min="0.10" style="width:70px;background:var(--bg2);border:1px solid var(--brd);border-radius:7px;color:var(--m1);padding:5px 8px;font-size:13px;font-weight:700;">'
@@ -3146,29 +3175,52 @@ function renderAnalyse(){
       +'<button class="btn bsm bblu" onclick="saveSeuilKm()">✓</button>'
       +'<span style="font-size:10px;color:var(--red);">En dessous = 🚨 suspect</span>'
       +'</div>';
+
+    function kmStatRow(label,stat){
+      if(stat.n===0)return '<div style="color:var(--m2);font-size:10px;padding:4px 0;">'+label+' — aucun quart</div>';
+      const r=stat.km>0?stat.tax/stat.km:0;
+      const al=r<seuilKm;
+      return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--brd);">'
+        +'<div style="font-size:11px;color:var(--m2);font-weight:700;">'+label+'</div>'
+        +'<div style="display:flex;gap:12px;align-items:center;">'
+        +'<span style="font-size:11px;color:var(--m1);">🛣️ '+stat.km.toLocaleString('fr-CA')+' km</span>'
+        +'<span style="font-size:13px;font-weight:900;color:'+(al?'var(--red)':'var(--grn)')+';">'+(al?'🚨 ':'')+r.toFixed(2)+'$/km</span>'
+        +'</div></div>';
+    }
+
     Object.entries(kmByD).sort((a,b)=>b[1].taxTotal/b[1].kmTotal - a[1].taxTotal/a[1].kmTotal).forEach(([nm,dk])=>{
       const ratio=dk.kmTotal>0?dk.taxTotal/dk.kmTotal:0;
       const suspect=ratio<seuilKm;
       const col=suspect?'var(--red)':ratio<seuilKm*1.5?'var(--gold)':'var(--grn)';
       html+='<div class="perf-card" style="border-color:'+(suspect?'rgba(255,58,58,.3)':'rgba(245,200,0,.15)')+';margin-bottom:10px;">'
-        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+        // Header
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
         +'<div><div style="font-size:15px;font-weight:900;color:var(--m1);">🚗 '+nm+'</div>'
         +'<div style="font-size:10px;color:var(--m2);">'+dk.n+' quarts · '+dk.kmTotal.toLocaleString('fr-CA')+' km total</div></div>'
         +'<div style="text-align:right;">'
         +'<div style="font-size:22px;font-weight:900;color:'+col+';">'+ratio.toFixed(2)+'$</div>'
-        +'<div style="font-size:10px;color:var(--m2);">/ km</div>'
+        +'<div style="font-size:10px;color:var(--m2);">/ km (global)</div>'
         +(suspect?'<div style="font-size:10px;font-weight:900;color:var(--red);">🚨 SUSPECT</div>':'<div style="font-size:10px;color:var(--grn);">✅ OK</div>')
         +'</div></div>'
-        +'<div style="background:rgba(255,255,255,.05);border-radius:5px;height:6px;overflow:hidden;margin-bottom:8px;">'
+        // Périodes
+        +'<div style="background:rgba(10,8,0,.5);border:1px solid var(--brd);border-radius:10px;padding:10px;margin-bottom:8px;">'
+        +'<div style="font-size:9px;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">📊 Rentabilité par période</div>'
+        +kmStatRow("📅 Aujourd'hui",dk.jour)
+        +kmStatRow('📆 Cette semaine',dk.sem)
+        +kmStatRow('🗓️ Ce mois',dk.mois)
+        +'</div>'
+        // Barre globale
+        +'<div style="background:rgba(255,255,255,.05);border-radius:5px;height:5px;overflow:hidden;margin-bottom:8px;">'
         +'<div style="height:100%;border-radius:5px;background:'+col+';width:'+Math.min(100,(ratio/(seuilKm*3))*100).toFixed(0)+'%;"></div>'
         +'</div>'
+        // Détail quarts
         +'<div style="background:rgba(10,8,0,.5);border:1px solid var(--brd);border-radius:10px;padding:8px;">'
         +'<div style="font-size:9px;color:var(--m2);font-weight:700;text-transform:uppercase;margin-bottom:6px;">Détail par quart</div>'
         +dk.shifts.sort((a,b)=>b.date.localeCompare(a.date)).map(sh=>{
           const r=sh.km>0?sh.taxBrut/sh.km:0;
           const al=r<seuilKm&&sh.taxBrut>0;
           return '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--brd);font-size:11px;">'
-            +'<div style="color:'+(al?'var(--red)':'var(--m1)')+'">'+(al?'🚨 ':'')+sh.date+' · '+sh.vehicle+'<br>'
+            +'<div style="color:'+(al?'var(--red)':'var(--m1)')+';">'+(al?'🚨 ':'')+sh.date+' · '+sh.vehicle+'<br>'
             +'<span style="font-size:9px;color:var(--m2);">'+sh.km+' km</span></div>'
             +'<div style="text-align:right;font-weight:900;color:'+(al?'var(--red)':'var(--grn)')+';">'+r.toFixed(2)+'$/km</div>'
             +'</div>';
