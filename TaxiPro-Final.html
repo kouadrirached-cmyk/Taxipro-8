@@ -4,25 +4,25 @@
 <meta charset="UTF-8">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <script>
-// AUTO-RELOAD: runs before app loads
 (function(){
-  var CURRENT = '2026-06-27-v5';
-  var stored = localStorage.getItem('taxipro_version');
-  if(stored && stored !== CURRENT) {
-    localStorage.setItem('taxipro_version', CURRENT);
-    // Clear all caches then hard reload
-    if('caches' in window) {
-      caches.keys().then(function(names){
-        Promise.all(names.map(function(n){return caches.delete(n);})).then(function(){
-          window.location.href = window.location.href.split('?')[0] + '?bust=' + CURRENT;
+  var CURRENT='2026-06-27-v6';
+  try{
+    var stored=localStorage.getItem('txpro_appver');
+    if(stored && stored!==CURRENT){
+      localStorage.setItem('txpro_appver',CURRENT);
+      if('caches' in window){
+        caches.keys().then(function(names){
+          Promise.all(names.map(function(n){return caches.delete(n);})).then(function(){
+            window.location.href=window.location.href.split('?')[0]+'?bust='+CURRENT;
+          });
         });
-      });
+      } else {
+        window.location.href=window.location.href.split('?')[0]+'?bust='+CURRENT;
+      }
     } else {
-      window.location.href = window.location.href.split('?')[0] + '?bust=' + CURRENT;
+      localStorage.setItem('txpro_appver',CURRENT);
     }
-  } else {
-    localStorage.setItem('taxipro_version', CURRENT);
-  }
+  }catch(e){}
 })();
 </script>
 <meta http-equiv="Pragma" content="no-cache">
@@ -4992,9 +4992,9 @@ async function sendPayEmails(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-06-27-v5';
+var APP_VERSION = '2026-06-27-v6';
 function forceMiseAJour(){
-  localStorage.removeItem('taxipro_version');
+  localStorage.removeItem('txpro_appver');
   if('caches' in window){
     caches.keys().then(function(names){
       Promise.all(names.map(function(n){return caches.delete(n);})).then(function(){
