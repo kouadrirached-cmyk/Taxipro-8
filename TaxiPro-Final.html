@@ -2231,7 +2231,6 @@ function showManqueConfirm(manque, attendu, remis, onConfirm){
     modal.remove();
     onConfirm(val);
   };
-  };
 }
 
 // ═══ DELETE ═══
@@ -4733,7 +4732,7 @@ function renderGiftCardsList(){
       +'<div><div style="font-size:13px;font-weight:900;color:var(--gold);">🎁 '+fm(gc.amt)+'</div>'
       +'<div style="font-size:10px;color:var(--m2);">Seuil: '+fm(gc.seuil)+' taxim. net · Pour: '+drv+'</div>'
       +(gc.desc?'<div style="font-size:10px;color:var(--m3);">'+gc.desc+'</div>':'')
-      +'<div style="font-size:10px;color:var(--grn);margin-top:2px);">'+claimedCount+' fois réclamé</div>'
+      +'<div style="font-size:10px;color:var(--grn);margin-top:2px;">'+claimedCount+' fois réclamé</div>'
       +'</div>'
       +'<button onclick="deleteGiftCard(\''+gc.id+'\')" style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.25);color:var(--red);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;">🗑️</button>'
       +'</div>';
