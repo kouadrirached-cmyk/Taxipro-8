@@ -2105,8 +2105,8 @@ function saveShift(){
   // ── Si manque → popup de confirmation ──
   if(ecart>0.5){
     const kmd=pi(gv('fkmd')),kmf=pi(gv('fkmf'));
-    showManqueConfirm(fm(ecart), fm(taxBrut), fm(rec), function(){
-      doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf});
+    showManqueConfirm(fm(ecart), fm(taxBrut), fm(rec), function(justifTxt){
+      doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf,justifTxt});
     });
     return;
   }
@@ -2114,7 +2114,7 @@ function saveShift(){
   doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf});
 }
 
-function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf}){
+function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf,justifTxt}){
   const s={
     id:uid(),date:gv('fd'),time:gv('ft'),vehicle:'Prius '+selV,driver,
     isOwner:isOwn,drvPct:pct,taxd,taxf,crsd:gv('fcrsd'),crsf:gv('fcrsf'),
@@ -2124,7 +2124,9 @@ function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn
     kmd:kmd||0,kmf:kmf||0,
     recette:rec,salary,ecart,createdBy:U.name,ts:new Date().toISOString()
   };
-  S[s.id]=s;lSave();
+  S[s.id]=s;
+  if(justifTxt){if(!C.justifs)C.justifs={};C.justifs[s.id]=justifTxt;}
+  lSave();
   audit('ADD',driver+'/'+s.vehicle+'/'+s.date+'/'+fm(rec));
   const ok=document.getElementById('shiftOk');
   ok.style.display='block';setTimeout(function(){ok.style.display='none';},2000);
@@ -2214,16 +2216,21 @@ function showManqueConfirm(manque, attendu, remis, onConfirm){
     +'<div style="font-size:28px;font-weight:900;color:var(--red);letter-spacing:-1px;">−'+manque+'</div>'
     +'</div>'
     +'</div>'
-    +'<div style="font-size:12px;color:var(--m2);margin-bottom:18px;">Voulez-vous enregistrer ce quart malgré le manque ?</div>'
+    +'<div style="font-size:12px;font-weight:800;color:var(--red);margin-bottom:8px;">⚠️ Justification obligatoire pour enregistrer ce quart</div>'
+    +'<textarea id="manqueJustifTxt" placeholder="Explique le manque avant d\'enregistrer..." style="width:100%;background:rgba(0,0,0,.5);border:2px solid rgba(255,58,58,.5);color:#fff;border-radius:10px;padding:10px;font-size:13px;resize:none;min-height:70px;margin-bottom:12px;box-sizing:border-box;"></textarea>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
     +'<button onclick="document.getElementById(\'manqueModal\').remove();" style="background:rgba(255,255,255,.06);border:1px solid var(--brd);color:var(--m1);border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">✕ Annuler</button>'
-    +'<button id="manqueConfirmBtn" style="background:linear-gradient(135deg,var(--red),#c00);border:none;color:#fff;border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">✓ Confirmer</button>'
+    +'<button id="manqueConfirmBtn" style="background:linear-gradient(135deg,var(--red),#c00);border:none;color:#fff;border-radius:12px;padding:12px;font-size:13px;font-weight:800;cursor:pointer;">💾 Enregistrer</button>'
     +'</div>'
     +'</div>';
   document.body.appendChild(modal);
   document.getElementById('manqueConfirmBtn').onclick=function(){
+    var txt=document.getElementById('manqueJustifTxt');
+    var val=txt?txt.value.trim():'';
+    if(!val){if(txt){txt.style.border='2px solid #ff0000';txt.focus();}return;}
     modal.remove();
-    onConfirm();
+    onConfirm(val);
+  };
   };
 }
 
@@ -2518,7 +2525,7 @@ function renderDash(){
   }else{
     const myGain=arr.reduce((a,s)=>a+calcSalary(s),0);
     const myCash=arr.reduce((a,s)=>a+(s.comp||0),0);
-    const myEcarts=arr.filter(s=>calcEcart(s)>0.5); // seulement les MANQUES (ecart positif = chauffeur a remis moins que le taximètre)
+    const myEcarts=arr.filter(s=>calcEcart(s)>0.5&&!isEcartRegle(s.id)&&!getJustif(s.id)); // MANQUES sans justification et non réglés
     const myTaxNet=arr.reduce((a,s)=>a+(pf(s.taxf)-pf(s.taxd)-pi(s.courses)),0);
     const arrSorted=[...arr].sort((a,b)=>b.date.localeCompare(a.date)||(b.time||'').localeCompare(a.time||''));
     const wkArr=getArr().filter(s=>inWk(s.date,new Date())&&s.driver===U.name);
@@ -2574,10 +2581,10 @@ function renderDash(){
       +'<div class="sb pur"><div class="slb">🚗 Courses</div><div class="sv cpur">'+totCrs+'</div></div>'
       +'</div>'
       // Alerte manques — chauffeur voit justification, patron voit justification + bouton régler
-      +(myEcarts.filter(s=>!isEcartRegle(s.id)).length
+      +(myEcarts.length
         ?'<div style="background:rgba(255,58,58,.1);border:2px solid rgba(255,58,58,.4);border-radius:14px;padding:13px;margin-bottom:11px;">'
-          +'<div style="font-size:13px;font-weight:900;color:var(--red);margin-bottom:6px;">⚠️ '+myEcarts.filter(s=>!isEcartRegle(s.id)).length+' quart'+(myEcarts.filter(s=>!isEcartRegle(s.id)).length>1?'s':'')+' avec manque</div>'
-          +myEcarts.filter(s=>!isEcartRegle(s.id)).map(s=>{
+          +'<div style="font-size:13px;font-weight:900;color:var(--red);margin-bottom:6px;">⚠️ '+myEcarts.length+' quart'+(myEcarts.length>1?'s':'')+' avec manque</div>'
+          +myEcarts.map(s=>{
             const ec=calcEcart(s);
             const justif=getJustif(s.id);
             const isOwnerView=U.role==='owner';
