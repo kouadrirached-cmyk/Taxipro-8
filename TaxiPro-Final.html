@@ -2224,13 +2224,25 @@ function showManqueConfirm(manque, attendu, remis, onConfirm){
     +'</div>'
     +'</div>';
   document.body.appendChild(modal);
-  document.getElementById('manqueConfirmBtn').onclick=function(){
-    var txt=document.getElementById('manqueJustifTxt');
+  modal.querySelector('#manqueConfirmBtn').addEventListener('click',function(){
+    var txt=modal.querySelector('#manqueJustifTxt');
     var val=txt?txt.value.trim():'';
-    if(!val){if(txt){txt.style.border='2px solid #ff0000';txt.focus();}return;}
+    if(!val){
+      if(txt){
+        txt.style.border='2px solid #ff0000';
+        txt.style.boxShadow='0 0 8px rgba(255,0,0,.6)';
+        txt.focus();
+        txt.placeholder='⚠️ Tu dois écrire une explication !';
+      }
+      return;
+    }
     modal.remove();
     onConfirm(val);
-  };
+  });
+  // Annuler button
+  modal.querySelector('button').addEventListener('click',function(){
+    modal.remove();
+  });
 }
 
 // ═══ DELETE ═══
@@ -4958,7 +4970,7 @@ async function sendPayEmails(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-06-27-v3';
+var APP_VERSION = '2026-06-27-v4';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
