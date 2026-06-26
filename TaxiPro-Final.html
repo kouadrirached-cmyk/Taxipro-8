@@ -886,7 +886,7 @@ body{
         <div class="hrole" id="hrole"></div>
       </div>
       <button class="hdeco" onclick="doLogout()">Déco.</button>
-      <div id="syncStatus" style="font-size:10px;font-weight:700;min-width:52px;text-align:center;"></div>
+      <div id="syncStatus" style="font-size:10px;font-weight:700;min-width:52px;text-align:center;"></div><div id="versionBadge" style="font-size:9px;color:rgba(245,200,0,.4);font-weight:700;text-align:center;"></div>
     </div>
   </div>
   <div class="chkbar-sm"></div>
@@ -3904,6 +3904,9 @@ function renderSet(){
   const b=localStorage.getItem(SK+'_bkd');
   document.getElementById('bkupInfo').textContent=b?'Dernière: '+new Date(b).toLocaleString('fr-CA'):'';
   var vi=document.getElementById('verInfo');if(vi)vi.textContent='Version: '+(window.APP_VERSION||'—');
+  // Also show version in a small badge always visible
+  var vb=document.getElementById('versionBadge');
+  if(vb)vb.textContent='v'+(window.APP_VERSION||'—');
   // Remplir objectifs
   if(!C.objectifs)C.objectifs={patron:10000};
   var opEl=document.getElementById('obj-patron-set');
@@ -4955,14 +4958,16 @@ async function sendPayEmails(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-06-24-v2';
+var APP_VERSION = '2026-06-27-v3';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
       names.forEach(function(name){caches.delete(name);});
+      setTimeout(function(){ window.location.href=window.location.href.split('?')[0]+'?v='+Date.now(); }, 500);
     });
+  } else {
+    window.location.href=window.location.href.split('?')[0]+'?v='+Date.now();
   }
-  setTimeout(function(){ window.location.reload(true); }, 300);
 }
 </script>
 </body>
