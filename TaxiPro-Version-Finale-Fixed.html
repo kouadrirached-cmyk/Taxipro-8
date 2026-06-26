@@ -2146,6 +2146,42 @@ function toggleEcartRegle(shiftId){
 function isEcartRegle(shiftId){return !!(C.ecartsRegles&&C.ecartsRegles[shiftId]);}
 
 
+// ─── JUSTIFICATION MANQUE ───
+function getJustif(shiftId){return (C.justifs&&C.justifs[shiftId])||"";}
+
+function saveJustif(shiftId){
+  var txt=document.getElementById("justif-input-"+shiftId);
+  if(!txt)return;
+  if(!C.justifs)C.justifs={};
+  C.justifs[shiftId]=txt.value.trim();
+  lSave();
+  var cur=document.querySelector(".pg.on");
+  if(cur){var nm=cur.id.replace("pg-","");if(nm==="dash")renderDash();else if(nm==="hist")renderHist();}
+  showToastGrn("Justification enregistrée ✅");
+}
+
+function showJustifForm(shiftId){
+  var box=document.getElementById("justif-box-"+shiftId);
+  if(box)box.style.display=box.style.display==="none"?"block":"none";
+}
+
+function reglerManque(shiftId){
+  if(!C.ecartsRegles)C.ecartsRegles={};
+  C.ecartsRegles[shiftId]=true;
+  lSave();
+  var cur=document.querySelector(".pg.on");
+  if(cur){var nm=cur.id.replace("pg-","");if(nm==="dash")renderDash();else if(nm==="hist")renderHist();else if(nm==="analyse")renderAnalyse();}
+  showToastGrn("Manque réglé ✅");
+}
+
+function showToastGrn(msg){
+  var t=document.createElement("div");
+  t.textContent=msg;
+  t.style.cssText="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:rgba(57,211,83,.95);color:#000;font-weight:800;font-size:13px;padding:10px 20px;border-radius:20px;z-index:9999;";
+  document.body.appendChild(t);
+  setTimeout(function(){t.remove();},2200);
+}
+
 function showManqueConfirm(manque, attendu, remis, onConfirm){
   // Supprimer popup existante
   const old=document.getElementById('manqueModal');if(old)old.remove();
@@ -2205,7 +2241,7 @@ function shiftRow(s,cumulMap){
   const cumul=cumulMap?cumulMap[s.id]:null;
   const field=U.role==='owner'?s.recette:salary;
   const drvPct=s.drvPct||40;
-  const ecartHTML=hasEcart?'<div class="sr-ecart" style="color:'+(ecart>0?'var(--red)':'var(--pur)')+';">'+(ecart>0?'⚠️ −':'💰 +')+fm(Math.abs(ecart))+'</div>':'';
+  const ecartHTML=(hasEcart&&(ecart>0||U.role==='owner'))?'<div class="sr-ecart" style="color:'+(ecart>0?'var(--red)':'var(--pur)')+';">'+(ecart>0?'⚠️ −':'💰 +')+fm(Math.abs(ecart))+'</div>':'';
   const kmTotal=(s.kmd>0&&s.kmf>0&&s.kmf>s.kmd)?(s.kmf-s.kmd):0;
   const taxBrutKm=pf(s.taxf)-pf(s.taxd);
   const ratioKm=kmTotal>0?(taxBrutKm/kmTotal):0;
@@ -2237,11 +2273,25 @@ function siHTML(s,cumulMap){
   if(s.coup>0)tags+='<span class="tag ty">🎟️ '+fm(s.coup)+'</span>';
   if(s.pourboire>0)tags+='<span class="tag ty">🪙 '+fm(s.pourboire)+'</span>';
   if(s.essence>0)tags+='<span class="tag tr">⛽ '+fm(s.essence)+'</span>';
-  // Écart en rouge bien visible
-  const ecartHTML=hasEc
-    ?'<div style="background:'+(ecart>0?'rgba(255,58,58,.12)':'rgba(192,132,252,.1)')+';border:1.5px solid '+(ecart>0?'rgba(255,58,58,.4)':'rgba(192,132,252,.3)')+';border-radius:9px;padding:7px 10px;margin-top:7px;display:flex;justify-content:space-between;align-items:center;">'
-      +'<span style="font-size:10px;font-weight:800;color:'+(ecart>0?'var(--red)':'var(--pur)')+';">'+(ecart>0?'⚠️ MANQUE D\'ARGENT':'💰 SURPLUS')+'</span>'
-      +'<span style="font-size:16px;font-weight:900;color:'+(ecart>0?'var(--red)':'var(--pur)')+';">'+(ecart>0?'−':'+')+fm(Math.abs(ecart))+'</span>'
+  // Ecart: manque visible chauffeur+patron avec justification, surplus patron seulement
+  const justifTxt=getJustif(s.id);
+  const ecartHTML=(hasEc&&(ecart>0||isOwnerView))
+    ?'<div style="background:'+(ecart>0?'rgba(255,58,58,.12)':'rgba(192,132,252,.1)')+';border:1.5px solid '+(ecart>0?'rgba(255,58,58,.4)':'rgba(192,132,252,.3)')+';border-radius:9px;padding:9px 10px;margin-top:7px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+      +'<span style="font-size:10px;font-weight:800;color:'+(ecart>0?'var(--red)':'var(--pur)')+';">'+(ecart>0?'\u26a0\ufe0f MANQUE D\'ARGENT':'\U0001f4b0 SURPLUS')+'</span>'
+      +'<span style="font-size:16px;font-weight:900;color:'+(ecart>0?'var(--red)':'var(--pur)')+';">'+(ecart>0?'-':'+')+fm(Math.abs(ecart))+'</span>'
+      +'</div>'
+      +(justifTxt?'<div style="margin-top:6px;background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.2);border-radius:7px;padding:6px 9px;font-size:11px;color:var(--m3);">\U0001f4dd <em>'+justifTxt+'</em></div>':'')
+      +(ecart>0&&!isOwnerView
+        ?'<button onclick="showJustifForm(\''+s.id+'\')" style="margin-top:6px;width:100%;background:rgba(245,200,0,.12);border:1px solid rgba(245,200,0,.3);color:var(--gold);border-radius:7px;padding:5px;font-size:11px;font-weight:700;cursor:pointer;">\u270f\ufe0f '+(justifTxt?'Modifier':'Ecrire')+' ma justification</button>'
+         +'<div id="justif-box-'+s.id+'" style="display:none;margin-top:5px;">'
+         +'<textarea id="justif-input-'+s.id+'" placeholder="Explication du manque..." style="width:100%;background:rgba(0,0,0,.4);border:1px solid rgba(245,200,0,.3);color:var(--txt);border-radius:7px;padding:7px;font-size:12px;resize:none;min-height:55px;">'+justifTxt+'</textarea>'
+         +'<button onclick="saveJustif(\''+s.id+'\')" style="margin-top:3px;width:100%;background:var(--gold);border:none;color:#000;border-radius:7px;padding:6px;font-size:12px;font-weight:900;cursor:pointer;">\U0001f4be Enregistrer</button>'
+         +'</div>'
+        :'')
+      +(ecart>0&&isOwnerView
+        ?'<button onclick="reglerManque(\''+s.id+'\')" style="margin-top:6px;width:100%;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:7px;padding:6px;font-size:11px;font-weight:800;cursor:pointer;">\u2705 Regler ce manque</button>'
+        :'')
       +'</div>'
     :'';
   return '<div class="si" style="border-color:'+(hasEc&&ecart>0?'rgba(255,58,58,.3)':'var(--brd)')+';background:'+(hasEc&&ecart>0?'rgba(255,10,10,.04)':'')+';">'
@@ -2326,7 +2376,7 @@ function renderDash(){
   const totEss=arr.reduce((a,s)=>a+(s.essence||0),0);
   const totSal=arr.reduce((a,s)=>a+calcSalary(s),0);
   const totProfit=arr.reduce((a,s)=>a+calcOwnerProfit(s),0);
-  const alerts=arr.filter(s=>Math.abs(calcEcart(s))>0.5&&!isEcartRegle(s.id)).sort((a,b)=>b.date.localeCompare(a.date));
+  const alerts=arr.filter(s=>(isOwner?Math.abs(calcEcart(s))>0.5:calcEcart(s)>0.5)&&!isEcartRegle(s.id)).sort((a,b)=>b.date.localeCompare(a.date));
   const expArr=getExpArr().filter(e=>inPer(e.date));
   const totExp=expArr.reduce((a,e)=>a+pf(e.amount),0);
 
@@ -2514,16 +2564,33 @@ function renderDash(){
       +'<div class="sb neon"><div class="slb">💵 Comptant reçu</div><div class="sv cneon">'+fm(myCash)+'</div></div>'
       +'<div class="sb pur"><div class="slb">🚗 Courses</div><div class="sv cpur">'+totCrs+'</div></div>'
       +'</div>'
-      // Alerte écarts en rouge
+      // Alerte manques — chauffeur voit justification, patron voit justification + bouton régler
       +(myEcarts.filter(s=>!isEcartRegle(s.id)).length
         ?'<div style="background:rgba(255,58,58,.1);border:2px solid rgba(255,58,58,.4);border-radius:14px;padding:13px;margin-bottom:11px;">'
           +'<div style="font-size:13px;font-weight:900;color:var(--red);margin-bottom:6px;">⚠️ '+myEcarts.filter(s=>!isEcartRegle(s.id)).length+' quart'+(myEcarts.filter(s=>!isEcartRegle(s.id)).length>1?'s':'')+' avec manque</div>'
-          +myEcarts.filter(s=>!isEcartRegle(s.id)).map(s=>{const ec=calcEcart(s);return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid rgba(255,58,58,.2);">'
-            +'<div style="font-size:11px;color:var(--m3);">📅 '+s.date+' · '+s.vehicle+'</div>'
-            +'<div style="display:flex;align-items:center;gap:8px;">'
-            +'<span style="color:var(--red);font-weight:900;font-size:13px;">−'+fm(ec)+'</span>'
-            +''
-            +'</div></div>';}).join('')
+          +myEcarts.filter(s=>!isEcartRegle(s.id)).map(s=>{
+            const ec=calcEcart(s);
+            const justif=getJustif(s.id);
+            const isOwnerView=U.role==='owner';
+            return '<div style="padding:8px 0;border-top:1px solid rgba(255,58,58,.2);">'
+              +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+              +'<div style="font-size:11px;color:var(--m3);">📅 '+s.date+' · '+s.vehicle+'</div>'
+              +'<span style="color:var(--red);font-weight:900;font-size:13px;">−'+fm(ec)+'</span>'
+              +'</div>'
+              // Justification existante
+              +(justif?'<div style="margin-top:5px;background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.2);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--m3);">📝 <em>'+justif+'</em></div>':'')
+              // Chauffeur : bouton écrire justification
+              +(!isOwnerView
+                ?'<button onclick="showJustifForm(''+s.id+'')" style="margin-top:6px;background:rgba(245,200,0,.12);border:1px solid rgba(245,200,0,.3);color:var(--gold);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;width:100%;">✏️ '+(justif?'Modifier':'Écrire')+'  ma justification</button>'
+                +'<div id="justif-box-'+s.id+'" style="display:none;margin-top:6px;">'
+                +'<textarea id="justif-input-'+s.id+'" placeholder="Explication du manque..." style="width:100%;background:rgba(0,0,0,.4);border:1px solid rgba(245,200,0,.3);color:var(--txt);border-radius:8px;padding:8px;font-size:12px;resize:none;min-height:60px;">'+justif+'</textarea>'
+                +'<button onclick="saveJustif(''+s.id+'')" style="margin-top:4px;background:var(--gold);border:none;color:#000;border-radius:8px;padding:6px 0;font-size:12px;font-weight:900;cursor:pointer;width:100%;">💾 Enregistrer</button>'
+                +'</div>'
+                // Patron : bouton régler le manque
+                :'<button onclick="reglerManque(''+s.id+'')" style="margin-top:6px;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:800;cursor:pointer;width:100%;">✅ Régler ce manque</button>'
+              )
+              +'</div>';
+          }).join('')
           +'</div>'
         :'')
       // Quarts détaillés
@@ -4511,7 +4578,7 @@ function renderSoldeBar(){
     const myShifts=wkArr.filter(s=>s.driver===U.name);
     const myTaxi=myShifts.reduce((a,s)=>a+(pf(s.taxf)-pf(s.taxd)),0);
     const myCash=myShifts.reduce((a,s)=>a+(s.comp||0),0);
-    const myEcarts=myShifts.filter(s=>Math.abs(calcEcart(s))>0.5);
+    const myEcarts=myShifts.filter(s=>calcEcart(s)>0.5); // seulement les MANQUES, pas les surplus
 
     // ── Paye semaine passée ──
     const lastMonday=new Date(now);
