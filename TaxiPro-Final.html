@@ -2153,8 +2153,16 @@ function getJustif(shiftId){return (C.justifs&&C.justifs[shiftId])||"";}
 function saveJustif(shiftId){
   var txt=document.getElementById("justif-input-"+shiftId);
   if(!txt)return;
+  var val=txt.value.trim();
+  if(!val){
+    txt.style.border='2px solid var(--red)';
+    txt.placeholder='⚠️ Justification obligatoire avant de continuer...';
+    txt.focus();
+    return;
+  }
+  txt.style.border='';
   if(!C.justifs)C.justifs={};
-  C.justifs[shiftId]=txt.value.trim();
+  C.justifs[shiftId]=val;
   lSave();
   var cur=document.querySelector(".pg.on");
   if(cur){var nm=cur.id.replace("pg-","");if(nm==="dash")renderDash();else if(nm==="hist")renderHist();}
@@ -2582,11 +2590,17 @@ function renderDash(){
               +(justif?'<div style="margin-top:5px;background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.2);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--m3);">📝 <em>'+justif+'</em></div>':'')
               // Chauffeur : bouton écrire justification
               +(!isOwnerView
-                ?'<button onclick="showJustifForm(''+s.id+'')" style="margin-top:6px;background:rgba(245,200,0,.12);border:1px solid rgba(245,200,0,.3);color:var(--gold);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;width:100%;">✏️ '+(justif?'Modifier':'Écrire')+'  ma justification</button>'
-                +'<div id="justif-box-'+s.id+'" style="display:none;margin-top:6px;">'
-                +'<textarea id="justif-input-'+s.id+'" placeholder="Explication du manque..." style="width:100%;background:rgba(0,0,0,.4);border:1px solid rgba(245,200,0,.3);color:var(--txt);border-radius:8px;padding:8px;font-size:12px;resize:none;min-height:60px;">'+justif+'</textarea>'
-                +'<button onclick="saveJustif(''+s.id+'')" style="margin-top:4px;background:var(--gold);border:none;color:#000;border-radius:8px;padding:6px 0;font-size:12px;font-weight:900;cursor:pointer;width:100%;">💾 Enregistrer</button>'
-                +'</div>'
+                ?( justif
+                  ?'<button onclick="showJustifForm(''+s.id+'')" style="margin-top:6px;background:rgba(245,200,0,.12);border:1px solid rgba(245,200,0,.3);color:var(--gold);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:700;cursor:pointer;width:100%;">✏️ Modifier ma justification</button>'
+                    +'<div id="justif-box-'+s.id+'" style="display:none;margin-top:6px;">'
+                    +'<textarea id="justif-input-'+s.id+'" placeholder="Explication du manque..." style="width:100%;background:rgba(0,0,0,.4);border:1px solid rgba(245,200,0,.3);color:var(--txt);border-radius:8px;padding:8px;font-size:12px;resize:none;min-height:60px;">'+justif+'</textarea>'
+                    +'<button onclick="saveJustif(''+s.id+'')" style="margin-top:4px;background:var(--gold);border:none;color:#000;border-radius:8px;padding:6px 0;font-size:12px;font-weight:900;cursor:pointer;width:100%;">💾 Enregistrer</button>'
+                    +'</div>'
+                  :'<div style="background:rgba(255,58,58,.08);border:2px solid rgba(255,58,58,.4);border-radius:9px;padding:9px;margin-top:6px;">'
+                    +'<div style="font-size:10px;font-weight:900;color:var(--red);margin-bottom:5px;">⚠️ Justification obligatoire — écris une explication</div>'
+                    +'<textarea id="justif-input-'+s.id+'" placeholder="Explique le manque avant de continuer..." style="width:100%;background:rgba(0,0,0,.4);border:2px solid rgba(255,58,58,.5);color:var(--txt);border-radius:8px;padding:8px;font-size:12px;resize:none;min-height:65px;"></textarea>'
+                    +'<button onclick="saveJustif(''+s.id+'')" style="margin-top:5px;background:var(--red);border:none;color:#fff;border-radius:8px;padding:9px 0;font-size:12px;font-weight:900;cursor:pointer;width:100%;">💾 Envoyer ma justification</button>'
+                    +'</div>')
                 // Patron : bouton régler le manque
                 :'<button onclick="reglerManque(''+s.id+'')" style="margin-top:6px;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:8px;padding:6px 12px;font-size:11px;font-weight:800;cursor:pointer;width:100%;">✅ Régler ce manque</button>'
               )
