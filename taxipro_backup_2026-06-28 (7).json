@@ -1,0 +1,2850 @@
+{
+  "v": "v4",
+  "ts": "2026-06-28T04:10:33.755Z",
+  "cfg": {
+    "fraudSeuil": 5,
+    "emailjsTemplateId": "",
+    "vehicles": [
+      {
+        "notes": "",
+        "id": "v707",
+        "active": true,
+        "num": "707",
+        "model": "Prius"
+      },
+      {
+        "notes": "",
+        "model": "Prius",
+        "num": "732",
+        "id": "v732",
+        "active": true
+      },
+      {
+        "num": "718",
+        "model": "Prius",
+        "id": "v718",
+        "active": true,
+        "notes": ""
+      }
+    ],
+    "ecartsRegles": {
+      "mqsjk8qgbldpx1wpg4m": true,
+      "mqlfkurvflcpzhoahf5": true,
+      "mqlaqz0zv3yhzm950uk": true,
+      "mqs7iixlx7n1tyfjaf": true,
+      "mqwuqzd5fgfe2y1g87v": true,
+      "mqw4l5zxxjjxx3n6ymn": true,
+      "mqlaeolmpm0syom37p": true,
+      "mqmvtn15btxkod09iy": true
+    },
+    "messages": [
+      {
+        "ts": "2026-06-22T20:48:53.541Z",
+        "from": "Amine",
+        "id": "mqpoudr9jpfz6g7e9hg",
+        "read": [
+          "meh"
+        ],
+        "text": "Barka ma tvyes",
+        "to": "meh"
+      }
+    ],
+    "huile": {},
+    "giftCards": [
+      {
+        "createdTs": "2026-06-27T03:08:38.017Z",
+        "amt": 60,
+        "seuil": 3000,
+        "id": "mqvs651dj547d7acik",
+        "driverId": "TOUS",
+        "desc": "",
+        "claimedBy": {}
+      }
+    ],
+    "justifs": {
+      "mqwuqzd5fgfe2y1g87v": "Jai oublier d'éteindre de taximetre apres le prix du coupon",
+      "mqw4l5zxxjjxx3n6ymn": "Cliente n’a pas payé je t’ai envoyé la photo et t’appeler pour t’informer"
+    },
+    "ownerShare": 60,
+    "drivers": [
+      {
+        "name": "Amine",
+        "role": "owner",
+        "email": "",
+        "phone": "",
+        "pct": 100,
+        "pw": "0107",
+        "active": true,
+        "id": "ami"
+      },
+      {
+        "phone": "",
+        "email": "",
+        "role": "driver",
+        "name": "Zin Abidine",
+        "id": "zin",
+        "active": true,
+        "pw": "3123",
+        "pct": 40
+      },
+      {
+        "active": true,
+        "id": "ibr",
+        "pct": 40,
+        "pw": "718718",
+        "phone": "",
+        "name": "Ibrahima",
+        "role": "driver",
+        "email": ""
+      },
+      {
+        "id": "meh",
+        "active": true,
+        "pw": "8424",
+        "pct": 40,
+        "phone": "",
+        "email": "",
+        "role": "driver",
+        "name": "Mehdi"
+      },
+      {
+        "email": "",
+        "name": "Imad",
+        "role": "driver",
+        "phone": "",
+        "pw": "1234",
+        "pct": 40,
+        "id": "ima",
+        "active": true
+      },
+      {
+        "email": "",
+        "name": "Ahmed",
+        "role": "driver",
+        "phone": "",
+        "pw": "1234",
+        "pct": 40,
+        "id": "ahm",
+        "active": true
+      },
+      {
+        "email": "",
+        "role": "driver",
+        "name": "Salim",
+        "phone": "",
+        "pw": "5764",
+        "pct": 40,
+        "id": "mqit9iysudw8anzahko",
+        "active": true
+      },
+      {
+        "phone": "",
+        "role": "driver",
+        "name": "Alpha",
+        "email": "",
+        "active": true,
+        "id": "mqit9qoxw2e72z52a2",
+        "pct": 40,
+        "pw": "1798"
+      },
+      {
+        "id": "mqp7qq421s5dvkrpozd",
+        "active": true,
+        "pw": "0101",
+        "pct": 40,
+        "phone": "",
+        "email": "",
+        "role": "driver",
+        "name": "Mohamed"
+      },
+      {
+        "name": "Amir",
+        "role": "driver",
+        "email": "",
+        "phone": "",
+        "pct": 40,
+        "pw": "0107",
+        "active": true,
+        "id": "mqvs70i8r5cqo95xc8"
+      }
+    ],
+    "payes": {
+      "2026-06-15|Ibrahima": {
+        "paid": true,
+        "ts": "2026-06-24T21:43:32.336Z",
+        "by": "Amine"
+      },
+      "2026-06-15|Salim": {
+        "ts": "2026-06-24T21:35:05.756Z",
+        "paid": true,
+        "by": "Amine"
+      },
+      "2026-06-15|Mehdi_deductCash": true,
+      "2026-06-15|Mehdi": {
+        "ts": "2026-06-22T17:49:54.906Z",
+        "paid": true,
+        "by": "Amine"
+      },
+      "2026-06-15|Ibrahima_deductCash": true,
+      "2026-06-15|Alpha": {
+        "by": "Amine",
+        "ts": "2026-06-23T00:46:19.074Z",
+        "paid": true
+      }
+    },
+    "cleans": [
+      {
+        "by": "Ibrahima",
+        "time": "05 h 33",
+        "date": "2026-06-27",
+        "vehicle": "707"
+      },
+      {
+        "by": "Ibrahima",
+        "time": "05 h 33",
+        "date": "2026-06-27",
+        "vehicle": "707"
+      },
+      {
+        "time": "12 h 06",
+        "by": "Amine",
+        "vehicle": "707",
+        "date": "2026-06-27"
+      },
+      {
+        "by": "Ibrahima",
+        "time": "16:29",
+        "date": "2026-06-27",
+        "vehicle": "707"
+      }
+    ],
+    "objectifs": {
+      "drv_mqit9iysudw8anzahko": 2500,
+      "drv_zin": 2500,
+      "drv_ahm": 1500,
+      "drv_mqvs70i8r5cqo95xc8": 2500,
+      "patron": 10000,
+      "drv_mqp7qq421s5dvkrpozd": 1500,
+      "drv_ima": 1500,
+      "drv_meh": 2000,
+      "drv_ibr": 2500,
+      "drv_mqit9qoxw2e72z52a2": 1600
+    },
+    "fleet": {
+      "707": {
+        "ts": "2026-06-27T20:29:17.443Z",
+        "status": "en_route",
+        "eta": "",
+        "by": "Ibrahima"
+      },
+      "732": {
+        "ts": "2026-06-27T15:31:56.743Z",
+        "eta": "",
+        "status": "en_route",
+        "by": "Salim"
+      }
+    },
+    "emailjsPublicKey": "",
+    "fixedCosts": {
+      "otherLabel": "",
+      "other": 0,
+      "insurance": 880,
+      "carRental": 850
+    },
+    "schedules": {
+      "zin": {}
+    },
+    "emailjsServiceId": "",
+    "ecartsDebits": {}
+  },
+  "shifts": {
+    "mqwxj8mclq9r0tl3w0l": {
+      "comp": 34.75,
+      "createdBy": "Ibrahima",
+      "crsd": "1",
+      "essence": 0,
+      "ts": "2026-06-27T22:26:33.444Z",
+      "ext": 0,
+      "crsf": "19",
+      "taxd": 3772.3,
+      "id": "mqwxj8mclq9r0tl3w0l",
+      "card": 529.51,
+      "coupDetails": [],
+      "taxf": 4302.55,
+      "ecart": 0,
+      "vehicle": "Prius 707",
+      "kmf": 0,
+      "isOwner": false,
+      "essencePar": "carte",
+      "coup": 0,
+      "sts": 0,
+      "drvPct": 40,
+      "remarque": "",
+      "salary": 238.91,
+      "time": "16h00",
+      "kmd": 0,
+      "courses": 18,
+      "date": "2026-06-23",
+      "driver": "Ibrahima",
+      "recette": 564.26,
+      "pourboire": 34.01
+    },
+    "mqo1tihwjnf04njn4ts": {
+      "driver": "Alpha",
+      "recette": 514.05,
+      "pourboire": 50.7,
+      "coup": 13.9,
+      "sts": 0,
+      "drvPct": 40,
+      "remarque": "",
+      "salary": 173.74,
+      "time": "06h00",
+      "date": "2026-06-19",
+      "courses": 29,
+      "card": 403.96,
+      "taxf": 5927.6,
+      "coupDetails": [],
+      "ecart": 29,
+      "isOwner": false,
+      "vehicle": "Prius 718",
+      "essencePar": "carte",
+      "comp": 96.19,
+      "createdBy": "Alpha",
+      "crsd": "281",
+      "essence": 0,
+      "ts": "2026-06-21T17:16:35.684Z",
+      "ext": 0,
+      "editedBy": "Amine",
+      "id": "mqo1tihwjnf04njn4ts",
+      "crsf": "310",
+      "editedAt": "2026-06-27T06:28:02.114Z",
+      "taxd": 5464.25
+    },
+    "mqrcphbsu9fjz96rbs": {
+      "coup": 23,
+      "sts": 0,
+      "drvPct": 40,
+      "remarque": "",
+      "salary": 131.96,
+      "time": "08h00",
+      "courses": 23,
+      "date": "2026-06-23",
+      "driver": "Salim",
+      "recette": 367.2,
+      "pourboire": 14,
+      "comp": 90.2,
+      "createdBy": "Salim",
+      "crsd": "210",
+      "essence": 0,
+      "ts": "2026-06-24T00:44:41.848Z",
+      "ext": 0,
+      "editedBy": "Salim",
+      "taxd": 3517,
+      "editedAt": "2026-06-26T03:13:18.672Z",
+      "crsf": "233",
+      "id": "mqrcphbsu9fjz96rbs",
+      "card": 254,
+      "coupDetails": [],
+      "taxf": 3869.9,
+      "ecart": 23.3,
+      "vehicle": "Prius 707",
+      "isOwner": false
+    },
+    "mqow20ftebafqz7ipz": {
+      "pourboire": 37.73,
+      "recette": 463.63,
+      "driver": "Salim",
+      "time": "08h00",
+      "courses": 20,
+      "date": "2026-06-21",
+      "salary": 162.4,
+      "drvPct": 40,
+      "remarque": "",
+      "coup": 0,
+      "sts": 0,
+      "ecart": 0,
+      "isOwner": false,
+      "vehicle": "Prius 707",
+      "taxf": 560,
+      "coupDetails": [],
+      "card": 399.03,
+      "ext": 0,
+      "id": "mqow20ftebafqz7ipz",
+      "taxd": 134,
+      "crsf": "30",
+      "essence": 0,
+      "crsd": "10",
+      "ts": "2026-06-22T07:23:00.666Z",
+      "comp": 64.6,
+      "createdBy": "Salim"
+    },
+    "mqv2h7nxrd8q7ad3i5j": {
+      "salary": 0,
+      "time": "20h00",
+      "kmd": 0,
+      "courses": 0,
+      "date": "2026-06-26",
+      "coup": 0,
+      "sts": 0,
+      "drvPct": 40,
+      "remarque": "",
+      "recette": 0,
+      "pourboire": 0,
+      "driver": "Mohamed",
+      "crsd": "",
+      "essence": 0,
+      "ts": "2026-06-26T15:09:24.621Z",
+      "ext": 0,
+      "crsf": "",
+      "taxd": 0,
+      "id": "mqv2h7nxrd8q7ad3i5j",
+      "comp": 0,
+      "createdBy": "Mohamed",
+      "ecart": 0,
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "kmf": 0,
+      "essencePar": "carte",
+      "card": 0,
+      "coupDetails": [],
+      "taxf": 0
+    },
+    "mqs7n83s2glr1lpu5rd": {
+      "driver": "Zin Abidine",
+      "recette": 231.32,
+      "pourboire": 9.62,
+      "sts": 0,
+      "coup": 37.6,
+      "remarque": "",
+      "drvPct": 40,
+      "salary": 82.68,
+      "courses": 15,
+      "date": "2026-06-22",
+      "time": "08h00",
+      "card": 158.52,
+      "taxf": 782.55,
+      "coupDetails": [],
+      "isOwner": false,
+      "vehicle": "Prius 718",
+      "ecart": 15,
+      "createdBy": "Zin Abidine",
+      "comp": 35.2,
+      "ts": "2026-06-24T15:10:44.680Z",
+      "essence": 0,
+      "crsd": "30",
+      "id": "mqs7n83s2glr1lpu5rd",
+      "crsf": "45",
+      "editedAt": "2026-06-27T15:41:14.634Z",
+      "taxd": 560.85,
+      "ext": 0,
+      "editedBy": "Amine"
+    },
+    "mqppq5b2hyvl1p8szo4": {
+      "vehicle": "Prius 732",
+      "isOwner": false,
+      "ecart": 0,
+      "card": 238.65,
+      "coupDetails": [],
+      "taxf": 318,
+      "ts": "2026-06-22T21:13:35.582Z",
+      "essence": 0,
+      "crsd": "",
+      "taxd": 1,
+      "crsf": "",
+      "id": "mqppq5b2hyvl1p8szo4",
+      "ext": 0,
+      "createdBy": "Mehdi",
+      "comp": 65,
+      "recette": 326.65,
+      "pourboire": 20.75,
+      "driver": "Mehdi",
+      "salary": 120.4,
+      "courses": 16,
+      "date": "2026-06-22",
+      "time": "08h00",
+      "sts": 23,
+      "coup": 0,
+      "remarque": "",
+      "drvPct": 40
+    },
+    "mqld4938osztepmis9b": {
+      "createdBy": "Salim",
+      "comp": 38,
+      "id": "mqld4938osztepmis9b",
+      "editedAt": "2026-06-27T06:25:33.491Z",
+      "crsf": "31",
+      "taxd": 221,
+      "editedBy": "Amine",
+      "ext": 0,
+      "ts": "2026-06-19T20:09:33.958Z",
+      "essence": 0,
+      "crsd": "16",
+      "taxf": 472,
+      "coupDetails": [],
+      "card": 214.18,
+      "isOwner": false,
+      "vehicle": "Prius 707",
+      "ecart": 15,
+      "remarque": "",
+      "drvPct": 40,
+      "sts": 0,
+      "coup": 22.15,
+      "courses": 15,
+      "date": "2026-06-16",
+      "time": "08h00",
+      "salary": 94.4,
+      "driver": "Salim",
+      "pourboire": 23.33,
+      "recette": 274.33
+    },
+    "mqodbe2al9cdotyq3rs": {
+      "coup": 0,
+      "sts": 0,
+      "drvPct": 40,
+      "remarque": "",
+      "salary": 116.56,
+      "time": "16h00",
+      "date": "2026-06-18",
+      "courses": 18,
+      "driver": "Ibrahima",
+      "recette": 334.68,
+      "pourboire": 25.33,
+      "comp": 22.5,
+      "createdBy": "Ibrahima",
+      "crsd": "1",
+      "essence": 0,
+      "ts": "2026-06-21T22:38:25.522Z",
+      "editedBy": "Amine",
+      "ext": 0,
+      "id": "mqodbe2al9cdotyq3rs",
+      "crsf": "19",
+      "editedAt": "2026-06-22T18:18:45.083Z",
+      "taxd": 1655.45,
+      "card": 312.18,
+      "taxf": 1964.85,
+      "coupDetails": [],
+      "ecart": 17.95,
+      "isOwner": false,
+      "vehicle": "Prius 707",
+      "essencePar": "carte"
+    },
+    "mqwtwu1gpgtwixnldx": {
+      "recette": 689.26,
+      "pourboire": 63.21,
+      "driver": "Zin Abidine",
+      "salary": 238.42,
+      "courses": 30,
+      "date": "2026-06-26",
+      "time": "08h00",
+      "kmd": 0,
+      "sts": 52.1,
+      "coup": 21.85,
+      "remarque": "",
+      "drvPct": 40,
+      "isOwner": false,
+      "kmf": 0,
+      "vehicle": "Prius 718",
+      "ecart": 30,
+      "essencePar": "carte",
+      "card": 587.06,
+      "taxf": 1853.2,
+      "coupDetails": [],
+      "ts": "2026-06-27T20:45:09.269Z",
+      "essence": 0,
+      "crsd": "73",
+      "id": "mqwtwu1gpgtwixnldx",
+      "crsf": "103",
+      "taxd": 1227.15,
+      "editedAt": "2026-06-27T23:15:27.606Z",
+      "ext": 0,
+      "editedBy": "Amine",
+      "createdBy": "Zin Abidine",
+      "comp": 28.25
+    },
+    "mqoe5s1r7s4lywhq863": {
+      "taxf": 2419.6,
+      "coupDetails": [],
+      "card": 407.11,
+      "essencePar": "carte",
+      "isOwner": false,
+      "vehicle": "Prius 707",
+      "ecart": 4.4,
+      "createdBy": "Ibrahima",
+      "comp": 25.3,
+      "id": "mqoe5s1r7s4lywhq863",
+      "taxd": 2028.1,
+      "crsf": "21",
+      "editedAt": "2026-06-22T18:18:41.253Z",
+      "ext": 0,
+      "editedBy": "Amine",
+      "ts": "2026-06-21T23:02:03.327Z",
+      "crsd": "1",
+      "essence": 0,
+      "driver": "Ibrahima",
+      "pourboire": 56.51,
+      "recette": 432.41,
+      "remarque": "1 faux départ \n9,85 non payé par client ",
+      "drvPct": 40,
+      "sts": 0,
+      "coup": 0,
+      "courses": 20,
+      "date": "2026-06-19",
+      "time": "16h00",
+      "salary": 148.6
+    },
+    "mqmvtn15btxkod09iy": {
+      "taxf": 321.25,
+      "coupDetails": [],
+      "card": 206.3,
+      "ecart": 18.22,
+      "isOwner": false,
+      "vehicle": "Prius 707",
+      "comp": 130,
+      "createdBy": "Salim",
+      "editedBy": "Salim",
+      "ext": 0,
+      "id": "mqmvtn15btxkod09iy",
+      "crsf": "19",
+      "editedAt": "2026-06-20T21:43:13.322Z",
+      "taxd": 0,
+      "crsd": "0",
+      "essence": 0,
+      "ts": "2026-06-20T21:40:57.689Z",
+      "driver": "Salim",
+      "pourboire": 24.53,
+      "recette": 345,
+      "drvPct": 40,
+      "remarque": "",
+      "coup": 8.7,
+      "sts": 0,
+      "time": "08h00",
+      "courses": 19,
+      "date": "2026-06-20",
+      "salary": 120.9
+    },
+    "mqo22f4nrfh221i7slf": {
+      "time": "06h00",
+      "date": "2026-06-20",
+      "courses": 23,
+      "salary": 121.3,
+      "drvPct": 40,
+      "remarque": "Erreur de 0,40$",
+      "coup": 0,
+      "sts": 0,
+      "pourboire": 29.21,
+      "recette": 346.11,
+      "driver": "Alpha",
+      "ext": 0,
+      "editedBy": "Amine",
+      "editedAt": "2026-06-27T06:54:06.680Z",
+      "taxd": 6478.35,
+      "crsf": "360",
+      "id": "mqo22f4nrfh221i7slf",
+      "essence": 0,
+      "crsd": "337",
+      "ts": "2026-06-21T17:23:31.223Z",
+      "comp": 113,
+      "createdBy": "Alpha",
+      "essencePar": "carte",
+      "ecart": 13.65,
+      "vehicle": "Prius 718",
+      "isOwner": false,
+      "coupDetails": [],
+      "taxf": 6804.6,
+      "card": 233.11
+    },
+    "mqsjk8qgbldpx1wpg4m": {
+      "card": 312.21,
+      "coupDetails": [],
+      "taxf": 4639,
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "ecart": 10.4,
+      "createdBy": "Salim",
+      "comp": 44.7,
+      "ts": "2026-06-24T20:44:20.920Z",
+      "essence": 0,
+      "crsd": "244",
+      "crsf": "266",
+      "editedAt": "2026-06-27T00:29:12.930Z",
+      "taxd": 4302,
+      "id": "mqsjk8qgbldpx1wpg4m",
+      "ext": 0,
+      "editedBy": "Salim",
+      "driver": "Salim",
+      "recette": 356.91,
+      "pourboire": 31.51,
+      "sts": 0,
+      "coup": 0,
+      "remarque": "Allumer taximètre 2 fois en erreur ",
+      "drvPct": 40,
+      "salary": 126,
+      "date": "2026-06-24",
+      "courses": 22,
+      "time": "08h00"
+    },
+    "mqtzhi75llwtnmxunsp": {
+      "coup": 0,
+      "sts": 236,
+      "drvPct": 40,
+      "remarque": "",
+      "salary": 185.6,
+      "time": "08h00",
+      "date": "2026-06-25",
+      "courses": 15,
+      "driver": "Mehdi",
+      "recette": 482.86,
+      "pourboire": 18.86,
+      "comp": 25,
+      "createdBy": "Mehdi",
+      "crsd": "",
+      "essence": 0,
+      "ts": "2026-06-25T20:57:53.249Z",
+      "ext": 0,
+      "id": "mqtzhi75llwtnmxunsp",
+      "crsf": "",
+      "taxd": 1,
+      "card": 221.86,
+      "taxf": 480,
+      "coupDetails": [],
+      "ecart": 0,
+      "isOwner": false,
+      "vehicle": "Prius 732"
+    },
+    "mqtso3fum7h8w18xubg": {
+      "recette": 606.71,
+      "pourboire": 55.96,
+      "driver": "Zin Abidine",
+      "salary": 209.5,
+      "time": "08h00",
+      "courses": 27,
+      "date": "2026-06-19",
+      "coup": 39.35,
+      "sts": 26.3,
+      "drvPct": 40,
+      "remarque": "",
+      "ecart": 27,
+      "vehicle": "Prius 718",
+      "isOwner": false,
+      "card": 470.56,
+      "coupDetails": [],
+      "taxf": 6478.35,
+      "crsd": "310",
+      "essence": 0,
+      "ts": "2026-06-25T17:47:03.402Z",
+      "ext": 0,
+      "editedBy": "Amine",
+      "crsf": "337",
+      "taxd": 5927.6,
+      "editedAt": "2026-06-27T06:32:02.612Z",
+      "id": "mqtso3fum7h8w18xubg",
+      "comp": 70.5,
+      "createdBy": "Zin Abidine"
+    },
+    "mqojr90w2h689q5xzh6": {
+      "driver": "Ibrahima",
+      "pourboire": 51.69,
+      "recette": 469.09,
+      "remarque": "",
+      "drvPct": 40,
+      "sts": 0,
+      "coup": 0,
+      "courses": 20,
+      "date": "2026-06-20",
+      "time": "16h00",
+      "salary": 158.96,
+      "coupDetails": [],
+      "taxf": 2983.65,
+      "card": 466.94,
+      "essencePar": "carte",
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "ecart": 20,
+      "createdBy": "Ibrahima",
+      "comp": 2.15,
+      "editedAt": "2026-06-25T22:43:16.790Z",
+      "taxd": 2566.25,
+      "crsf": "21",
+      "id": "mqojr90w2h689q5xzh6",
+      "ext": 0,
+      "editedBy": "Amine",
+      "ts": "2026-06-22T01:38:43.184Z",
+      "crsd": "1",
+      "essence": 0
+    },
+    "mqtp5r4ogxhf3un4sd5": {
+      "taxf": 500,
+      "coupDetails": [],
+      "card": 300,
+      "essencePar": "carte",
+      "ecart": 0,
+      "isOwner": true,
+      "kmf": 650,
+      "vehicle": "Prius 707",
+      "comp": 0,
+      "createdBy": "Amine",
+      "ext": 0,
+      "id": "mqtp5r4ogxhf3un4sd5",
+      "taxd": 200,
+      "crsf": "2",
+      "essence": 0,
+      "crsd": "1",
+      "ts": "2026-06-25T16:08:48.792Z",
+      "driver": "Amine",
+      "pourboire": 0,
+      "recette": 300,
+      "drvPct": 100,
+      "remarque": "",
+      "coup": 0,
+      "sts": 0,
+      "kmd": 50,
+      "time": "08h00",
+      "courses": 1,
+      "date": "2026-06-25",
+      "salary": 300
+    },
+    "mqveulijo5a22h3v6r": {
+      "sts": 0,
+      "coup": 27.55,
+      "remarque": "",
+      "drvPct": 40,
+      "salary": 153.76,
+      "date": "2026-06-26",
+      "courses": 24,
+      "time": "08h00",
+      "driver": "Salim",
+      "recette": 435.22,
+      "pourboire": 26.52,
+      "createdBy": "Salim",
+      "comp": 102.75,
+      "ts": "2026-06-26T20:55:44.491Z",
+      "essence": 0,
+      "crsd": "1",
+      "crsf": "25",
+      "editedAt": "2026-06-27T21:29:41.823Z",
+      "taxd": 0,
+      "id": "mqveulijo5a22h3v6r",
+      "editedBy": "Salim",
+      "ext": 0,
+      "card": 304.92,
+      "coupDetails": [],
+      "taxf": 408.4,
+      "vehicle": "Prius 732",
+      "isOwner": false,
+      "ecart": 24.3
+    },
+    "mqv2hfnyf183lx4fn8m": {
+      "comp": 0,
+      "createdBy": "Mohamed",
+      "essence": 0,
+      "crsd": "",
+      "ts": "2026-06-26T15:09:34.990Z",
+      "ext": 0,
+      "id": "mqv2hfnyf183lx4fn8m",
+      "taxd": 0,
+      "crsf": "",
+      "card": 0,
+      "taxf": 0,
+      "coupDetails": [],
+      "ecart": 0,
+      "kmf": 0,
+      "isOwner": false,
+      "vehicle": "Prius 707",
+      "essencePar": "carte",
+      "coup": 0,
+      "sts": 0,
+      "drvPct": 40,
+      "remarque": "",
+      "salary": 0,
+      "kmd": 0,
+      "time": "20h00",
+      "date": "2026-06-26",
+      "courses": 0,
+      "driver": "Mohamed",
+      "recette": 0,
+      "pourboire": 0
+    },
+    "mqjzspn8nxhwqp3tsv": {
+      "card": 123.5,
+      "coupDetails": [],
+      "taxf": 4644.65,
+      "vehicle": "Prius 718",
+      "isOwner": false,
+      "ecart": 0,
+      "createdBy": "Zin Abidine",
+      "comp": 33.05,
+      "ts": "2026-06-18T21:08:54.356Z",
+      "essence": 0,
+      "crsd": "218",
+      "crsf": "233",
+      "taxd": 4339,
+      "id": "mqjzspn8nxhwqp3tsv",
+      "ext": 0,
+      "driver": "Zin Abidine",
+      "recette": 316.9,
+      "pourboire": 11.25,
+      "sts": 124.1,
+      "coup": 36.25,
+      "remarque": "",
+      "drvPct": 40,
+      "salary": 116.26,
+      "courses": 15,
+      "date": "2026-06-17",
+      "time": "08h00"
+    },
+    "mqlaeolmpm0syom37p": {
+      "card": 220.84,
+      "taxf": 1070,
+      "coupDetails": [],
+      "isOwner": false,
+      "vehicle": "Prius 707",
+      "ecart": 0,
+      "createdBy": "Salim",
+      "comp": 90.5,
+      "ts": "2026-06-19T18:53:41.770Z",
+      "crsd": "44",
+      "essence": 0,
+      "id": "mqlaeolmpm0syom37p",
+      "crsf": "65",
+      "taxd": 781,
+      "ext": 0,
+      "driver": "Salim",
+      "recette": 311.34,
+      "pourboire": 23.34,
+      "sts": 0,
+      "coup": 0,
+      "remarque": "",
+      "drvPct": 40,
+      "salary": 107.2,
+      "courses": 21,
+      "date": "2026-06-17",
+      "time": "08h00"
+    },
+    "mqww4uh6obgo411scia": {
+      "createdBy": "Amine",
+      "comp": 0,
+      "taxd": 0,
+      "crsf": "",
+      "id": "mqww4uh6obgo411scia",
+      "ext": 0,
+      "ts": "2026-06-27T21:47:22.314Z",
+      "essence": 0,
+      "crsd": "",
+      "coupDetails": [],
+      "taxf": 650,
+      "card": 650,
+      "essencePar": "carte",
+      "vehicle": "Prius 707",
+      "isOwner": true,
+      "kmf": 0,
+      "ecart": 0,
+      "remarque": "",
+      "drvPct": 100,
+      "sts": 0,
+      "coup": 0,
+      "date": "2026-06-27",
+      "courses": 0,
+      "time": "08h00",
+      "kmd": 0,
+      "salary": 650,
+      "driver": "Amine",
+      "pourboire": 0,
+      "recette": 650
+    },
+    "mqs7iixlx7n1tyfjaf": {
+      "pourboire": 15.85,
+      "recette": 354.55,
+      "driver": "Zin Abidine",
+      "date": "2026-06-23",
+      "courses": 20,
+      "time": "08h00",
+      "salary": 129.54,
+      "remarque": "",
+      "drvPct": 40,
+      "sts": 139.3,
+      "coup": 0,
+      "vehicle": "Prius 718",
+      "isOwner": false,
+      "ecart": 0,
+      "coupDetails": [],
+      "taxf": 445.1,
+      "card": 180.8,
+      "crsf": "30",
+      "taxd": 101.25,
+      "id": "mqs7iixlx7n1tyfjaf",
+      "ext": 0,
+      "ts": "2026-06-24T15:07:05.433Z",
+      "crsd": "10",
+      "essence": 0,
+      "createdBy": "Zin Abidine",
+      "comp": 34.45
+    },
+    "mqnj5mndn1aoe5wziwo": {
+      "createdBy": "Mehdi",
+      "comp": 164,
+      "ts": "2026-06-21T08:34:08.233Z",
+      "essence": 0,
+      "crsd": "",
+      "taxd": 1,
+      "crsf": "",
+      "id": "mqnj5mndn1aoe5wziwo",
+      "ext": 0,
+      "card": 234.01,
+      "coupDetails": [],
+      "taxf": 380,
+      "vehicle": "Prius 732",
+      "isOwner": false,
+      "ecart": -19.01,
+      "sts": 0,
+      "coup": 0,
+      "remarque": "",
+      "drvPct": 40,
+      "salary": 144.8,
+      "courses": 17,
+      "date": "2026-06-21",
+      "time": "08h00",
+      "driver": "Mehdi",
+      "recette": 398.01,
+      "pourboire": 17.96
+    },
+    "mqpycjln549kafduasg": {
+      "coupDetails": [],
+      "taxf": 359,
+      "card": 225.5,
+      "essencePar": "carte",
+      "ecart": 17.2,
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "comp": 73.1,
+      "createdBy": "Salim",
+      "ext": 0,
+      "editedBy": "Amine",
+      "taxd": 0,
+      "crsf": "18",
+      "editedAt": "2026-06-27T06:26:12.486Z",
+      "id": "mqpycjln549kafduasg",
+      "crsd": "1",
+      "essence": 0,
+      "ts": "2026-06-23T01:14:57.467Z",
+      "driver": "Salim",
+      "pourboire": 39.4,
+      "recette": 398.6,
+      "drvPct": 40,
+      "remarque": "",
+      "coup": 100,
+      "sts": 0,
+      "time": "08h00",
+      "date": "2026-06-15",
+      "courses": 17,
+      "salary": 136.8
+    },
+    "mqwuqzd5fgfe2y1g87v": {
+      "createdBy": "Salim",
+      "comp": 34.1,
+      "ts": "2026-06-27T21:08:35.849Z",
+      "essence": 0,
+      "crsd": "1",
+      "crsf": "16",
+      "taxd": 0,
+      "id": "mqwuqzd5fgfe2y1g87v",
+      "ext": 0,
+      "card": 200.33,
+      "coupDetails": [],
+      "taxf": 256.5,
+      "vehicle": "Prius 707",
+      "kmf": 0,
+      "isOwner": false,
+      "ecart": 2.4,
+      "essencePar": "carte",
+      "sts": 0,
+      "coup": 44,
+      "remarque": " Jai oublier d'éteindre le Taximètre avant le prix du coupon ",
+      "drvPct": 40,
+      "salary": 120.93,
+      "date": "2026-06-27",
+      "courses": 15,
+      "kmd": 0,
+      "time": "08h00",
+      "driver": "Salim",
+      "recette": 278.43,
+      "pourboire": 24.33
+    },
+    "mqou6icy4t3kpb44ehy": {
+      "courses": 16,
+      "date": "2026-06-21",
+      "time": "16h00",
+      "salary": 94.12,
+      "remarque": "",
+      "drvPct": 40,
+      "sts": 0,
+      "coup": 0,
+      "pourboire": 10.75,
+      "recette": 262.05,
+      "driver": "Ibrahima",
+      "crsf": "17",
+      "editedAt": "2026-06-22T18:18:26.913Z",
+      "taxd": 2983.65,
+      "id": "mqou6icy4t3kpb44ehy",
+      "ext": 0,
+      "editedBy": "Amine",
+      "ts": "2026-06-22T06:30:31.282Z",
+      "essence": 0,
+      "crsd": "1",
+      "createdBy": "Ibrahima",
+      "comp": 20.15,
+      "essencePar": "carte",
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "ecart": 16,
+      "coupDetails": [],
+      "taxf": 3234.95,
+      "card": 241.9
+    },
+    "mqo1nn7y0jzxmzg01gre": {
+      "createdBy": "Alpha",
+      "comp": 80,
+      "crsf": "262",
+      "taxd": 4644.65,
+      "id": "mqo1nn7y0jzxmzg01gre",
+      "ext": 0,
+      "ts": "2026-06-21T17:12:01.870Z",
+      "essence": 0,
+      "crsd": "233",
+      "coupDetails": [],
+      "taxf": 5121.55,
+      "card": 402.24,
+      "essencePar": "carte",
+      "vehicle": "Prius 718",
+      "isOwner": false,
+      "ecart": 8.04,
+      "remarque": "",
+      "drvPct": 40,
+      "sts": 0,
+      "coup": 14.45,
+      "courses": 29,
+      "date": "2026-06-18",
+      "time": "06h00",
+      "salary": 206.99,
+      "driver": "Alpha",
+      "pourboire": 27.83,
+      "recette": 496.69
+    },
+    "mqt96m7cc0o0itzmqv": {
+      "card": 5128,
+      "coupDetails": [],
+      "taxf": 5129,
+      "vehicle": "Prius 732",
+      "kmf": 0,
+      "isOwner": true,
+      "ecart": 0,
+      "essencePar": "carte",
+      "createdBy": "Amine",
+      "comp": 0,
+      "ts": "2026-06-25T08:41:35.208Z",
+      "essence": 0,
+      "crsd": "",
+      "taxd": 1,
+      "crsf": "",
+      "id": "mqt96m7cc0o0itzmqv",
+      "ext": 0,
+      "driver": "Amine",
+      "recette": 5128,
+      "pourboire": 0,
+      "sts": 0,
+      "coup": 0,
+      "remarque": "",
+      "drvPct": 100,
+      "salary": 5128,
+      "courses": 0,
+      "date": "2026-06-25",
+      "kmd": 0,
+      "time": "08h00"
+    },
+    "mqr2onffp9jebybjcsj": {
+      "comp": 34.6,
+      "createdBy": "Mehdi",
+      "editedBy": "Mehdi",
+      "ext": 0,
+      "id": "mqr2onffp9jebybjcsj",
+      "crsf": "",
+      "editedAt": "2026-06-25T02:15:12.589Z",
+      "taxd": 1,
+      "essence": 0,
+      "crsd": "",
+      "ts": "2026-06-23T20:04:06.939Z",
+      "taxf": 340,
+      "coupDetails": [],
+      "card": 176.4,
+      "ecart": 4.8,
+      "isOwner": false,
+      "vehicle": "Prius 732",
+      "drvPct": 40,
+      "remarque": "",
+      "coup": 0,
+      "sts": 128,
+      "time": "08h00",
+      "courses": 14,
+      "date": "2026-06-23",
+      "salary": 130,
+      "driver": "Mehdi",
+      "pourboire": 9.2,
+      "recette": 339
+    },
+    "mqk0x69vs2ltvcsgh6": {
+      "ecart": 0,
+      "isOwner": false,
+      "vehicle": "Prius 718",
+      "card": 135.55,
+      "taxf": 4035.3,
+      "coupDetails": [],
+      "crsd": "183",
+      "essence": 0,
+      "ts": "2026-06-18T21:40:22.147Z",
+      "ext": 0,
+      "id": "mqk0x69vs2ltvcsgh6",
+      "taxd": 3763.95,
+      "crsf": "198",
+      "comp": 141.55,
+      "createdBy": "Zin Abidine",
+      "recette": 277.1,
+      "pourboire": 10.7,
+      "driver": "Zin Abidine",
+      "salary": 102.54,
+      "time": "08h00",
+      "date": "2026-06-13",
+      "courses": 15,
+      "coup": 0,
+      "sts": 0,
+      "drvPct": 40,
+      "remarque": ""
+    },
+    "mqwyri4t73y7wj2juqk": {
+      "remarque": "",
+      "drvPct": 40,
+      "sts": 0,
+      "coup": 0,
+      "courses": 18,
+      "date": "2026-06-24",
+      "time": "16h00",
+      "kmd": 0,
+      "salary": 185.46,
+      "driver": "Ibrahima",
+      "pourboire": 29.86,
+      "recette": 436.86,
+      "createdBy": "Ibrahima",
+      "comp": 44.65,
+      "taxd": 4639.5,
+      "crsf": "19",
+      "id": "mqwyri4t73y7wj2juqk",
+      "ext": 0,
+      "ts": "2026-06-27T23:00:58.637Z",
+      "essence": 0,
+      "crsd": "1",
+      "coupDetails": [],
+      "taxf": 5046.5,
+      "card": 392.21,
+      "essencePar": "carte",
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "kmf": 0,
+      "ecart": 0
+    },
+    "mqu9jsjmip03mpu24w": {
+      "pourboire": 28.64,
+      "recette": 446.99,
+      "driver": "Alpha",
+      "kmd": 0,
+      "time": "06h00",
+      "courses": 28,
+      "date": "2026-06-25",
+      "salary": 156.14,
+      "drvPct": 40,
+      "remarque": "",
+      "coup": 0,
+      "sts": 0,
+      "essencePar": "carte",
+      "ecart": 28,
+      "vehicle": "Prius 718",
+      "isOwner": false,
+      "kmf": 0,
+      "coupDetails": [],
+      "taxf": 878.05,
+      "card": 370.29,
+      "ext": 0,
+      "editedBy": "Amine",
+      "taxd": 459.7,
+      "crsf": "58",
+      "editedAt": "2026-06-27T06:27:26.595Z",
+      "id": "mqu9jsjmip03mpu24w",
+      "crsd": "30",
+      "essence": 0,
+      "ts": "2026-06-26T01:39:36.130Z",
+      "comp": 76.7,
+      "createdBy": "Alpha"
+    },
+    "mqod0gzzbuoso0z8zwo": {
+      "salary": 118.2,
+      "date": "2026-06-16",
+      "courses": 13,
+      "time": "16h00",
+      "sts": 0,
+      "coup": 83.6,
+      "remarque": "",
+      "drvPct": 40,
+      "recette": 320.7,
+      "pourboire": 12.2,
+      "driver": "Ibrahima",
+      "ts": "2026-06-21T22:29:56.111Z",
+      "crsd": "1",
+      "essence": 0,
+      "taxd": 472.85,
+      "crsf": "14",
+      "editedAt": "2026-06-24T17:40:47.691Z",
+      "id": "mqod0gzzbuoso0z8zwo",
+      "ext": 0,
+      "editedBy": "Amine",
+      "createdBy": "Ibrahima",
+      "comp": 23,
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "ecart": 13,
+      "essencePar": "carte",
+      "card": 214.1,
+      "coupDetails": [],
+      "taxf": 781.35
+    },
+    "mqtznrq20a7prgf00wk": {
+      "courses": 26,
+      "date": "2026-06-25",
+      "time": "08h00",
+      "salary": 185.6,
+      "remarque": "Une course de Walmart a l'hôpital, jai oublier d'allumer le taximètre, peyer a 12$",
+      "drvPct": 40,
+      "sts": 0,
+      "coup": 15.65,
+      "pourboire": 36.52,
+      "recette": 526.67,
+      "driver": "Salim",
+      "crsf": "310",
+      "editedAt": "2026-06-26T03:05:43.561Z",
+      "taxd": 5046,
+      "id": "mqtznrq20a7prgf00wk",
+      "editedBy": "Salim",
+      "ext": 0,
+      "ts": "2026-06-25T21:02:45.530Z",
+      "crsd": "284",
+      "essence": 0,
+      "createdBy": "Salim",
+      "comp": 106.2,
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "ecart": 26.15,
+      "coupDetails": [],
+      "taxf": 5536,
+      "card": 404.82
+    },
+    "mqlaqz0zv3yhzm950uk": {
+      "driver": "Salim",
+      "pourboire": 31.71,
+      "recette": 366.1,
+      "drvPct": 40,
+      "remarque": "",
+      "coup": 46.1,
+      "sts": 0,
+      "time": "08h00",
+      "date": "2026-06-18",
+      "courses": 18,
+      "salary": 130.8,
+      "taxf": 1665,
+      "coupDetails": [],
+      "card": 290,
+      "ecart": 0,
+      "isOwner": false,
+      "vehicle": "Prius 707",
+      "comp": 30,
+      "createdBy": "Salim",
+      "ext": 0,
+      "id": "mqlaqz0zv3yhzm950uk",
+      "crsf": "99",
+      "taxd": 1320,
+      "crsd": "81",
+      "essence": 0,
+      "ts": "2026-06-19T19:03:15.155Z"
+    },
+    "mqpid62oxll0ynuxllf": {
+      "coup": 0,
+      "sts": 0,
+      "drvPct": 40,
+      "remarque": "",
+      "salary": 67.5,
+      "time": "08h00",
+      "date": "2026-06-15",
+      "courses": 1,
+      "driver": "Mehdi",
+      "recette": 157.9,
+      "pourboire": 7.9,
+      "comp": 16,
+      "createdBy": "Mehdi",
+      "essence": 0,
+      "crsd": "1",
+      "ts": "2026-06-22T17:47:32.736Z",
+      "ext": 0,
+      "taxd": 100,
+      "crsf": "2",
+      "id": "mqpid62oxll0ynuxllf",
+      "card": 141.9,
+      "coupDetails": [],
+      "taxf": 250,
+      "ecart": 0,
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "essencePar": "carte"
+    },
+    "mqlfkurvflcpzhoahf5": {
+      "essence": 0,
+      "crsd": "0",
+      "ts": "2026-06-19T21:18:27.787Z",
+      "editedBy": "Salim",
+      "ext": 0,
+      "crsf": "25",
+      "taxd": 0,
+      "editedAt": "2026-06-19T21:20:34.279Z",
+      "id": "mqlfkurvflcpzhoahf5",
+      "comp": 91.55,
+      "createdBy": "Salim",
+      "ecart": 17.1,
+      "vehicle": "Prius 707",
+      "isOwner": false,
+      "card": 255.73,
+      "coupDetails": [],
+      "taxf": 339,
+      "salary": 125.6,
+      "time": "08h00",
+      "courses": 25,
+      "date": "2026-06-19",
+      "coup": 13.5,
+      "sts": 0,
+      "drvPct": 40,
+      "remarque": "",
+      "recette": 360.78,
+      "pourboire": 29.68,
+      "driver": "Salim"
+    },
+    "mqk0arj9hlhxmvjc3le": {
+      "salary": 113.36,
+      "time": "08h00",
+      "date": "2026-06-16",
+      "courses": 20,
+      "coup": 0,
+      "sts": 68.5,
+      "drvPct": 40,
+      "remarque": "",
+      "recette": 303.4,
+      "pourboire": 19.44,
+      "driver": "Zin Abidine",
+      "essence": 0,
+      "crsd": "198",
+      "ts": "2026-06-18T21:22:56.613Z",
+      "editedBy": "Amine",
+      "ext": 0,
+      "id": "mqk0arj9hlhxmvjc3le",
+      "crsf": "218",
+      "editedAt": "2026-06-27T15:45:08.280Z",
+      "taxd": 4035.6,
+      "comp": 26.91,
+      "createdBy": "Zin Abidine",
+      "ecart": 0.56,
+      "isOwner": false,
+      "vehicle": "Prius 718",
+      "card": 207.99,
+      "taxf": 4339,
+      "coupDetails": []
+    },
+    "mquijunofro81k0szod": {
+      "recette": 365.74,
+      "pourboire": 16.64,
+      "driver": "Zin Abidine",
+      "salary": 133.64,
+      "time": "08h00",
+      "courses": 15,
+      "date": "2026-06-25",
+      "coup": 0,
+      "sts": 20.45,
+      "drvPct": 40,
+      "remarque": "",
+      "ecart": 15,
+      "isOwner": false,
+      "vehicle": "Prius 718",
+      "card": 281.59,
+      "taxf": 1227.15,
+      "coupDetails": [],
+      "crsd": "58",
+      "essence": 0,
+      "ts": "2026-06-26T05:51:35.412Z",
+      "ext": 0,
+      "editedBy": "Amine",
+      "id": "mquijunofro81k0szod",
+      "crsf": "73",
+      "editedAt": "2026-06-27T15:42:21.927Z",
+      "taxd": 878.05,
+      "comp": 63.7,
+      "createdBy": "Zin Abidine"
+    },
+    "mqw4l5zxxjjxx3n6ymn": {
+      "createdBy": "Ibrahima",
+      "comp": 107.35,
+      "ts": "2026-06-27T08:56:14.493Z",
+      "essence": 0,
+      "crsd": "1",
+      "id": "mqw4l5zxxjjxx3n6ymn",
+      "editedAt": "2026-06-27T10:44:52.318Z",
+      "crsf": "21",
+      "taxd": 5896.65,
+      "editedBy": "Amine",
+      "ext": 0,
+      "card": 310.24,
+      "taxf": 6298.85,
+      "coupDetails": [],
+      "isOwner": false,
+      "kmf": 0,
+      "vehicle": "Prius 707",
+      "ecart": -4.7,
+      "essencePar": "carte",
+      "sts": 0,
+      "coup": 0,
+      "remarque": "24.70 clients n’a pas payé je t’ai envoyé la photo du taximètre et je t’ai aussi appelé pour t’informer ",
+      "drvPct": 40,
+      "salary": 152.88,
+      "date": "2026-06-26",
+      "courses": 20,
+      "kmd": 0,
+      "time": "16h00",
+      "driver": "Ibrahima",
+      "recette": 417.59,
+      "pourboire": 40.09
+    },
+    "mqod7myv9btsk8eh32": {
+      "sts": 0,
+      "coup": 56.8,
+      "remarque": "56,80 non payés par la cliente \nQue je vous ai envoyé les informations ",
+      "drvPct": 40,
+      "salary": 93.72,
+      "date": "2026-06-17",
+      "courses": 16,
+      "time": "16h00",
+      "driver": "Ibrahima",
+      "recette": 261.59,
+      "pourboire": 11.39,
+      "createdBy": "Ibrahima",
+      "comp": 5.8,
+      "ts": "2026-06-21T22:35:30.439Z",
+      "crsd": "1",
+      "essence": 0,
+      "id": "mqod7myv9btsk8eh32",
+      "taxd": 1070.35,
+      "editedAt": "2026-06-25T00:03:32.890Z",
+      "crsf": "17",
+      "ext": 0,
+      "editedBy": "Ibrahima",
+      "card": 198.99,
+      "taxf": 1320.65,
+      "coupDetails": [],
+      "isOwner": false,
+      "vehicle": "Prius 707",
+      "ecart": 15.9,
+      "essencePar": "carte"
+    },
+    "mqlcr516mlwf97qcfj": {
+      "sts": 0,
+      "coup": 21.85,
+      "remarque": "",
+      "drvPct": 40,
+      "salary": 124.24,
+      "date": "2026-06-18",
+      "courses": 19,
+      "time": "08h00",
+      "driver": "Zin Abidine",
+      "recette": 362.67,
+      "pourboire": 33.07,
+      "createdBy": "Zin Abidine",
+      "comp": 15.05,
+      "ts": "2026-06-19T19:59:22.170Z",
+      "crsd": "262",
+      "essence": 0,
+      "id": "mqlcr516mlwf97qcfj",
+      "taxd": 5121.55,
+      "crsf": "281",
+      "ext": 0,
+      "card": 325.77,
+      "taxf": 5451.15,
+      "coupDetails": [],
+      "isOwner": false,
+      "vehicle": "Prius 718",
+      "ecart": 0
+    },
+    "mqv2gzy6ne25iezllj": {
+      "salary": 119.74,
+      "date": "2026-06-26",
+      "courses": 8,
+      "kmd": 0,
+      "time": "20h00",
+      "sts": 0,
+      "coup": 0,
+      "remarque": "",
+      "drvPct": 40,
+      "recette": 307.32,
+      "pourboire": 0,
+      "driver": "Mohamed",
+      "ts": "2026-06-26T15:09:14.622Z",
+      "essence": 0,
+      "crsd": "310",
+      "crsf": "318",
+      "taxd": 5536.6,
+      "id": "mqv2gzy6ne25iezllj",
+      "ext": 0,
+      "createdBy": "Mohamed",
+      "comp": 150,
+      "vehicle": "Prius 707",
+      "kmf": 0,
+      "isOwner": false,
+      "ecart": 0.03,
+      "essencePar": "carte",
+      "card": 157.32,
+      "coupDetails": [],
+      "taxf": 5843.95
+    },
+    "mqpx6rau3w0cdyr2xld": {
+      "createdBy": "Alpha",
+      "comp": 30.45,
+      "id": "mqpx6rau3w0cdyr2xld",
+      "taxd": 0,
+      "crsf": "18",
+      "ext": 0,
+      "ts": "2026-06-23T00:42:27.895Z",
+      "essence": 0,
+      "crsd": "1",
+      "taxf": 279.8,
+      "coupDetails": [],
+      "card": 274.85,
+      "essencePar": "carte",
+      "isOwner": false,
+      "vehicle": "Prius 732",
+      "ecart": 0,
+      "remarque": "",
+      "drvPct": 40,
+      "sts": 0,
+      "coup": 0,
+      "courses": 17,
+      "date": "2026-06-21",
+      "time": "08h00",
+      "salary": 130.62,
+      "driver": "Alpha",
+      "pourboire": 25.5,
+      "recette": 305.3
+    }
+  },
+  "expenses": {},
+  "audit": [
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Ibrahima",
+      "ts": "2026-06-27T08:08:15.143Z"
+    },
+    {
+      "ts": "2026-06-27T08:12:55.747Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGOUT"
+    },
+    {
+      "ts": "2026-06-27T08:13:39.135Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T08:23:36.040Z"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGIN",
+      "ts": "2026-06-27T08:24:26.363Z"
+    },
+    {
+      "ts": "2026-06-27T08:27:01.036Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T08:29:39.569Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T08:31:20.968Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "ts": "2026-06-27T08:31:37.778Z"
+    },
+    {
+      "ts": "2026-06-27T08:31:44.949Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN"
+    },
+    {
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T08:31:59.175Z"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T08:32:03.647Z"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T08:32:52.492Z"
+    },
+    {
+      "ts": "2026-06-27T08:32:56.889Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-27T08:36:38.553Z"
+    },
+    {
+      "ts": "2026-06-27T08:36:55.862Z",
+      "u": "Amine",
+      "action": "LOGOUT",
+      "detail": ""
+    },
+    {
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "ts": "2026-06-27T08:37:02.498Z"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGIN",
+      "ts": "2026-06-27T08:40:30.905Z"
+    },
+    {
+      "ts": "2026-06-27T08:41:37.121Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T08:44:23.522Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Ibrahima"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T08:44:41.652Z"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T08:44:52.898Z"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGIN",
+      "ts": "2026-06-27T08:45:05.784Z"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T08:45:15.524Z"
+    },
+    {
+      "ts": "2026-06-27T08:45:22.121Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN"
+    },
+    {
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T08:46:05.138Z"
+    },
+    {
+      "ts": "2026-06-27T08:56:14.497Z",
+      "detail": "Ibrahima/Prius 707/2026-06-26/$417.59",
+      "u": "Ibrahima",
+      "action": "ADD"
+    },
+    {
+      "action": "ADD",
+      "u": "Ibrahima",
+      "detail": "Ibrahima/Prius 707/2026-06-26/$0.00",
+      "ts": "2026-06-27T08:56:19.541Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-27T08:58:05.680Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "ts": "2026-06-27T08:58:18.466Z"
+    },
+    {
+      "ts": "2026-06-27T08:58:38.351Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "u": "Amine",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T08:59:57.180Z"
+    },
+    {
+      "ts": "2026-06-27T09:02:51.276Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T09:23:40.092Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "ts": "2026-06-27T09:23:57.830Z"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T09:25:23.920Z"
+    },
+    {
+      "ts": "2026-06-27T09:31:59.988Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-27T09:32:08.623Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "ts": "2026-06-27T09:32:45.769Z"
+    },
+    {
+      "ts": "2026-06-27T09:32:53.870Z",
+      "action": "LOGIN",
+      "u": "Ibrahima",
+      "detail": ""
+    },
+    {
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T09:34:02.937Z"
+    },
+    {
+      "ts": "2026-06-27T09:34:19.777Z",
+      "detail": "",
+      "u": "Salim",
+      "action": "LOGIN"
+    },
+    {
+      "u": "Salim",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T09:35:13.363Z"
+    },
+    {
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T09:35:20.900Z"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T09:39:29.271Z"
+    },
+    {
+      "ts": "2026-06-27T09:39:37.359Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T09:39:51.324Z",
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT"
+    },
+    {
+      "ts": "2026-06-27T09:40:25.885Z",
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGIN"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-27T09:40:34.459Z"
+    },
+    {
+      "ts": "2026-06-27T09:43:36.317Z",
+      "u": "Amine",
+      "action": "LOGOUT",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T09:43:40.418Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T09:43:48.891Z"
+    },
+    {
+      "ts": "2026-06-27T09:44:00.027Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T09:44:32.662Z"
+    },
+    {
+      "ts": "2026-06-27T09:50:31.396Z",
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T09:50:39.298Z"
+    },
+    {
+      "ts": "2026-06-27T09:51:05.664Z",
+      "u": "Amine",
+      "action": "LOGOUT",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T09:51:09.550Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T09:51:53.049Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-27T09:52:22.399Z"
+    },
+    {
+      "ts": "2026-06-27T10:00:15.104Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "u": "Amine",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T10:00:25.060Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-27T10:01:01.109Z"
+    },
+    {
+      "ts": "2026-06-27T10:01:41.320Z",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T10:01:54.667Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN"
+    },
+    {
+      "u": "Ibrahima",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T10:02:12.058Z"
+    },
+    {
+      "ts": "2026-06-27T10:02:33.180Z",
+      "action": "LOGIN",
+      "u": "Salim",
+      "detail": ""
+    },
+    {
+      "u": "Salim",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T10:03:43.094Z"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T10:03:52.161Z"
+    },
+    {
+      "ts": "2026-06-27T10:05:29.143Z",
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT"
+    },
+    {
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T10:05:37.597Z"
+    },
+    {
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T10:07:18.994Z"
+    },
+    {
+      "ts": "2026-06-27T10:07:41.108Z",
+      "action": "LOGIN",
+      "u": "Mehdi",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T10:11:51.128Z",
+      "u": "Mehdi",
+      "action": "LOGOUT",
+      "detail": ""
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T10:13:00.910Z"
+    },
+    {
+      "ts": "2026-06-27T10:13:21.926Z",
+      "action": "LOGIN",
+      "u": "Ibrahima",
+      "detail": ""
+    },
+    {
+      "detail": "Ibrahima/2026-06-26",
+      "u": "Ibrahima",
+      "action": "DEL",
+      "ts": "2026-06-27T10:14:24.326Z"
+    },
+    {
+      "ts": "2026-06-27T10:15:04.574Z",
+      "detail": "Ibrahima/2026-06-26",
+      "action": "EDIT",
+      "u": "Ibrahima"
+    },
+    {
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Ibrahima",
+      "ts": "2026-06-27T10:15:17.009Z"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGIN",
+      "ts": "2026-06-27T10:15:27.076Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "ts": "2026-06-27T10:17:00.254Z"
+    },
+    {
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "ts": "2026-06-27T10:17:08.538Z"
+    },
+    {
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T10:17:56.010Z"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T10:18:01.200Z"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T10:19:52.764Z"
+    },
+    {
+      "ts": "2026-06-27T10:20:00.209Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN"
+    },
+    {
+      "ts": "2026-06-27T10:30:20.740Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T10:30:37.115Z"
+    },
+    {
+      "ts": "2026-06-27T10:32:23.164Z",
+      "action": "EDIT",
+      "u": "Amine",
+      "detail": "Ibrahima/2026-06-26"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T10:39:28.558Z"
+    },
+    {
+      "ts": "2026-06-27T10:39:32.490Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T10:39:41.593Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T10:44:20.919Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "action": "EDIT",
+      "u": "Amine",
+      "detail": "Ibrahima/2026-06-26",
+      "ts": "2026-06-27T10:44:52.324Z"
+    },
+    {
+      "ts": "2026-06-27T10:45:10.420Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T10:45:19.226Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T10:48:34.294Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T10:48:42.747Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-27T10:52:32.879Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-27T10:52:41.793Z"
+    },
+    {
+      "action": "LOGOUT",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T10:52:55.036Z"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T10:52:59.066Z"
+    },
+    {
+      "ts": "2026-06-27T10:57:13.083Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T10:58:07.159Z",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T10:58:24.097Z",
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGIN"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T10:58:56.014Z"
+    },
+    {
+      "ts": "2026-06-27T10:59:32.575Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Mehdi"
+    },
+    {
+      "action": "LOGOUT",
+      "u": "Mehdi",
+      "detail": "",
+      "ts": "2026-06-27T11:00:30.962Z"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Salim",
+      "detail": "",
+      "ts": "2026-06-27T11:00:53.908Z"
+    },
+    {
+      "ts": "2026-06-27T11:01:54.276Z",
+      "action": "LOGOUT",
+      "u": "Salim",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T11:02:05.084Z",
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "u": "Ibrahima",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T11:02:48.761Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Mehdi",
+      "ts": "2026-06-27T11:03:09.263Z"
+    },
+    {
+      "detail": "",
+      "u": "Mehdi",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T11:03:54.283Z"
+    },
+    {
+      "ts": "2026-06-27T11:04:14.308Z",
+      "detail": "",
+      "u": "Alpha",
+      "action": "LOGIN"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T14:49:57.870Z"
+    },
+    {
+      "ts": "2026-06-27T15:15:18.927Z",
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGIN"
+    },
+    {
+      "ts": "2026-06-27T15:16:41.192Z",
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT"
+    },
+    {
+      "ts": "2026-06-27T15:16:48.985Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "action": "LOGOUT",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T15:16:56.156Z"
+    },
+    {
+      "ts": "2026-06-27T15:17:02.606Z",
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T15:17:38.357Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGOUT"
+    },
+    {
+      "ts": "2026-06-27T15:21:26.206Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T15:23:42.164Z",
+      "detail": "Zin Abidine/2026-06-25",
+      "u": "Amine",
+      "action": "EDIT"
+    },
+    {
+      "action": "EDIT",
+      "u": "Amine",
+      "detail": "Zin Abidine/2026-06-25",
+      "ts": "2026-06-27T15:23:51.528Z"
+    },
+    {
+      "detail": "Zin Abidine/2026-06-16",
+      "action": "EDIT",
+      "u": "Amine",
+      "ts": "2026-06-27T15:39:33.955Z"
+    },
+    {
+      "detail": "Zin Abidine/2026-06-16",
+      "action": "EDIT",
+      "u": "Amine",
+      "ts": "2026-06-27T15:40:06.481Z"
+    },
+    {
+      "ts": "2026-06-27T15:40:35.730Z",
+      "action": "EDIT",
+      "u": "Amine",
+      "detail": "Zin Abidine/2026-06-22"
+    },
+    {
+      "detail": "Zin Abidine/2026-06-22",
+      "action": "EDIT",
+      "u": "Amine",
+      "ts": "2026-06-27T15:41:14.639Z"
+    },
+    {
+      "ts": "2026-06-27T15:42:21.933Z",
+      "u": "Amine",
+      "action": "EDIT",
+      "detail": "Zin Abidine/2026-06-25"
+    },
+    {
+      "detail": "Zin Abidine/2026-06-16",
+      "u": "Amine",
+      "action": "EDIT",
+      "ts": "2026-06-27T15:45:08.288Z"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T15:45:44.946Z"
+    },
+    {
+      "ts": "2026-06-27T15:46:05.652Z",
+      "action": "LOGIN",
+      "u": "Zin Abidine",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T15:47:36.269Z",
+      "detail": "",
+      "u": "Zin Abidine",
+      "action": "LOGOUT"
+    },
+    {
+      "ts": "2026-06-27T15:47:43.871Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN"
+    },
+    {
+      "action": "LOGOUT",
+      "u": "Ibrahima",
+      "detail": "",
+      "ts": "2026-06-27T15:47:55.875Z"
+    },
+    {
+      "ts": "2026-06-27T15:48:49.435Z",
+      "action": "LOGIN",
+      "u": "Mehdi",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T16:05:16.781Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T16:05:33.824Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "ts": "2026-06-27T16:07:50.605Z"
+    },
+    {
+      "ts": "2026-06-27T16:08:01.288Z",
+      "action": "LOGIN",
+      "u": "Ibrahima",
+      "detail": ""
+    },
+    {
+      "u": "Ibrahima",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T16:19:44.598Z"
+    },
+    {
+      "ts": "2026-06-27T16:34:19.605Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine"
+    },
+    {
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "ts": "2026-06-27T16:42:20.150Z"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T16:42:25.215Z"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT",
+      "ts": "2026-06-27T16:50:24.994Z"
+    },
+    {
+      "ts": "2026-06-27T16:50:33.627Z",
+      "action": "LOGIN",
+      "u": "Ibrahima",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T16:57:59.819Z",
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T19:32:27.632Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN"
+    },
+    {
+      "ts": "2026-06-27T19:35:59.208Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN"
+    },
+    {
+      "ts": "2026-06-27T19:36:38.964Z",
+      "u": "Salim",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T20:18:18.583Z",
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Ibrahima",
+      "ts": "2026-06-27T20:25:14.420Z"
+    },
+    {
+      "ts": "2026-06-27T20:25:48.806Z",
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Ibrahima"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGIN",
+      "ts": "2026-06-27T20:26:09.592Z"
+    },
+    {
+      "ts": "2026-06-27T20:26:16.342Z",
+      "action": "LOGOUT",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-27T20:26:24.576Z",
+      "action": "LOGIN",
+      "u": "Ibrahima",
+      "detail": ""
+    },
+    {
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "ts": "2026-06-27T20:30:31.192Z"
+    },
+    {
+      "ts": "2026-06-27T20:31:56.295Z",
+      "action": "LOGIN",
+      "u": "Zin Abidine",
+      "detail": ""
+    },
+    {
+      "action": "ADD",
+      "u": "Zin Abidine",
+      "detail": "Zin Abidine/Prius 718/2026-06-26/$689.26",
+      "ts": "2026-06-27T20:45:09.276Z"
+    },
+    {
+      "detail": "",
+      "u": "Mehdi",
+      "action": "LOGIN",
+      "ts": "2026-06-27T20:51:12.393Z"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Salim",
+      "detail": "",
+      "ts": "2026-06-27T21:05:55.309Z"
+    },
+    {
+      "ts": "2026-06-27T21:08:35.857Z",
+      "detail": "Salim/Prius 707/2026-06-27/$278.43",
+      "action": "ADD",
+      "u": "Salim"
+    },
+    {
+      "u": "Salim",
+      "action": "EDIT",
+      "detail": "Salim/2026-06-26",
+      "ts": "2026-06-27T21:29:41.832Z"
+    },
+    {
+      "ts": "2026-06-27T21:41:17.560Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine"
+    },
+    {
+      "ts": "2026-06-27T21:42:22.042Z",
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Amine"
+    },
+    {
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T21:42:30.089Z"
+    },
+    {
+      "ts": "2026-06-27T21:44:52.022Z",
+      "detail": "",
+      "u": "Ibrahima",
+      "action": "LOGOUT"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-27T21:45:09.936Z"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T21:45:36.502Z"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amir",
+      "detail": "",
+      "ts": "2026-06-27T21:45:42.780Z"
+    },
+    {
+      "u": "Amir",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T21:46:45.336Z"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T21:46:50.019Z"
+    },
+    {
+      "detail": "Amine/Prius 707/2026-06-27/$650.00",
+      "action": "ADD",
+      "u": "Amine",
+      "ts": "2026-06-27T21:47:22.320Z"
+    },
+    {
+      "u": "Ibrahima",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-27T22:21:42.327Z"
+    },
+    {
+      "u": "Ibrahima",
+      "action": "ADD",
+      "detail": "Ibrahima/Prius 707/2026-06-23/$564.26",
+      "ts": "2026-06-27T22:26:33.448Z"
+    },
+    {
+      "detail": "Ibrahima/Prius 707/2026-06-24/$436.86",
+      "action": "ADD",
+      "u": "Ibrahima",
+      "ts": "2026-06-27T23:00:58.640Z"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T23:06:04.607Z"
+    },
+    {
+      "u": "Amine",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-27T23:06:47.930Z"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-27T23:06:59.514Z"
+    },
+    {
+      "ts": "2026-06-27T23:15:27.612Z",
+      "detail": "Zin Abidine/2026-06-26",
+      "action": "EDIT",
+      "u": "Amine"
+    },
+    {
+      "ts": "2026-06-28T01:05:39.777Z",
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine"
+    },
+    {
+      "ts": "2026-06-28T01:40:40.693Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-28T01:54:01.594Z"
+    },
+    {
+      "detail": "",
+      "action": "LOGIN",
+      "u": "Amine",
+      "ts": "2026-06-28T02:04:20.114Z"
+    },
+    {
+      "ts": "2026-06-28T02:04:31.279Z",
+      "detail": "46 quarts → taxipro_backup_2026-06-28.json",
+      "action": "DRIVE_BACKUP",
+      "u": "Amine"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-28T02:27:33.295Z"
+    },
+    {
+      "ts": "2026-06-28T02:27:49.134Z",
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGIN"
+    },
+    {
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-28T03:03:37.404Z"
+    },
+    {
+      "detail": "",
+      "u": "Amine",
+      "action": "LOGOUT",
+      "ts": "2026-06-28T03:04:36.276Z"
+    },
+    {
+      "ts": "2026-06-28T03:04:55.961Z",
+      "action": "LOGIN",
+      "u": "Salim",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-28T03:07:06.629Z",
+      "detail": "",
+      "action": "LOGOUT",
+      "u": "Salim"
+    },
+    {
+      "ts": "2026-06-28T03:07:15.671Z",
+      "action": "LOGIN",
+      "u": "Amine",
+      "detail": ""
+    },
+    {
+      "action": "LOGOUT",
+      "u": "Amine",
+      "detail": "",
+      "ts": "2026-06-28T03:07:33.161Z"
+    },
+    {
+      "u": "Zin Abidine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-28T03:07:40.386Z"
+    },
+    {
+      "u": "Zin Abidine",
+      "action": "LOGOUT",
+      "detail": "",
+      "ts": "2026-06-28T03:14:58.801Z"
+    },
+    {
+      "ts": "2026-06-28T03:15:09.141Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": "",
+      "ts": "2026-06-28T04:08:04.838Z"
+    },
+    {
+      "ts": "2026-06-28T04:09:47.655Z",
+      "u": "Amine",
+      "action": "LOGIN",
+      "detail": ""
+    },
+    {
+      "ts": "2026-06-28T04:10:23.576Z",
+      "u": "Amine",
+      "action": "DRIVE_BACKUP",
+      "detail": "46 quarts → taxipro_backup_2026-06-28.json"
+    }
+  ],
+  "source": "Google Drive Auto-Backup"
+}
