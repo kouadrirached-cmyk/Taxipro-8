@@ -946,9 +946,8 @@ body{
         <h1>TaxiPro</h1>
         <div class="sub">Fleet Management System</div>
         <div class="login-plates" id="lPlates">
-          <div class="plate">707</div>
-          <div class="plate">732</div>
-          <div class="plate">718</div>
+          <div class="plate">101</div>
+          <div class="plate">102</div>
         </div>
       </div>
       <div class="lcard" id="loginCard" style="margin-top:28px;">
@@ -1866,18 +1865,16 @@ const DEF={
   emailjsTemplateId:'',
   emailjsPublicKey:'',
   fixedCosts:{insurance:880,carRental:850,otherLabel:'',other:0},
+  // Config de DÉMO neutre — ne sert qu'aux appareils neufs sans données.
+  // Les vraies flottes vivent dans Firestore + localStorage : cette liste
+  // ne les touche jamais. (Aucun vrai nom ici — vitrine publique.)
   drivers:[
-    {id:'ami', name:'Amine',       pw:'1234',role:'owner', pct:100,phone:'',email:'',active:true},
-    {id:'zin', name:'Zin Abidine', pw:'1234',role:'driver',pct:40, phone:'',email:'',active:true},
-    {id:'ibr', name:'Ibrahima',    pw:'1234',role:'driver',pct:40, phone:'',email:'',active:true},
-    {id:'meh', name:'Mehdi',       pw:'1234',role:'driver',pct:40, phone:'',email:'',active:true},
-    {id:'ima', name:'Imad',        pw:'1234',role:'driver',pct:40, phone:'',email:'',active:true},
-    {id:'ahm', name:'Ahmed',       pw:'1234',role:'driver',pct:40, phone:'',email:'',active:true},
+    {id:'demo_own', name:'Patron (démo)',    pw:'1234',role:'owner', pct:100,phone:'',email:'',active:true},
+    {id:'demo_drv', name:'Chauffeur (démo)', pw:'1234',role:'driver',pct:40, phone:'',email:'',active:true},
   ],
   vehicles:[
-    {id:'v707',num:'707',model:'Prius',active:true,notes:''},
-    {id:'v732',num:'732',model:'Prius',active:true,notes:''},
-    {id:'v718',num:'718',model:'Prius',active:true,notes:''},
+    {id:'v101',num:'101',model:'Prius',active:true,notes:''},
+    {id:'v102',num:'102',model:'Prius',active:true,notes:''},
   ],
 };
 let C=null,S={},EX={},AU=[];
@@ -8340,7 +8337,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-16-v66-COMPARAISON';
+var APP_VERSION = '2026-07-16-v67-DEMO-NEUTRE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
