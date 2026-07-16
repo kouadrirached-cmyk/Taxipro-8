@@ -1,0 +1,72 @@
+rules_version = '2';
+// ═══════════════════════════════════════════════════════════════
+// TAXIPRO — Règles de sécurité Firestore (v65)
+// Isolation stricte des données par flotte.
+//
+// Modèle :
+//  - Chaque flotte = une collection racine (ex: taxipro, fl_taxiabc_x1y2z3)
+//    avec 5 documents de données : config, shifts, expenses, audit, deleted.
+//  - Chaque flotte a un 6e document « members » :
+//      { joinKey: "<code de la flotte>", locked: bool, uids: { <uid>: true } }
+//  - Chaque appareil s'authentifie anonymement (Firebase Auth) et son uid
+//    doit figurer dans members.uids pour lire/écrire les données.
+//  - Un nouvel appareil peut s'ajouter lui-même à members UNIQUEMENT s'il
+//    fournit le bon joinKey ET que la flotte n'est pas verrouillée (locked).
+//  - Le premier appareil d'une flotte crée le document members (inscription
+//    autonome ou prise de possession d'une flotte existante).
+// ═══════════════════════════════════════════════════════════════
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{fleet}/{doc} {
+
+      function membersPath() {
+        return /databases/$(database)/documents/$(fleet)/members;
+      }
+      function isMember() {
+        return request.auth != null
+          && exists(membersPath())
+          && get(membersPath()).data.get('uids', {}).get(request.auth.uid, false) == true;
+      }
+      function isDataDoc() {
+        return doc in ['config', 'shifts', 'expenses', 'audit', 'deleted'];
+      }
+
+      // ── Documents de données : membres de la flotte seulement ──
+      allow read, write: if isDataDoc() && isMember();
+
+      // ── Document « members » ──
+      // Lecture : membres seulement (contient la liste des appareils)
+      allow read: if doc == 'members' && isMember();
+
+      // Création : première prise de possession de la flotte
+      // (inscription autonome, ou migration d'une flotte existante).
+      // L'appareil créateur ne peut inscrire QUE lui-même.
+      allow create: if doc == 'members'
+        && request.auth != null
+        && request.resource.data.joinKey is string
+        && request.resource.data.uids is map
+        && request.resource.data.uids.keys().hasOnly([request.auth.uid])
+        && request.resource.data.uids[request.auth.uid] == true;
+
+      // Mise à jour par un membre existant (gérer les appareils,
+      // verrouiller/déverrouiller la flotte, changer le joinKey).
+      allow update: if doc == 'members' && isMember();
+
+      // Auto-inscription d'un NOUVEL appareil : bon joinKey exigé,
+      // flotte non verrouillée, et il ne peut qu'ajouter SON propre uid
+      // (aucune autre modification permise).
+      allow update: if doc == 'members'
+        && request.auth != null
+        && resource.data.get('locked', false) != true
+        && request.resource.data.joinKey == resource.data.joinKey
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uids'])
+        && request.resource.data.uids.diff(resource.data.uids).addedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.uids.diff(resource.data.uids).removedKeys().size() == 0
+        && request.resource.data.uids.diff(resource.data.uids).changedKeys().size() == 0
+        && request.resource.data.uids[request.auth.uid] == true;
+
+      // NOTE : la suppression du document members n'est jamais autorisée
+      // (aucune règle allow delete ne le couvre — refus par défaut).
+    }
+  }
+}

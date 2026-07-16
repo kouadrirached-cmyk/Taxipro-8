@@ -23,6 +23,7 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 - **Verrou d'hydratation (hydration lock)** : empêche les données locales périmées d'écraser Firestore au chargement.
 - **Écritures par lots atomiques** (Firestore batch writes) : toute écriture multi-documents doit rester atomique.
 - **BUG HISTORIQUE À NE JAMAIS RÉINTRODUIRE** : `location.reload()` appelé avant la fin des écritures asynchrones Firebase = perte de données. Toujours `await` toutes les écritures avant tout reload.
+- **Sécurité Firestore (v65)** : chaque appareil s'authentifie anonymement (Firebase Auth) et s'inscrit dans le doc `members` de sa flotte via `window._fbEnsure()`. Les règles (`firestore.rules`) n'autorisent lecture/écriture qu'aux membres. TOUJOURS `await window._fbEnsure()` avant toute opération Firestore directe. À la création d'une flotte, le doc `members` doit être écrit AVANT le batch des documents de données.
 
 ## Fonctionnalités existantes (v63 et plus — le code fait foi, pas cette liste)
 - Paie automatique 60/40 avec gestion propriétaire-conducteur
@@ -49,8 +50,8 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 - Après déploiement, l'utilisateur doit utiliser « 🔄 Forcer la mise à jour » dans l'app.
 
 ## Feuille de route produit (SaaS)
-1. Inscription autonome : un nouveau propriétaire crée son compte, sa flotte et ses chauffeurs sans intervention manuelle.
-2. Isolation stricte des données par flotte via les règles de sécurité Firestore.
-3. Page d'accueil de vente avec essai gratuit 30 jours.
+1. ✅ Inscription autonome (v64) : un nouveau propriétaire crée son compte, sa flotte et ses chauffeurs sans intervention manuelle.
+2. ✅ Isolation stricte des données par flotte (v65) : Auth anonyme + doc `members` par flotte + règles `firestore.rules` (à coller dans la console Firebase). Bouton « Verrouiller la flotte » dans Réglages.
+3. Page d'accueil de vente avec essai gratuit 30 jours (champs `createdAt`/`trialEndsAt` déjà dans la config de flotte depuis v64).
 4. Paiement par abonnement via Stripe Checkout.
 5. Politique de confidentialité conforme à la Loi 25 (Québec).
