@@ -2961,6 +2961,111 @@ function renderWkList(){
   el.innerHTML=arr.map(s=>shiftRow(s,cmap)).join('');
 }
 
+// ═══════════════════════════════════════════════
+// 📊 COMPARAISON vs PÉRIODE PRÉCÉDENTE (v66)
+// Semaine vs semaine passée, mois vs mois passé, jour vs veille,
+// année vs année passée — suit les onglets du Tableau de bord.
+// ═══════════════════════════════════════════════
+function getPrevRef(){
+  const d=getRef();
+  if(perMode==='day')d.setDate(d.getDate()-1);
+  else if(perMode==='week')d.setDate(d.getDate()-7);
+  else if(perMode==='month')d.setMonth(d.getMonth()-1);
+  else if(perMode==='year')d.setFullYear(d.getFullYear()-1);
+  return d;
+}
+function inPerRef(ds,r){
+  if(perMode==='day')return inDay(ds,r);
+  if(perMode==='week')return inWk(ds,r);
+  if(perMode==='month')return inMo(ds,r);
+  return inYr(ds,r);
+}
+// Ligne de comparaison : libellé · avant → maintenant · variation %
+// goodUp=true : une hausse est une bonne nouvelle (vert). false : mauvaise (rouge).
+function _compRow(icone,lbl,prev,cur,goodUp,isMoney){
+  if(!prev&&!cur)return '';
+  const f=isMoney?fm:function(n){return String(Math.round(n));};
+  let badge;
+  if(!prev&&cur){badge='<span style="color:var(--gold);font-weight:800;">🆕</span>';}
+  else{
+    const delta=cur-prev;
+    const pct=prev!==0?(delta/Math.abs(prev)*100):0;
+    const up=delta>=0;
+    const good=(up&&goodUp)||(!up&&!goodUp);
+    const col=Math.abs(pct)<0.5?'var(--m2)':(good?'var(--grn)':'var(--red)');
+    badge='<span style="color:'+col+';font-weight:900;">'+(up?'▲':'▼')+' '+(pct>=0?'+':'')+pct.toFixed(0)+'%</span>';
+  }
+  return '<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--brd);font-size:12px;">'
+    +'<span style="color:var(--m3);flex:1;">'+icone+' '+lbl+'</span>'
+    +'<span style="color:var(--m2);margin-right:10px;white-space:nowrap;">'+f(prev)+' → <b style="color:var(--txt);">'+f(cur)+'</b></span>'
+    +badge+'</div>';
+}
+function periodCompHTML(forDriver){
+  if(perMode==='all')return '';
+  const rCur=getRef(),rPrev=getPrevRef();
+  let cur=getArr().filter(s=>inPerRef(s.date,rCur));
+  let prev=getArr().filter(s=>inPerRef(s.date,rPrev));
+  if(forDriver){cur=cur.filter(s=>s.driver===U.name);prev=prev.filter(s=>s.driver===U.name);}
+  if(!cur.length&&!prev.length)return '';
+  const lblMap={day:'vs la veille',week:'vs semaine précédente',month:'vs mois précédent',year:'vs année précédente'};
+  const sum=(a,f)=>a.reduce((t,s)=>t+f(s),0);
+  let rows='';
+  if(forDriver){
+    // Vue chauffeur : uniquement SES chiffres (jamais les données globales)
+    rows+=_compRow('💼','Mon salaire',sum(prev,calcSalary),sum(cur,calcSalary),true,true);
+    rows+=_compRow('🔢','Taximètre net',sum(prev,s=>pf(s.taxf)-pf(s.taxd)),sum(cur,s=>pf(s.taxf)-pf(s.taxd)),true,true);
+    rows+=_compRow('🪙','Pourboires',sum(prev,s=>pf(s.pourboire)),sum(cur,s=>pf(s.pourboire)),true,true);
+    rows+=_compRow('🚗','Quarts',prev.length,cur.length,true,false);
+    rows+=_compRow('🚕','Courses',sum(prev,s=>pi(s.courses)),sum(cur,s=>pi(s.courses)),true,false);
+  }else{
+    const expCur=getExpArr().filter(e=>inPerRef(e.date,rCur)).reduce((t,e)=>t+pf(e.amount),0);
+    const expPrev=getExpArr().filter(e=>inPerRef(e.date,rPrev)).reduce((t,e)=>t+pf(e.amount),0);
+    rows+=_compRow('💰','Recette',sum(prev,s=>s.recette||0),sum(cur,s=>s.recette||0),true,true);
+    rows+=_compRow('👑','Profit patron',sum(prev,calcOwnerProfit),sum(cur,calcOwnerProfit),true,true);
+    rows+=_compRow('💼','Salaires versés',sum(prev,calcSalary),sum(cur,calcSalary),true,true);
+    rows+=_compRow('⛽','Essence',sum(prev,s=>pf(s.essence)),sum(cur,s=>pf(s.essence)),false,true);
+    rows+=_compRow('💸','Dépenses',expPrev,expCur,false,true);
+    rows+=_compRow('🚗','Quarts',prev.length,cur.length,true,false);
+    rows+=_compRow('🚕','Courses',sum(prev,s=>pi(s.courses)),sum(cur,s=>pi(s.courses)),true,false);
+  }
+  if(!rows)return '';
+  // ⚖️ À JOUR ÉGAL : période EN COURS incomplète → comparer la période
+  // précédente coupée au même nombre de jours (comparaison honnête).
+  let fairHTML='';
+  if(perOff===0&&(perMode==='week'||perMode==='month')){
+    const now=new Date();
+    let prevFair;
+    if(perMode==='week'){
+      const ws=gwS(now);
+      const elapsed=Math.floor((now-ws)/864e5)+1; // 1..7
+      if(elapsed<7){
+        const pws=gwS(rPrev),cutoff=new Date(pws);cutoff.setDate(cutoff.getDate()+elapsed);
+        prevFair=prev.filter(s=>parseLocalDate(s.date)<cutoff);
+      }
+    }else{
+      const dom=now.getDate();
+      const lastDayPrev=new Date(rPrev.getFullYear(),rPrev.getMonth()+1,0).getDate();
+      if(dom<lastDayPrev)prevFair=prev.filter(s=>parseLocalDate(s.date).getDate()<=dom);
+    }
+    if(prevFair){
+      const key=forDriver?calcSalary:(s=>s.recette||0);
+      const fp=sum(prevFair,key),fc=sum(cur,key);
+      if(fp||fc){
+        const delta=fc-fp,pct=fp!==0?(delta/Math.abs(fp)*100):0;
+        const col=delta>=0?'var(--grn)':'var(--red)';
+        fairHTML='<div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.18);border-radius:10px;padding:8px 11px;margin-top:9px;font-size:11px;line-height:1.6;">'
+          +'⚖️ <b>À jour égal</b> ('+(perMode==='week'?'même point de la semaine':'même jour du mois')+') : '
+          +(forDriver?'salaire ':'recette ')+fm(fp)+' avant → <b style="color:var(--txt);">'+fm(fc)+'</b> maintenant '
+          +'<b style="color:'+col+';">('+(delta>=0?'▲ +':'▼ ')+pct.toFixed(0)+'%)</b></div>';
+      }
+    }
+  }
+  return '<div class="card" style="border-color:rgba(96,165,250,.3);">'
+    +'<div class="ctit"><span><span class="ci">📊</span>Comparaison — '+lblMap[perMode]+'</span></div>'
+    +rows+fairHTML
+    +'</div>';
+}
+
 // ═══ PAGES ═══
 function goPage(name){
   // 🔒 Pages strictement réservées au patron (données financières de l'entreprise)
@@ -3098,6 +3203,7 @@ function renderDash(){
       +'<div><div class="slb">🎟️ Coupons</div><div style="font-size:16px;font-weight:900;color:var(--neon);">'+fm(totCoup)+'</div></div>'
       +'</div></div>'
       +'</div>'
+      +periodCompHTML(false)
       +payBreakHTML
       // ════ TABLEAU RÉCAP 60% PAR CHAUFFEUR (semaine courante ou période sélectionnée) ════
       +(Object.keys(byD).length?(function(){
@@ -3195,6 +3301,8 @@ function renderDash(){
       +'<div class="hero-cumul">🔄 Cumul semaine: '+fm(wkCumul)+'</div>'
       +'<div class="hero-period">'+arr.length+' quart'+(arr.length!==1?'s':'')+' · '+fm(myCash)+' comptant reçu</div>'
       +'</div>'
+      // Comparaison vs période précédente (mes chiffres seulement)
+      +periodCompHTML(true)
       // KPIs
       +'<div class="sg">'
       +'<div class="sb gold full"><div class="slb">🔢 Taximètre net ('+perLabel()+')</div><div class="sv cgold">'+fm(myTaxNet)+'</div><div class="ssb">Cumul semaine: '+fm(wkTaxNet)+'</div></div>'
@@ -8232,7 +8340,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-16-v65-SECURITE';
+var APP_VERSION = '2026-07-16-v66-COMPARAISON';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
