@@ -220,6 +220,12 @@ body{
   box-shadow:0 20px 60px rgba(0,0,0,.7),0 0 0 1px rgba(245,200,0,.06),inset 0 1px 0 rgba(245,200,0,.06);
 }
 .lcard h2{font-size:18px;font-weight:800;margin-bottom:20px;letter-spacing:-.3px;color:var(--gold3);}
+/* ═══ INSCRIPTION (signup) ═══ */
+.sg-in{flex:1;min-width:0;padding:11px 12px;background:rgba(24,18,0,.9);border:1.5px solid var(--brd);border-radius:var(--rs);color:var(--txt);font-size:14px;-webkit-appearance:none;outline:none;font-family:inherit;}
+.sg-in:focus{border-color:var(--gold);}
+.sg-add{background:var(--gold);color:#0a0800;border:none;border-radius:var(--rs);padding:0 16px;font-weight:900;font-size:18px;cursor:pointer;flex-shrink:0;}
+.sg-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--brd);font-size:12px;}
+.sg-del{background:rgba(255,58,58,.12);border:1px solid rgba(255,58,58,.3);color:var(--red);border-radius:7px;padding:3px 9px;font-size:11px;cursor:pointer;font-weight:700;}
 
 /* ═══ INPUTS ═══ */
 .fi{margin-bottom:14px;}
@@ -939,18 +945,54 @@ body{
         <span class="login-taxi">🚕</span>
         <h1>TaxiPro</h1>
         <div class="sub">Fleet Management System</div>
-        <div class="login-plates">
+        <div class="login-plates" id="lPlates">
           <div class="plate">707</div>
           <div class="plate">732</div>
           <div class="plate">718</div>
         </div>
       </div>
-      <div class="lcard" style="margin-top:28px;">
+      <div class="lcard" id="loginCard" style="margin-top:28px;">
         <h2>🔐 Connexion</h2>
+        <div id="lFleetLbl" style="display:none;font-size:11px;color:var(--m2);margin:-10px 0 14px;"></div>
         <div class="fi"><label>Identification</label><div class="sw"><select id="lu"></select></div></div>
         <div class="fi"><label>Code d'accès</label><input type="password" id="lp" placeholder="••••••"/></div>
         <div id="lerr" class="ial iale" style="display:none"></div>
         <button class="btn btn-gold" onclick="doLogin()">🚀 Accéder au système</button>
+      </div>
+      <div id="loginAltBtns" style="margin-top:14px;display:grid;gap:8px;">
+        <button class="btn btn-neon" onclick="showSignup()">🚀 Nouveau propriétaire — Créer ma flotte</button>
+        <button class="btn bsec" onclick="loginJoinFleet()">🔑 J'ai un code de flotte</button>
+      </div>
+      <!-- ══ INSCRIPTION AUTONOME — un nouveau propriétaire crée sa flotte ══ -->
+      <div class="lcard" id="signupCard" style="margin-top:16px;display:none;">
+        <h2>🚀 Créer ma flotte</h2>
+        <div style="font-size:11px;color:var(--m2);margin-bottom:16px;line-height:1.6;">Créez votre compte de propriétaire en 1 minute — aucune intervention manuelle. Vos données sont <b style="color:var(--gold)">totalement séparées</b> des autres flottes.</div>
+        <div class="fi"><label>🏢 Nom de la compagnie</label><input type="text" id="sg-company" placeholder="Ex: Taxi Tremblay Inc."></div>
+        <div class="fi"><label>👑 Votre nom (propriétaire)</label><input type="text" id="sg-owner" placeholder="Ex: Jean Tremblay"></div>
+        <div class="fi"><label>📧 Courriel</label><input type="email" id="sg-email" placeholder="proprietaire@courriel.com" autocapitalize="none" autocomplete="email"></div>
+        <div class="frow">
+          <div class="fsm"><label>Mot de passe (6+)</label><input type="password" id="sg-pw" placeholder="••••••"></div>
+          <div class="fsm"><label>Confirmer</label><input type="password" id="sg-pw2" placeholder="••••••"></div>
+        </div>
+        <hr class="div">
+        <div style="font-size:12px;font-weight:800;color:var(--gold3);margin-bottom:8px;">🚗 Mes véhicules <span style="color:var(--m2);font-weight:500;">(minimum 1)</span></div>
+        <div id="sgVehList"></div>
+        <div style="display:flex;gap:7px;margin:8px 0 16px;">
+          <input type="text" class="sg-in" id="sg-vnum" placeholder="N° (ex: 101)">
+          <input type="text" class="sg-in" id="sg-vmodel" placeholder="Modèle (ex: Prius)">
+          <button class="sg-add" onclick="sgAddVeh()">+</button>
+        </div>
+        <div style="font-size:12px;font-weight:800;color:var(--gold3);margin-bottom:8px;">👥 Mes chauffeurs <span style="color:var(--m2);font-weight:500;">(optionnel — ajoutables plus tard)</span></div>
+        <div id="sgDrvList"></div>
+        <div style="display:flex;gap:7px;margin:8px 0 10px;">
+          <input type="text" class="sg-in" id="sg-dname" placeholder="Nom du chauffeur">
+          <input type="text" class="sg-in" id="sg-dpw" placeholder="Mot de passe">
+          <button class="sg-add" onclick="sgAddDrv()">+</button>
+        </div>
+        <div style="font-size:10px;color:var(--m2);margin-bottom:14px;line-height:1.6;">💰 Partage par défaut : <b style="color:var(--gold)">60 % propriétaire / 40 % chauffeur</b> (modifiable dans ⚙️ Réglages). 🔐 Les mots de passe sont hachés SHA-256 — jamais stockés en clair.</div>
+        <div id="sgErr" class="ial iale" style="display:none"></div>
+        <button class="btn btn-gold" id="sgCreateBtn" onclick="signupCreateFleet()">✓ Créer ma flotte</button>
+        <button class="btn bsec" style="margin-top:8px;" onclick="hideSignup()">← Retour à la connexion</button>
       </div>
       <div class="chkbar" style="position:absolute;bottom:0;left:0;right:0;"></div>
     </div>
@@ -2204,6 +2246,21 @@ function initLogin(){
   const sel=document.getElementById('lu');
   sel.innerHTML=C.drivers.filter(d=>d.active!==false)
     .map(d=>'<option value="'+d.id+'">'+(d.role==='owner'?'👑':'🚗')+' '+d.name+'</option>').join('');
+  // Identité de la flotte active (multi-tenant)
+  const esc=s=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const lbl=document.getElementById('lFleetLbl');
+  if(lbl){
+    const t=window.TXP_TENANT||'taxipro';
+    if(t==='taxipro'){lbl.style.display='none';}
+    else{
+      lbl.innerHTML='🏢 Flotte : <b style="color:var(--gold3)">'+esc(C.companyName||t)+'</b>';
+      lbl.style.display='block';
+    }
+  }
+  // Plaques : numéros réels des véhicules de la flotte
+  const pl=document.getElementById('lPlates');
+  const av=(C.vehicles||[]).filter(v=>v.active!==false);
+  if(pl&&av.length)pl.innerHTML=av.slice(0,3).map(v=>'<div class="plate">'+esc(v.num)+'</div>').join('');
 }
 
 // ═══ LOGIN / LOGOUT ═══
@@ -2645,8 +2702,9 @@ function saveShift(){
 }
 
 function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn,pct,taxNet,salary,ecart,kmd,kmf,justifTxt}){
+  const selVehObj=C.vehicles.find(v=>v.num===selV);
   const s={
-    id:uid(),date:gv('fd'),time:gv('ft'),vehicle:'Prius '+selV,driver,
+    id:uid(),date:gv('fd'),time:gv('ft'),vehicle:((selVehObj&&selVehObj.model)||'Prius')+' '+selV,driver,
     isOwner:isOwn,drvPct:pct,taxd,taxf,crsd:gv('fcrsd'),crsf:gv('fcrsf'),
     courses:crs,comp,card,sts,coup,ext,pourboire:pour,
     coupDetails:[...coupClients],
@@ -4699,7 +4757,7 @@ function openAddExp(){
   editExpId=null;
   document.getElementById('expMTit').innerHTML='➕ Dépense <button class="mclose" onclick="closeM(\'expMov\')">✕</button>';
   const cats=['Réparation','Entretien','Huile','Pneus','Carburant','Assurance','Autre'];
-  document.getElementById('expForm').innerHTML='<div class="fsm"><label>Catégorie</label><div class="sw"><select id="ec-cat">'+cats.map(c=>'<option>'+c+'</option>').join('')+'</select></div></div><div class="fsm"><label>Montant ($)</label><input type="number" inputmode="decimal" id="ec-amt" placeholder="0.00"></div><div class="fsm"><label>Date</label><input type="date" id="ec-date" value="'+today()+'"></div><div class="fsm"><label>Véhicule</label><div class="sw"><select id="ec-veh"><option value="Général">Général</option>'+C.vehicles.map(v=>'<option value="Prius '+v.num+'">Prius '+v.num+'</option>').join('')+'</select></div></div><div class="fsm"><label>Description</label><input type="text" id="ec-desc" placeholder="Ex: Changement pneus..."></div>';
+  document.getElementById('expForm').innerHTML='<div class="fsm"><label>Catégorie</label><div class="sw"><select id="ec-cat">'+cats.map(c=>'<option>'+c+'</option>').join('')+'</select></div></div><div class="fsm"><label>Montant ($)</label><input type="number" inputmode="decimal" id="ec-amt" placeholder="0.00"></div><div class="fsm"><label>Date</label><input type="date" id="ec-date" value="'+today()+'"></div><div class="fsm"><label>Véhicule</label><div class="sw"><select id="ec-veh"><option value="Général">Général</option>'+C.vehicles.map(v=>'<option value="'+(v.model||'Prius')+' '+v.num+'">'+(v.model||'Prius')+' '+v.num+'</option>').join('')+'</select></div></div><div class="fsm"><label>Description</label><input type="text" id="ec-desc" placeholder="Ex: Changement pneus..."></div>';
   document.getElementById('expMov').classList.add('on');
 }
 function saveExp(){
@@ -5231,7 +5289,7 @@ function renderFleetInfo(){
   var isMain=(t==='taxipro');
   var sz=0;try{sz=Math.round(JSON.stringify(S).length/1024);}catch(e){}
   el.innerHTML=
-    '<div><b style="color:var(--neon)">Flotte active :</b> '+(isMain?'⭐ PRINCIPALE (mes données)':'🧪 '+t)+'</div>'
+    '<div><b style="color:var(--neon)">Flotte active :</b> '+(isMain?'⭐ PRINCIPALE (mes données)':'🏢 '+String(C.companyName||t).replace(/</g,'&lt;'))+'</div>'
     +'<div><b style="color:var(--neon)">Code de connexion :</b> <span style="font-family:monospace;font-weight:900;">'+t+'</span> <button onclick="copyFleetCode()" style="background:none;border:1px solid rgba(0,229,255,.3);color:var(--neon);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer;">📋 Copier</button></div>'
     +'<div><b style="color:var(--neon)">Quarts :</b> '+Object.keys(S).length+' · <b style="color:var(--neon)">Taille :</b> '+sz+' Ko'+(sz>700?' <span style="color:var(--red);font-weight:900;">⚠️ Archivage recommandé</span>':' ✅')+'</div>';
   var back=document.getElementById('backMainFleetBtn');
@@ -5290,6 +5348,182 @@ function switchFleet(code){
 function backToMainFleet(){
   if(!confirm('Revenir à ta flotte PRINCIPALE (tes données) ?'))return;
   switchFleet('taxipro');
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🚀 INSCRIPTION AUTONOME (SaaS) — un nouveau propriétaire crée
+// sa flotte lui-même, sans intervention manuelle.
+// Réutilise l'architecture multi-tenant : la flotte = une collection
+// Firestore dédiée (code tenant) + espace localStorage préfixé.
+// Aucune donnée des autres flottes n'est lue ni écrite.
+// ═══════════════════════════════════════════════════════════
+var _sgVehs=[],_sgDrvs=[];
+function _sgEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+function showSignup(){
+  var lc=document.getElementById('loginCard'),ab=document.getElementById('loginAltBtns'),sc=document.getElementById('signupCard');
+  if(lc)lc.style.display='none';
+  if(ab)ab.style.display='none';
+  if(sc)sc.style.display='block';
+  sgRenderLists();
+}
+function hideSignup(){
+  var lc=document.getElementById('loginCard'),ab=document.getElementById('loginAltBtns'),sc=document.getElementById('signupCard');
+  if(sc)sc.style.display='none';
+  if(lc)lc.style.display='block';
+  if(ab)ab.style.display='grid';
+}
+function sgRenderLists(){
+  var vl=document.getElementById('sgVehList');
+  if(vl)vl.innerHTML=_sgVehs.length
+    ?_sgVehs.map(function(v,i){return '<div class="sg-row"><span>🚗 '+_sgEsc(v.model)+' <b>'+_sgEsc(v.num)+'</b></span><button class="sg-del" onclick="sgDelVeh('+i+')">✕</button></div>';}).join('')
+    :'<div style="font-size:11px;color:var(--m2);">Aucun véhicule ajouté.</div>';
+  var dl=document.getElementById('sgDrvList');
+  if(dl)dl.innerHTML=_sgDrvs.length
+    ?_sgDrvs.map(function(d,i){return '<div class="sg-row"><span>🧑 '+_sgEsc(d.name)+' <span style="color:var(--m2);">(40 %)</span></span><button class="sg-del" onclick="sgDelDrv('+i+')">✕</button></div>';}).join('')
+    :'<div style="font-size:11px;color:var(--m2);">Aucun chauffeur — vous pourrez en ajouter dans 👥 Équipe.</div>';
+}
+function sgAddVeh(){
+  var num=gv('sg-vnum').trim(),model=gv('sg-vmodel').trim()||'Prius';
+  if(!num){alert('Numéro du véhicule requis (ex: 101).');return;}
+  if(_sgVehs.find(function(v){return v.num===num;})){alert('Ce numéro de véhicule existe déjà.');return;}
+  _sgVehs.push({num:num,model:model});
+  document.getElementById('sg-vnum').value='';
+  document.getElementById('sg-vmodel').value='';
+  sgRenderLists();
+}
+function sgDelVeh(i){_sgVehs.splice(i,1);sgRenderLists();}
+function sgAddDrv(){
+  var name=gv('sg-dname').trim(),pw=gv('sg-dpw').trim();
+  if(!name){alert('Nom du chauffeur requis.');return;}
+  if(pw.length<4){alert('Mot de passe du chauffeur : 4 caractères minimum.');return;}
+  if(_sgDrvs.find(function(d){return d.name.toLowerCase()===name.toLowerCase();})){alert('Ce chauffeur existe déjà.');return;}
+  _sgDrvs.push({name:name,pw:pw});
+  document.getElementById('sg-dname').value='';
+  document.getElementById('sg-dpw').value='';
+  sgRenderLists();
+}
+function sgDelDrv(i){_sgDrvs.splice(i,1);sgRenderLists();}
+function _sgErr(msg){
+  var e=document.getElementById('sgErr');
+  if(!e)return;
+  e.textContent=msg;e.style.display='block';
+  e.scrollIntoView({block:'center'});
+}
+// Code tenant lisible : slug de la compagnie + suffixe aléatoire
+function _slugifyFleet(s){
+  return (s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'').slice(0,12)||'flotte';
+}
+// true = existe, false = libre, null = impossible de vérifier (hors-ligne)
+async function _fleetCodeExists(code){
+  if(!window._fbReady)return null;
+  try{
+    var d=await firebase.firestore().collection(code).doc('config').get();
+    return d.exists;
+  }catch(e){return null;}
+}
+async function signupCreateFleet(){
+  var errEl=document.getElementById('sgErr');
+  if(errEl)errEl.style.display='none';
+  var company=gv('sg-company').trim();
+  var ownerName=gv('sg-owner').trim();
+  var email=gv('sg-email').trim().toLowerCase();
+  var pw=gv('sg-pw'),pw2=gv('sg-pw2');
+  if(!company){_sgErr('Nom de la compagnie requis.');return;}
+  if(!ownerName){_sgErr('Votre nom est requis.');return;}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){_sgErr('Courriel invalide.');return;}
+  if(pw.length<6){_sgErr('Mot de passe : 6 caractères minimum.');return;}
+  if(pw!==pw2){_sgErr('Les deux mots de passe ne correspondent pas.');return;}
+  if(!_sgVehs.length){_sgErr('Ajoutez au moins un véhicule (numéro puis bouton +).');return;}
+  if(_sgDrvs.find(function(d){return d.name.toLowerCase()===ownerName.toLowerCase();})){_sgErr('Un chauffeur porte le même nom que le propriétaire.');return;}
+  var btn=document.getElementById('sgCreateBtn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Création en cours...';}
+  try{
+    // Mots de passe TOUJOURS hachés SHA-256 — jamais stockés en clair
+    var h=await window.txpHash(pw);
+    if(!h){_sgErr('Hachage sécurisé indisponible — ouvrez l\'app en HTTPS.');return;}
+    var drivers=[{id:'own',name:ownerName,role:'owner',pct:100,phone:'',email:email,active:true,pwh:h}];
+    for(var i=0;i<_sgDrvs.length;i++){
+      var dh=await window.txpHash(_sgDrvs[i].pw);
+      if(!dh){_sgErr('Hachage sécurisé indisponible — ouvrez l\'app en HTTPS.');return;}
+      drivers.push({id:uid(),name:_sgDrvs[i].name,role:'driver',pct:40,phone:'',email:'',active:true,pwh:dh});
+    }
+    var vehicles=_sgVehs.map(function(v,k){return {id:'v'+(k+1)+'_'+v.num,num:v.num,model:v.model||'Prius',active:true,notes:''};});
+    // Identifiant tenant unique (= nom de la collection Firestore de la flotte)
+    var base='fl_'+_slugifyFleet(company);
+    var code=base+'_'+Math.random().toString(36).slice(2,8);
+    for(var t=0;t<5;t++){
+      var ex=await _fleetCodeExists(code);
+      if(ex!==true)break; // libre (ou vérification impossible) → on garde ce code
+      code=base+'_'+Math.random().toString(36).slice(2,8);
+    }
+    var now=new Date();
+    var trial=new Date(now);trial.setDate(trial.getDate()+30);
+    var newC={
+      companyName:company,
+      ownerEmail:email,
+      createdAt:now.toISOString(),
+      trialEndsAt:trial.toISOString(), // essai gratuit 30 jours (feuille de route SaaS)
+      ownerShare:60, // règle 60/40 : 60 % propriétaire / 40 % chauffeur
+      emailjsServiceId:'',emailjsTemplateId:'',emailjsPublicKey:'',
+      fixedCosts:{insurance:0,carRental:0,otherLabel:'',other:0},
+      drivers:drivers,
+      vehicles:vehicles
+    };
+    // 1) ÉCRITURE CLOUD ATOMIQUE : les 5 documents de la flotte partent en
+    //    UN SEUL batch, et on ATTEND le commit avant tout reload (jamais de
+    //    location.reload() avant la fin des écritures Firebase).
+    var cloudOk=false;
+    if(window._fbReady){
+      try{
+        var sdb=firebase.firestore();
+        var scol=sdb.collection(code);
+        var sbatch=sdb.batch();
+        sbatch.set(scol.doc('config'),newC);
+        sbatch.set(scol.doc('shifts'),{data:{}});
+        sbatch.set(scol.doc('expenses'),{data:{}});
+        sbatch.set(scol.doc('audit'),{data:[]});
+        sbatch.set(scol.doc('deleted'),{s:{},e:{},r:0});
+        // Hors-ligne, commit() attend le réseau : plafond 8 s. L'écriture
+        // reste en file Firestore (persistence) et partira au retour du réseau.
+        await Promise.race([
+          sbatch.commit().then(function(){cloudOk=true;}),
+          new Promise(function(res){setTimeout(res,8000);})
+        ]);
+      }catch(e){console.warn('Inscription: écriture cloud échouée',e);}
+    }
+    // 2) Provisionnement local — même mécanique que la flotte démo
+    var nsk='txpro_v4_'+code;
+    localStorage.setItem(nsk+'_c',JSON.stringify(newC));
+    localStorage.setItem(nsk+'_s','{}');
+    localStorage.setItem(nsk+'_e','{}');
+    localStorage.setItem(nsk+'_a','[]');
+    localStorage.setItem('txpro_lastShiftCount_'+code,'0');
+    localStorage.setItem('txpro_tenant',code);
+    alert('✅ Flotte « '+company+' » créée !\n\n'
+      +'🔑 Code de flotte : '+code+'\n'
+      +'Garde ce code précieusement : il sert à connecter tes autres appareils et ceux de tes chauffeurs (bouton « 🔑 J\'ai un code de flotte »).\n\n'
+      +(cloudOk?'☁️ Flotte synchronisée dans le cloud.':'📵 Réseau indisponible : la flotte sera synchronisée automatiquement au retour de la connexion.')
+      +'\n\nL\'app va recharger sur ta nouvelle flotte.');
+    location.reload(); // sécuritaire : toutes les écritures ci-dessus sont terminées (await)
+  }catch(e){
+    _sgErr('Erreur : '+(e&&e.message?e.message:e));
+  }finally{
+    if(btn){btn.disabled=false;btn.textContent='✓ Créer ma flotte';}
+  }
+}
+// Rejoindre une flotte existante depuis l'écran de connexion
+// (appareil d'un chauffeur ou 2e appareil du propriétaire)
+async function loginJoinFleet(){
+  var code=prompt('Code de la flotte à rejoindre :\n(fourni par le propriétaire — ex: fl_taxitremblay_a1b2c3)');
+  if(!code)return;
+  code=code.trim().toLowerCase();
+  if(!/^[a-z0-9_-]{3,60}$/.test(code)){alert('Code invalide (lettres, chiffres, - et _ seulement).');return;}
+  if(code===window.TXP_TENANT){alert('Tu es déjà connecté à cette flotte.');return;}
+  if(code!=='taxipro'){
+    var ex=await _fleetCodeExists(code);
+    if(ex===false){alert('❌ Flotte introuvable — vérifie le code avec le propriétaire.');return;}
+  }
+  switchFleet(code);
 }
 
 // ═══ ARCHIVAGE (allège la base, protège contre la limite ~1 Mo) ═══
@@ -7763,10 +7997,12 @@ function renderFleet(){
   var el=document.getElementById('fleetList');
   if(!el)return;
   if(!C.fleet)C.fleet={};
-  var veh=['707','718','732'];
+  // Véhicules réels de la flotte active (multi-tenant — plus de liste codée en dur)
+  var vehObjs=(C.vehicles||[]).filter(function(x){return x.active!==false;});
   var h='';
-  for(var i=0;i<veh.length;i++){
-    var v=veh[i];
+  if(!vehObjs.length){el.innerHTML='<div class="empty"><div class="ei">🚗</div>Aucun véhicule actif. Ajoutez-en dans ⚙️ Réglages.</div>';return;}
+  for(var i=0;i<vehObjs.length;i++){
+    var v=vehObjs[i].num,vlbl=(vehObjs[i].model||'Prius')+' '+v;
     var f=C.fleet[v]||{status:'disponible'};
     var st=f.status||'disponible';
     var isD=st==='disponible',isR=st==='en_route',isH=st==='retour';
@@ -7778,7 +8014,7 @@ function renderFleet(){
     var statusDesc=isD?'La voiture est libre':isR?'Voiture occupee en course':('Arrive dans '+(f.eta||'?')+' min');
     h+='<div style="background:'+bgColor+';border:2px solid '+borderColor+';border-radius:16px;padding:16px;margin-bottom:12px;">';
     h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
-    h+='<div style="font-size:20px;font-weight:900;color:#fbcc24;">Prius '+v+'</div>';
+    h+='<div style="font-size:20px;font-weight:900;color:#fbcc24;">'+vlbl+'</div>';
     h+='<div style="text-align:right;">';
     h+='<div style="font-size:16px;">'+statusIcon+'</div>';
     h+='<div style="font-size:10px;font-weight:900;color:'+statusColor+';">'+statusText+'</div>';
@@ -7815,7 +8051,10 @@ function renderClean(){
   var el=document.getElementById('cleanList');
   if(!el)return;
   if(!C.cleans)C.cleans=[];
-  var veh=['707','718','732'];
+  // Véhicules réels de la flotte active (multi-tenant — plus de liste codée en dur)
+  var vehObjs=(C.vehicles||[]).filter(function(x){return x.active!==false;});
+  if(!vehObjs.length){el.innerHTML='<div class="empty"><div class="ei">🔧</div>Aucun véhicule actif. Ajoutez-en dans ⚙️ Réglages.</div>';return;}
+  var veh=vehObjs.map(function(x){return x.num;});
   var now=new Date();
   var ws=new Date(now);
   ws.setDate(now.getDate()-now.getDay()+1);
@@ -7845,7 +8084,7 @@ function renderClean(){
     var huileText=kmRestant===null?'Non configuré':kmRestant>500?'✅ OK ('+Math.round(kmRestant)+' km restants)':kmRestant>0?'⚠️ Bientôt ('+Math.round(kmRestant)+' km)':'🔴 CHANGEMENT REQUIS';
 
     h+='<div style="background:rgba(255,255,255,.03);border:1.5px solid rgba(255,255,255,.1);border-radius:16px;padding:16px;margin-bottom:14px;">';
-    h+='<div style="font-size:20px;font-weight:900;color:#fbcc24;margin-bottom:12px;">🚕 Prius '+v+'</div>';
+    h+='<div style="font-size:20px;font-weight:900;color:#fbcc24;margin-bottom:12px;">🚕 '+(vehObjs[i].model||'Prius')+' '+v+'</div>';
 
     // Nettoyage section
     h+='<div style="background:'+cleanBg+';border:1.5px solid '+cleanBorder+';border-radius:12px;padding:12px;margin-bottom:10px;">';
@@ -7879,7 +8118,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-10-v63-VERIFIED';
+var APP_VERSION = '2026-07-16-v64-INSCRIPTION';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
