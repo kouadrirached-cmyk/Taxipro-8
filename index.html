@@ -1433,6 +1433,7 @@ body{
           <button class="btn bblu bsm" style="padding:11px;" onclick="joinFleet()">🔑 Rejoindre / changer</button>
         </div>
         <button class="btn bsec bsm" id="backMainFleetBtn" style="width:100%;padding:10px;margin-top:8px;display:none;" onclick="backToMainFleet()">🏠 Revenir à ma flotte principale</button>
+        <button class="btn bsec bsm" id="fleetLockBtn" style="width:100%;padding:10px;margin-top:8px;" onclick="toggleFleetLock()">🔒 Verrouiller la flotte (bloquer les nouveaux appareils)</button>
         <button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:8px;" onclick="archiveOldShifts()">🗄️ Archiver les vieux quarts (+12 mois)</button>
       </div>
       <div class="card" style="border-color:rgba(255,120,120,.25);">
@@ -1541,6 +1542,7 @@ body{
 
 <!-- FIREBASE SDK COMPAT — fonctionne iPhone + Android -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script>
 // ════════════════════════════════════════
@@ -1641,6 +1643,48 @@ window.txpMerge = function(local, remote, tombType){
     const COLNAME = window.TXP_TENANT;
     const COL = function(){ return db.collection(COLNAME); };
 
+    // ── AUTH ANONYME + ADHÉSION À LA FLOTTE (sécurité Firestore v65) ──
+    // Chaque appareil obtient une identité anonyme (uid, persistée) et
+    // s'inscrit dans le document «members» de sa flotte. Les règles de
+    // sécurité Firestore (firestore.rules) n'autorisent la lecture et
+    // l'écriture des données qu'aux appareils membres.
+    window._fbUid=null;
+    window._fbMember=false;
+    window._fbJoinDenied=false;
+    let _ensureP=null;
+    async function _ensureAuthMember(){
+      // 1) Connexion anonyme silencieuse (aucun changement pour l'utilisateur)
+      try{
+        if(!firebase.auth)return;
+        if(!firebase.auth().currentUser)await firebase.auth().signInAnonymously();
+        window._fbUid=firebase.auth().currentUser.uid;
+      }catch(e){ console.warn('Auth anonyme indisponible:',e&&e.code); return; }
+      // 2) S'inscrire comme membre de la flotte (idempotent).
+      //    joinKey = code de la flotte : les règles exigent le bon code pour
+      //    rejoindre, et refusent tout nouvel appareil si la flotte est 🔒.
+      if(window._fbMember)return;
+      try{
+        const w={joinKey:COLNAME,uids:{}};
+        w.uids[window._fbUid]=true;
+        // Hors-ligne, set() attend le réseau : plafond 6 s pour ne pas
+        // bloquer le chargement (l'écriture reste en file et partira seule).
+        await Promise.race([
+          COL().doc('members').set(w,{merge:true}).then(function(){window._fbMember=true;}),
+          new Promise(function(res){setTimeout(res,6000);})
+        ]);
+      }catch(e){
+        console.warn('Adhésion à la flotte refusée:',e&&e.code);
+        if(e&&e.code==='permission-denied'&&!window._fbJoinDenied){
+          window._fbJoinDenied=true;
+          setTimeout(function(){alert('🔒 Cette flotte est verrouillée par son propriétaire.\n\nCet appareil ne peut pas la rejoindre pour le moment. Demande au propriétaire de la déverrouiller (⚙️ Réglages → Multi-propriétaire → 🔓), puis rouvre l\'app.');},1200);
+        }
+      }
+    }
+    window._fbEnsure=function(){
+      if(!_ensureP)_ensureP=_ensureAuthMember().finally(function(){ if(!window._fbMember)_ensureP=null; });
+      return _ensureP;
+    };
+
     window._fbPending=false;
     window._fbLastOk=0;
     // VERROU D'HYDRATATION : aucune écriture vers le cloud tant que la
@@ -1677,6 +1721,8 @@ window.txpMerge = function(local, remote, tombType){
             return;
           }
           if(shiftsCount>0)localStorage.setItem(window.TXP_LSC,shiftsCount);
+          // Auth + adhésion à la flotte AVANT toute écriture (règles de sécurité)
+          await window._fbEnsure();
           if(typeof setSyncStatus==='function')setSyncStatus('saving');
           // ÉCRITURE ATOMIQUE : les 5 documents partent en UN SEUL commit.
           // Si la connexion coupe, rien n'est écrit à moitié.
@@ -1721,6 +1767,8 @@ window.txpMerge = function(local, remote, tombType){
       },
       async load(){
         try{
+          // Auth + adhésion à la flotte AVANT toute lecture (règles de sécurité)
+          await window._fbEnsure();
           const [c,s,e,a,d]=await Promise.all([
             COL().doc('config').get(),
             COL().doc('shifts').get(),
@@ -1757,23 +1805,25 @@ window.txpMerge = function(local, remote, tombType){
         }catch(e){console.warn('FB load err',e);return null;}
       },
       listen(onUpdate){
+        // Erreur d'écoute (ex: permission refusée par les règles) → log, sans casser l'app
+        const onErr=function(err){console.warn('FB listen err',err&&err.code);if(typeof setSyncStatus==='function')setSyncStatus('offline');};
         const u1=COL().doc('shifts').onSnapshot(snap=>{
           if(!snap.exists)return;
           if(snap.metadata && snap.metadata.hasPendingWrites)return; // ignorer nos propres ecritures
           onUpdate('shifts',snap.data().data||{});
-        });
+        },onErr);
         const u2=COL().doc('config').onSnapshot(snap=>{
           if(!snap.exists)return;
           if(snap.metadata && snap.metadata.hasPendingWrites)return;
           const fbCfg=snap.data();
           if(!fbCfg||!fbCfg.drivers||!fbCfg.drivers.length)return;
           onUpdate('config',fbCfg);
-        });
+        },onErr);
         const u3=COL().doc('expenses').onSnapshot(snap=>{
           if(!snap.exists)return;
           if(snap.metadata && snap.metadata.hasPendingWrites)return;
           onUpdate('expenses',snap.data().data||{});
-        });
+        },onErr);
         const u4=COL().doc('deleted').onSnapshot(snap=>{
           if(!snap.exists)return;
           const rd=snap.data()||{};
@@ -1793,7 +1843,7 @@ window.txpMerge = function(local, remote, tombType){
             });
           });
           if(changed){window.txpTombSave();onUpdate('deleted',null);}
-        });
+        },onErr);
         return()=>{u1();u2();u3();u4();};
       }
     };
@@ -5291,9 +5341,59 @@ function renderFleetInfo(){
   el.innerHTML=
     '<div><b style="color:var(--neon)">Flotte active :</b> '+(isMain?'⭐ PRINCIPALE (mes données)':'🏢 '+String(C.companyName||t).replace(/</g,'&lt;'))+'</div>'
     +'<div><b style="color:var(--neon)">Code de connexion :</b> <span style="font-family:monospace;font-weight:900;">'+t+'</span> <button onclick="copyFleetCode()" style="background:none;border:1px solid rgba(0,229,255,.3);color:var(--neon);border-radius:6px;padding:2px 8px;font-size:10px;cursor:pointer;">📋 Copier</button></div>'
-    +'<div><b style="color:var(--neon)">Quarts :</b> '+Object.keys(S).length+' · <b style="color:var(--neon)">Taille :</b> '+sz+' Ko'+(sz>700?' <span style="color:var(--red);font-weight:900;">⚠️ Archivage recommandé</span>':' ✅')+'</div>';
+    +'<div><b style="color:var(--neon)">Quarts :</b> '+Object.keys(S).length+' · <b style="color:var(--neon)">Taille :</b> '+sz+' Ko'+(sz>700?' <span style="color:var(--red);font-weight:900;">⚠️ Archivage recommandé</span>':' ✅')+'</div>'
+    +'<div id="fleetSecInfo">🛡️ <b style="color:var(--neon)">Sécurité :</b> vérification...</div>';
   var back=document.getElementById('backMainFleetBtn');
   if(back)back.style.display=isMain?'none':'block';
+  _fillFleetSec();
+}
+
+// ═══ SÉCURITÉ FIRESTORE — statut membre + verrouillage de la flotte ═══
+// Chaque appareil est identifié anonymement (Firebase Auth) et doit être
+// membre de la flotte (doc «members») pour lire/écrire dans le cloud.
+async function _fillFleetSec(){
+  var el=document.getElementById('fleetSecInfo');if(!el)return;
+  if(!window._fbReady){el.innerHTML='🛡️ <b style="color:var(--neon)">Sécurité :</b> ☁️ cloud non connecté (mode local)';return;}
+  try{
+    if(window._fbEnsure)await window._fbEnsure();
+    if(!window._fbUid){
+      el.innerHTML='🛡️ <b style="color:var(--neon)">Sécurité :</b> ⚠️ Auth anonyme non activée (console Firebase → Authentication → Anonyme)';
+      return;
+    }
+    var d=await firebase.firestore().collection(window.TXP_TENANT).doc('members').get();
+    if(!d.exists){el.innerHTML='🛡️ <b style="color:var(--neon)">Sécurité :</b> ⏳ en cours d\'initialisation...';return;}
+    var m=d.data()||{};
+    var n=Object.keys(m.uids||{}).length;
+    var isMem=!!(m.uids&&m.uids[window._fbUid]);
+    el.innerHTML='🛡️ <b style="color:var(--neon)">Sécurité :</b> '
+      +(isMem?'✅ appareil membre':'❌ appareil NON membre')
+      +' · 📱 '+n+' appareil'+(n>1?'s':'')
+      +' · '+(m.locked?'🔒 verrouillée':'🔓 ouverte');
+    var btn=document.getElementById('fleetLockBtn');
+    if(btn)btn.textContent=m.locked
+      ?'🔓 Déverrouiller la flotte (autoriser de nouveaux appareils)'
+      :'🔒 Verrouiller la flotte (bloquer les nouveaux appareils)';
+  }catch(e){
+    el.innerHTML='🛡️ <b style="color:var(--neon)">Sécurité :</b> lecture refusée ('+((e&&e.code)||'?')+')';
+  }
+}
+async function toggleFleetLock(){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  if(!window._fbReady||!firebase.auth||!firebase.auth().currentUser){alert('☁️ Cloud non connecté — impossible pour le moment.');return;}
+  try{
+    var ref=firebase.firestore().collection(window.TXP_TENANT).doc('members');
+    var d=await ref.get();
+    if(!d.exists){alert('Le document de sécurité n\'existe pas encore. Réessaie dans quelques secondes.');return;}
+    var locked=!!(d.data()||{}).locked;
+    var msg=locked
+      ?'🔓 DÉVERROUILLER la flotte ?\n\nLes nouveaux appareils pourront la rejoindre avec le code de flotte.'
+      :'🔒 VERROUILLER la flotte ?\n\nPlus AUCUN nouvel appareil ne pourra rejoindre la flotte, même avec le code. Les appareils déjà connectés (le tien et ceux de tes chauffeurs) continuent de fonctionner normalement.\n\nTu pourras déverrouiller ici en tout temps.';
+    if(!confirm(msg))return;
+    await ref.set({locked:!locked},{merge:true});
+    alert(!locked?'🔒 Flotte verrouillée. Aucun nouvel appareil ne peut la rejoindre.':'🔓 Flotte déverrouillée. Les nouveaux appareils peuvent la rejoindre avec le code.');
+    audit(!locked?'FLEET_LOCK':'FLEET_UNLOCK');
+    _fillFleetSec();
+  }catch(e){alert('Erreur : '+((e&&e.code)||e));}
 }
 function copyFleetCode(){
   var t=window.TXP_TENANT||'taxipro';
@@ -5475,8 +5575,21 @@ async function signupCreateFleet(){
     var cloudOk=false;
     if(window._fbReady){
       try{
+        // Identité anonyme requise par les règles de sécurité Firestore
+        try{ if(firebase.auth&&!firebase.auth().currentUser)await firebase.auth().signInAnonymously(); }catch(eA){ console.warn('Auth anonyme:',eA&&eA.code); }
+        var sUid=(firebase.auth&&firebase.auth().currentUser)?firebase.auth().currentUser.uid:null;
         var sdb=firebase.firestore();
         var scol=sdb.collection(code);
+        // 1a) Créer le document «members» EN PREMIER : les règles exigent
+        //     d'être membre pour pouvoir écrire les documents de données.
+        if(sUid){
+          var sMem={joinKey:code,locked:false,uids:{}};
+          sMem.uids[sUid]=true;
+          await Promise.race([
+            scol.doc('members').set(sMem),
+            new Promise(function(res){setTimeout(res,8000);})
+          ]);
+        }
         var sbatch=sdb.batch();
         sbatch.set(scol.doc('config'),newC);
         sbatch.set(scol.doc('shifts'),{data:{}});
@@ -5586,6 +5699,7 @@ function showDiagnostic(){
    +'\n📱 Version : '+(window.APP_VERSION||'?')
    +'\n🏢 Flotte : '+(window.TXP_TENANT==='taxipro'?'⭐ PRINCIPALE':window.TXP_TENANT)
    +'\n☁️ Cloud Firebase : '+(window._fbReady?'✅ connecté':'❌ hors-ligne (mode local)')
+   +'\n🛡️ Sécurité : '+(window._fbUid?('identité ✅ · '+(window._fbMember?'membre de la flotte ✅':'membre ❌ (en attente)')):'identité anonyme ❌ (Auth non activée ou hors-ligne)')
    +'\n⏳ Sauvegarde en attente : '+(window._fbPending?'⚠️ OUI (relance auto en cours)':'✅ non')
    +'\n🕐 Dernière sync cloud : '+(last?new Date(last).toLocaleString('fr-CA'):'jamais')
    +'\n🚕 Quarts : '+Object.keys(S).length+' ('+sz+' Ko / limite ~1000 Ko)'
@@ -8118,7 +8232,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-16-v64-INSCRIPTION';
+var APP_VERSION = '2026-07-16-v65-SECURITE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
