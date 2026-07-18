@@ -4324,7 +4324,7 @@ function renderAnalyse(){
     });
   }
 
-  c.innerHTML=contribDashHTML()+driverCompareHTML()+dailyBreakdownHTML()+vehAnalysisHTML()+html;
+  c.innerHTML=contribDashHTML()+insightsHTML()+weekdayCompHTML()+duelDrvHTML()+duelVehHTML()+driverCompareHTML()+dailyBreakdownHTML()+vehAnalysisHTML()+html;
 }
 
 // ═══════════════════════════════════════════════
@@ -4348,6 +4348,283 @@ function contribPeriod(){
 }
 function contribSetMode(m){_contribMode=m;_contribOff=0;renderAnalyse();}
 function contribNav(n){ if(n===0)_contribOff=0; else _contribOff+=n; renderAnalyse();}
+
+// ═══════════════════════════════════════════════
+// 🧠 COMPARATEUR & CONSEILS (v68)
+// Jours de semaine comparés · Duel chauffeurs · Duel véhicules ·
+// Faiblesses & économies détectées automatiquement.
+// (Page Analyse — déjà réservée au patron par goPage.)
+// ═══════════════════════════════════════════════
+var _cmpWin=90,_duelD1=null,_duelD2=null,_duelV1=null,_duelV2=null;
+function setCmpWin(n){_cmpWin=n;renderAnalyse();}
+function setDuelD(i,v){if(i===1)_duelD1=v;else _duelD2=v;renderAnalyse();}
+function setDuelV(i,v){if(i===1)_duelV1=v;else _duelV2=v;renderAnalyse();}
+function _cmpEsc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+function _cmpLim(){var lim=new Date();lim.setDate(lim.getDate()-_cmpWin);lim.setHours(0,0,0,0);return lim;}
+function _cmpArr(){var lim=_cmpLim();return getArr().filter(function(s){return s.date&&parseLocalDate(s.date)>=lim;});}
+function _cmpExp(){var lim=_cmpLim();return getExpArr().filter(function(e){return e.date&&parseLocalDate(e.date)>=lim;});}
+function cmpWinSelHTML(){
+  var opts=[[30,'30 jours'],[90,'90 jours'],[365,'12 mois']];
+  var h='<div style="display:flex;gap:6px;margin-bottom:12px;background:rgba(0,0,0,.25);padding:4px;border-radius:12px;">';
+  opts.forEach(function(o){
+    var on=_cmpWin===o[0];
+    h+='<button onclick="setCmpWin('+o[0]+')" style="flex:1;background:'+(on?'linear-gradient(135deg,var(--gold3),var(--gold))':'transparent')+';border:none;color:'+(on?'#0a0800':'var(--m2)')+';border-radius:9px;padding:8px;font-size:11px;font-weight:800;cursor:pointer;">'+o[1]+'</button>';
+  });
+  return h+'</div>';
+}
+
+// ── Statistiques par jour de la semaine (lundi..dimanche) ──
+function _weekdayStats(){
+  var arr=_cmpArr();
+  var byW={};
+  arr.forEach(function(s){
+    var w=parseLocalDate(s.date).getDay();
+    if(!byW[w])byW[w]={rec:0,profit:0,n:0,soir:0};
+    byW[w].rec+=(s.recette||0);byW[w].profit+=calcOwnerProfit(s);byW[w].n++;
+    if(shiftPeriode(s)==='soir')byW[w].soir++;
+  });
+  return byW;
+}
+// 📅 JOURS DE LA SEMAINE COMPARÉS
+function weekdayCompHTML(){
+  var byW=_weekdayStats();
+  var names=['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  var order=[1,2,3,4,5,6,0].filter(function(w){return byW[w];});
+  if(order.length<2)return '';
+  var perQ=function(w){return byW[w].profit/byW[w].n;};
+  var pool=order.filter(function(w){return byW[w].n>=2;});
+  if(pool.length<2)pool=order;
+  var best=pool.reduce(function(a,w){return perQ(w)>perQ(a)?w:a;});
+  var worst=pool.reduce(function(a,w){return perQ(w)<perQ(a)?w:a;});
+  var maxPQ=Math.max.apply(null,order.map(perQ).concat([0.01]));
+  var h='<div class="card" style="border-color:rgba(245,200,0,.3);">'
+    +'<div class="ctit"><span><span class="ci">📅</span>Jours de la semaine comparés — '+_cmpWin+' derniers jours</span></div>'
+    +cmpWinSelHTML();
+  order.forEach(function(w){
+    var o=byW[w],pq=perQ(w);
+    var tag=w===best?' <span style="color:var(--gold);">⭐</span>':w===worst?' <span style="color:var(--red);">⚠️</span>':'';
+    h+='<div style="margin-bottom:9px;">'
+      +'<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;">'
+      +'<span style="font-weight:800;">'+names[w]+tag+' <span style="color:var(--m2);font-weight:500;font-size:10px;">'+o.n+' quart'+(o.n>1?'s':'')+(o.soir?' · '+Math.round(o.soir/o.n*100)+'% soir':'')+'</span></span>'
+      +'<span style="font-weight:900;color:'+(w===best?'var(--gold)':w===worst?'var(--red)':'var(--txt)')+';">'+fm(pq)+'<span style="font-size:9px;color:var(--m2);font-weight:600;"> profit/quart</span></span></div>'
+      +'<div style="height:10px;background:rgba(255,255,255,.05);border-radius:6px;overflow:hidden;">'
+      +'<div style="height:100%;width:'+Math.max(3,pq/maxPQ*100).toFixed(0)+'%;border-radius:6px;background:'+(w===best?'linear-gradient(90deg,var(--gold2),var(--gold3))':w===worst?'rgba(255,58,58,.6)':'rgba(96,165,250,.55)')+';"></div></div>'
+      +'<div style="font-size:9px;color:var(--m2);margin-top:2px;">Recette moy: '+fm(o.rec/o.n)+'/quart · total '+fm(o.rec)+'</div>'
+      +'</div>';
+  });
+  if(best!==worst){
+    h+='<div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.18);border-radius:10px;padding:9px 11px;font-size:11px;line-height:1.6;margin-top:4px;">'
+      +'💡 <b>'+names[best]+'</b> est ton meilleur jour ('+fm(perQ(best))+'/quart) et <b>'+names[worst]+'</b> ton plus faible ('+fm(perQ(worst))+'/quart). '
+      +'Mets tes meilleurs chauffeurs le '+names[best].toLowerCase()+', et planifie entretien/nettoyage le '+names[worst].toLowerCase()+'.</div>';
+  }
+  return h+'</div>';
+}
+
+// ── Ligne de duel : valeur A | libellé | valeur B, gagnant en vert ──
+function _duelRow(lbl,a,b,fmt,lowerBetter,na){
+  if(na)return '<div style="display:grid;grid-template-columns:1fr 1.1fr 1fr;align-items:center;padding:7px 0;border-bottom:1px solid var(--brd);">'
+    +'<div style="text-align:center;color:var(--m2);">—</div>'
+    +'<div style="text-align:center;font-size:10px;color:var(--m2);font-weight:700;">'+lbl+'</div>'
+    +'<div style="text-align:center;color:var(--m2);">—</div></div>';
+  var eq=Math.abs(a-b)<1e-9;
+  var aWins=eq?null:(lowerBetter?a<b:a>b);
+  function cell(v,w){return '<div style="text-align:center;font-size:13px;font-weight:900;color:'+(w===null?'var(--txt)':w?'var(--grn)':'var(--m2)')+';">'+fmt(v)+(w?' ✓':'')+'</div>';}
+  return '<div style="display:grid;grid-template-columns:1fr 1.1fr 1fr;align-items:center;padding:7px 0;border-bottom:1px solid var(--brd);">'
+    +cell(a,aWins)
+    +'<div style="text-align:center;font-size:10px;color:var(--m2);font-weight:700;">'+lbl+'</div>'
+    +cell(b,aWins===null?null:!aWins)
+    +'</div>';
+}
+function _duelSelects(names,v1,v2,fn){
+  function sel(i,val,other){
+    return '<select onchange="'+fn+'('+i+',this.value)" style="flex:1;min-width:0;background:rgba(24,18,0,.9);border:1.5px solid var(--brd);border-radius:10px;color:var(--txt);padding:9px;font-size:12px;font-weight:700;">'
+      +names.map(function(n){return '<option value="'+_cmpEsc(n)+'"'+(n===val?' selected':'')+(n===other?' disabled':'')+'>'+_cmpEsc(n)+'</option>';}).join('')
+      +'</select>';
+  }
+  return '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">'
+    +sel(1,v1,v2)+'<span style="font-size:12px;font-weight:900;color:var(--red);">VS</span>'+sel(2,v2,v1)
+    +'</div>';
+}
+
+// 🥊 DUEL CHAUFFEURS
+function _drvDuelStats(){
+  var by={};
+  _cmpArr().forEach(function(s){
+    var n=s.driver||'?';
+    if(!by[n])by[n]={n:0,rec:0,taxNet:0,crs:0,pour:0,ess:0,profit:0,manq:0,manqAmt:0,km:0,taxKm:0};
+    var o=by[n];
+    o.n++;o.rec+=(s.recette||0);o.taxNet+=(pf(s.taxf)-pf(s.taxd));o.crs+=pi(s.courses);
+    o.pour+=pf(s.pourboire);o.ess+=pf(s.essence);o.profit+=calcOwnerProfit(s);
+    var ec=calcEcart(s);if(ec>0.5){o.manq++;o.manqAmt+=ec;}
+    if(s.kmf>0&&s.kmd>0&&s.kmf>s.kmd){o.km+=(s.kmf-s.kmd);o.taxKm+=(pf(s.taxf)-pf(s.taxd));}
+  });
+  return by;
+}
+function duelDrvHTML(){
+  var by=_drvDuelStats();
+  var names=Object.keys(by).sort(function(a,b){return by[b].n-by[a].n;});
+  if(names.length<2)return '';
+  if(!_duelD1||!by[_duelD1])_duelD1=names[0];
+  if(!_duelD2||!by[_duelD2]||_duelD2===_duelD1)_duelD2=names.filter(function(n){return n!==_duelD1;})[0];
+  var A=by[_duelD1],B=by[_duelD2];
+  var M=fm,R=function(v){return v.toFixed(1);};
+  var h='<div class="card" style="border-color:rgba(192,132,252,.3);">'
+    +'<div class="ctit"><span><span class="ci">🥊</span>Duel chauffeurs — '+_cmpWin+' derniers jours</span></div>'
+    +_duelSelects(names,_duelD1,_duelD2,'setDuelD')
+    +'<div style="display:grid;grid-template-columns:1fr 1.1fr 1fr;font-size:12px;font-weight:900;color:var(--pur);padding-bottom:6px;border-bottom:1.5px solid var(--brd2);">'
+    +'<div style="text-align:center;">'+_cmpEsc(_duelD1)+'</div><div></div><div style="text-align:center;">'+_cmpEsc(_duelD2)+'</div></div>'
+    +_duelRow('🚗 Quarts',A.n,B.n,String,false)
+    +_duelRow('💰 Recette / quart',A.rec/A.n,B.rec/B.n,M,false)
+    +_duelRow('🔢 Taximètre / quart',A.taxNet/A.n,B.taxNet/B.n,M,false)
+    +_duelRow('👑 Profit patron / quart',A.profit/A.n,B.profit/B.n,M,false)
+    +_duelRow('🚕 Courses / quart',A.crs/A.n,B.crs/B.n,R,false)
+    +_duelRow('🛣️ $ / km',A.km>0?A.taxKm/A.km:0,B.km>0?B.taxKm/B.km:0,function(v){return v.toFixed(2)+'$';},false,!(A.km>0&&B.km>0))
+    +_duelRow('⛽ Essence / quart',A.ess/A.n,B.ess/B.n,M,true)
+    +_duelRow('⚠️ Manques (nb)',A.manq,B.manq,String,true)
+    +_duelRow('⚠️ Manques ($)',A.manqAmt,B.manqAmt,M,true)
+    +'<div style="font-size:9px;color:var(--m2);margin-top:7px;">✓ = le meilleur des deux sur ce critère (essence et manques : plus bas = mieux)</div>'
+    +'</div>';
+  return h;
+}
+
+// 🥊 DUEL VÉHICULES
+function _vehDuelStats(){
+  var by={};
+  _cmpArr().forEach(function(s){
+    var v=s.vehicle||'?';
+    if(!by[v])by[v]={n:0,rec:0,ess:0,profit:0,km:0,taxKm:0,dep:0,days:{}};
+    var o=by[v];
+    o.n++;o.rec+=(s.recette||0);o.ess+=pf(s.essence);o.profit+=calcOwnerProfit(s);
+    o.days[s.date]=1;
+    if(s.kmf>0&&s.kmd>0&&s.kmf>s.kmd){o.km+=(s.kmf-s.kmd);o.taxKm+=(pf(s.taxf)-pf(s.taxd));}
+  });
+  _cmpExp().forEach(function(e){
+    if(e.vehicle&&by[e.vehicle])by[e.vehicle].dep+=pf(e.amount);
+  });
+  return by;
+}
+function duelVehHTML(){
+  var by=_vehDuelStats();
+  var names=Object.keys(by).sort(function(a,b){return by[b].n-by[a].n;});
+  if(names.length<2)return '';
+  if(!_duelV1||!by[_duelV1])_duelV1=names[0];
+  if(!_duelV2||!by[_duelV2]||_duelV2===_duelV1)_duelV2=names.filter(function(n){return n!==_duelV1;})[0];
+  var A=by[_duelV1],B=by[_duelV2];
+  var dA=Object.keys(A.days).length,dB=Object.keys(B.days).length;
+  var M=fm;
+  var h='<div class="card" style="border-color:rgba(96,165,250,.3);">'
+    +'<div class="ctit"><span><span class="ci">🥊</span>Duel véhicules — '+_cmpWin+' derniers jours</span></div>'
+    +_duelSelects(names,_duelV1,_duelV2,'setDuelV')
+    +'<div style="display:grid;grid-template-columns:1fr 1.1fr 1fr;font-size:12px;font-weight:900;color:var(--blu);padding-bottom:6px;border-bottom:1.5px solid var(--brd2);">'
+    +'<div style="text-align:center;">'+_cmpEsc(_duelV1)+'</div><div></div><div style="text-align:center;">'+_cmpEsc(_duelV2)+'</div></div>'
+    +_duelRow('🚗 Quarts',A.n,B.n,String,false)
+    +_duelRow('📅 Jours travaillés',dA,dB,String,false)
+    +_duelRow('💰 Recette totale',A.rec,B.rec,M,false)
+    +_duelRow('💰 Recette / quart',A.rec/A.n,B.rec/B.n,M,false)
+    +_duelRow('🛣️ $ / km',A.km>0?A.taxKm/A.km:0,B.km>0?B.taxKm/B.km:0,function(v){return v.toFixed(2)+'$';},false,!(A.km>0&&B.km>0))
+    +_duelRow('⛽ Essence totale',A.ess,B.ess,M,true)
+    +_duelRow('🔧 Réparations/dépenses',A.dep,B.dep,M,true)
+    +_duelRow('✅ NET patron (profit − dép.)',A.profit-A.dep,B.profit-B.dep,M,false)
+    +_duelRow('✅ NET / quart',(A.profit-A.dep)/A.n,(B.profit-B.dep)/B.n,M,false)
+    +'<div style="font-size:9px;color:var(--m2);margin-top:7px;">NET = profit patron (essence déjà déduite) − réparations/dépenses du véhicule sur la période</div>'
+    +'</div>';
+  return h;
+}
+
+// 💡 FAIBLESSES & ÉCONOMIES — détection automatique
+function insightsHTML(){
+  var arr=_cmpArr();
+  if(arr.length<5)return '';
+  var names=['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+  var tips=[];
+  // 1) Jour de semaine faible
+  var byW=_weekdayStats();
+  var order=Object.keys(byW).map(Number).filter(function(w){return byW[w].n>=2;});
+  if(order.length>=2){
+    var pq=function(w){return byW[w].profit/byW[w].n;};
+    var b=order.reduce(function(a,w){return pq(w)>pq(a)?w:a;});
+    var wo=order.reduce(function(a,w){return pq(w)<pq(a)?w:a;});
+    if(b!==wo&&pq(b)>0&&(pq(b)-pq(wo))/pq(b)>0.25){
+      tips.push({c:'var(--gold)',t:'📅 <b>Jour faible :</b> le '+names[wo].toLowerCase()+' rapporte '+fm(pq(wo))+'/quart contre '+fm(pq(b))+' le '+names[b].toLowerCase()+' (−'+Math.round((pq(b)-pq(wo))/pq(b)*100)+'%). Déplace ton meilleur monde vers le '+names[b].toLowerCase()+' et cale l\'entretien le '+names[wo].toLowerCase()+'.'});
+    }
+  }
+  // 2) Véhicule le moins rentable + réparations lourdes
+  var byV=_vehDuelStats();
+  var vn=Object.keys(byV).filter(function(v){return byV[v].n>=5;});
+  if(vn.length>=2){
+    var netQ=function(v){return (byV[v].profit-byV[v].dep)/byV[v].n;};
+    var vb=vn.reduce(function(a,v){return netQ(v)>netQ(a)?v:a;});
+    var vw=vn.reduce(function(a,v){return netQ(v)<netQ(a)?v:a;});
+    if(vb!==vw&&netQ(vb)>0&&netQ(vw)<netQ(vb)*0.7){
+      tips.push({c:'var(--blu)',t:'🚗 <b>Véhicule à surveiller :</b> '+_cmpEsc(vw)+' laisse '+fm(netQ(vw))+' net/quart contre '+fm(netQ(vb))+' pour '+_cmpEsc(vb)+'. Vérifie l\'essence, les réparations récurrentes et l\'état mécanique.'});
+    }
+  }
+  Object.keys(byV).forEach(function(v){
+    var o=byV[v];
+    if(o.dep>0&&o.profit>0&&o.dep>o.profit*0.3&&o.n>=3){
+      tips.push({c:'var(--red)',t:'🔧 <b>Réparations lourdes :</b> '+_cmpEsc(v)+' a coûté '+fm(o.dep)+' en dépenses sur la période ('+Math.round(o.dep/o.profit*100)+'% de son profit). Demande-toi si une grosse réparation à venir vaut encore la peine.'});
+    }
+  });
+  // 3) Essence élevée par chauffeur
+  var byD=_drvDuelStats();
+  var dn=Object.keys(byD).filter(function(n){return byD[n].n>=5;});
+  var essTot=0,essN=0;
+  dn.forEach(function(n){essTot+=byD[n].ess;essN+=byD[n].n;});
+  var essAvg=essN?essTot/essN:0;
+  if(essAvg>0){
+    dn.forEach(function(n){
+      var o=byD[n],perQ2=o.ess/o.n;
+      if(perQ2>essAvg*1.25){
+        tips.push({c:'var(--neon)',t:'⛽ <b>Essence élevée :</b> '+_cmpEsc(n)+' consomme '+fm(perQ2)+'/quart vs '+fm(essAvg)+' de moyenne. Trajets à vide? Économie possible ≈ '+fm((perQ2-essAvg)*o.n)+' sur la période.'});
+      }
+    });
+  }
+  // 4) Manques répétés
+  dn.forEach(function(n){
+    var o=byD[n];
+    if(o.manq>=3&&o.manq/o.n>0.2){
+      tips.push({c:'var(--red)',t:'⚠️ <b>Manques répétés :</b> '+_cmpEsc(n)+' a '+o.manq+' manques ('+fm(o.manqAmt)+') sur '+o.n+' quarts. Exige la justification et utilise la déduction de salaire si ça continue.'});
+    }
+  });
+  // 5) $/km sous le seuil
+  var seuil=C.seuilDollarParKm||1.0;
+  dn.forEach(function(n){
+    var o=byD[n];
+    if(o.km>200&&o.taxKm/o.km<seuil){
+      tips.push({c:'var(--red)',t:'🛣️ <b>Rendement km faible :</b> '+_cmpEsc(n)+' roule à '+(o.taxKm/o.km).toFixed(2)+'$/km (seuil : '+seuil.toFixed(2)+'$). Trop de kilomètres pour pas assez de taximètre.'});
+    }
+  });
+  // 6) Voiture qui dort
+  Object.keys(byV).forEach(function(v){
+    var o=byV[v],days=Object.keys(o.days).length;
+    var span=Math.min(_cmpWin,Math.max(1,Math.round((new Date()-_cmpLim())/864e5)));
+    if(o.n>=3&&days<span*0.5){
+      var recDay=days?o.rec/days:0;
+      tips.push({c:'var(--pur)',t:'🛌 <b>Voiture qui dort :</b> '+_cmpEsc(v)+' n\'a travaillé que '+days+' jours sur '+span+'. Chaque jour immobile ≈ '+fm(recDay)+' de recette non gagnée — un quart de soir de plus par semaine changerait le mois.'});
+    }
+  });
+  // 7) Point mort (coûts fixes)
+  var fc=C.fixedCosts||{};
+  var fcMo=pf(fc.insurance)+pf(fc.carRental)+pf(fc.other||0);
+  if(fcMo>0){
+    var span2=Math.min(_cmpWin,Math.max(1,Math.round((new Date()-_cmpLim())/864e5)));
+    var profDay=arr.reduce(function(a,s){return a+calcOwnerProfit(s);},0)/span2;
+    var fcDay=fcMo/30;
+    if(profDay<fcDay*1.15){
+      tips.push({c:'var(--red)',t:'🏦 <b>Marge serrée :</b> tes coûts fixes ≈ '+fm(fcDay)+'/jour et ton profit brut moyen est '+fm(profDay)+'/jour. Il faut soit plus de quarts, soit couper des coûts — regarde les conseils ci-dessus.'});
+    }
+  }
+  var h='<div class="card" style="border-color:rgba(57,211,83,.35);">'
+    +'<div class="ctit"><span><span class="ci">💡</span>Faiblesses & économies — '+_cmpWin+' derniers jours</span></div>';
+  if(!tips.length){
+    h+='<div style="font-size:12px;color:var(--grn);font-weight:700;">✅ Rien d\'inquiétant détecté sur la période. Continue comme ça!</div>';
+  }else{
+    tips.slice(0,6).forEach(function(t){
+      h+='<div style="border-left:3px solid '+t.c+';background:rgba(255,255,255,.03);border-radius:0 10px 10px 0;padding:9px 11px;margin-bottom:7px;font-size:11px;line-height:1.6;">'+t.t+'</div>';
+    });
+  }
+  return h+'</div>';
+}
 
 // ═══════════════════════════════════════════════
 // 🚗 ANALYSE FINANCIÈRE PAR VÉHICULE (Phase 2)
@@ -8337,7 +8614,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-16-v67-DEMO-NEUTRE';
+var APP_VERSION = '2026-07-17-v68-ANALYSE-PRO';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
