@@ -961,6 +961,8 @@ body{
       <div id="loginAltBtns" style="margin-top:14px;display:grid;gap:8px;">
         <button class="btn btn-neon" onclick="showSignup()">🚀 Nouveau propriétaire — Créer ma flotte</button>
         <button class="btn bsec" onclick="loginJoinFleet()">🔑 J'ai un code de flotte</button>
+        <!-- Mise à jour accessible AVANT connexion (les chauffeurs n'ont pas accès aux Réglages) -->
+        <button onclick="forceMiseAJour()" style="background:none;border:none;color:var(--m2);font-size:11px;font-weight:700;cursor:pointer;padding:6px;">🔄 Mettre à jour l'app · <span id="lVerLbl"></span></button>
       </div>
       <!-- ══ INSCRIPTION AUTONOME — un nouveau propriétaire crée sa flotte ══ -->
       <div class="lcard" id="signupCard" style="margin-top:16px;display:none;">
@@ -2308,6 +2310,9 @@ function initLogin(){
   const pl=document.getElementById('lPlates');
   const av=(C.vehicles||[]).filter(v=>v.active!==false);
   if(pl&&av.length)pl.innerHTML=av.slice(0,3).map(v=>'<div class="plate">'+esc(v.num)+'</div>').join('');
+  // Version affichée sur l'écran de connexion (diagnostic sans Réglages)
+  const vl=document.getElementById('lVerLbl');
+  if(vl)vl.textContent=(window.APP_VERSION||'').replace(/^\d{4}-\d{2}-\d{2}-/,'');
 }
 
 // ═══ LOGIN / LOGOUT ═══
@@ -8614,7 +8619,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-17-v68-ANALYSE-PRO';
+var APP_VERSION = '2026-07-17-v69-MAJ-LOGIN';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
