@@ -2033,6 +2033,9 @@ function lSaveLocal(){
 
 // Main save — Firebase + local backup simultaneously
 function lSave(){
+  // Horodater la config à chaque modification : permet au listener temps réel
+  // de distinguer une config distante PLUS ANCIENNE et de ne pas l'appliquer.
+  if(C)C._cm=Date.now();
   lSaveLocal();
   if(window._fb)window._fb.save(C,S,EX,AU);
 }
@@ -2194,8 +2197,20 @@ function startRealtimeSync(){
       setSyncStatus('ok');
     }
     if(type==='config'){
-      C=applyDefaults(data);
-      lSaveLocal();
+      // ANTI-ÉCRASEMENT : un instantané Firestore parti AVANT ma dernière
+      // modification locale ne doit jamais remplacer ma config (sinon un
+      // réglage, un bien ou un solde saisi juste après l'ouverture de l'app
+      // disparaît silencieusement). Le plus récent gagne, comme pour les quarts.
+      var localCm=pf(C&&C._cm), remoteCm=pf(data&&data._cm);
+      if(localCm>remoteCm){
+        _schedulePushBack(); // ma version est la bonne : la renvoyer au cloud
+      }else{
+        C=applyDefaults(data);
+        lSaveLocal();
+        // Rafraîchir l'écran ouvert si la config vient de changer
+        var cur=document.querySelector('.pg.on');
+        if(cur&&cur.id==='pg-treso'&&typeof renderTreso==='function')renderTreso();
+      }
     }
     if(type==='expenses'){
       EX=window.txpMerge(EX,data,'e');
@@ -2262,7 +2277,13 @@ function initApp(){
   if(window._fb){
     window._fb.load().then(function(fbData){
       if(fbData && fbData.C){
-        C=applyDefaults(fbData.C);
+        // ANTI-ÉCRASEMENT : le chargement cloud peut se terminer APRÈS que
+        // l'utilisateur ait déjà modifié quelque chose (réglage, bien, solde).
+        // On n'applique la config distante que si elle n'est pas plus vieille
+        // que la locale — sinon la modification serait perdue en silence.
+        var _localCm=pf(C&&C._cm), _remoteCm=pf(fbData.C&&fbData.C._cm);
+        if(_remoteCm>=_localCm)C=applyDefaults(fbData.C);
+        else console.warn('Config locale plus récente : chargement cloud ignoré');
         // FUSION : union local + cloud — jamais de remplacement brut
         const remoteS=fbData.S||{}, remoteE=fbData.EX||{};
         S=window.txpMerge(S,remoteS,'s');
@@ -9688,7 +9709,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v83-CREANCES-AU-BILAN';
+var APP_VERSION = '2026-07-29-v84-ANTI-ECRASEMENT-CONFIG';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
