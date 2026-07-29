@@ -5200,7 +5200,7 @@ function renderExp(){
 function expPayAccounts(){
   var t=getTresoAccounts();
   // On ne peut pas payer avec de l'argent qu'on ne détient pas encore
-  return t.accounts.filter(function(a){return a.id!=='cashdrv'&&a.id!=='recev';});
+  return t.accounts.filter(function(a){return a.id!=='cashdrv'&&a.id!=='recev'&&a.id!=='reclam';});
 }
 function expAccLabel(accId){
   if(!accId)return '';
@@ -6270,7 +6270,7 @@ function renderInvest(){
   var actif=0;
   // Ni le cash chez les chauffeurs ni les crédits accordés ne sont
   // investissables : cet argent n'est pas encore en main.
-  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv'&&a.id!=='recev';}).forEach(function(a){actif+=tresoSolde(a.id);});
+  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv'&&a.id!=='recev'&&a.id!=='reclam';}).forEach(function(a){actif+=tresoSolde(a.id);});
   var dette=tresoSolde('credit');
   var fc=C.fixedCosts||{};
   var fcMo=pf(fc.insurance)+pf(fc.carRental)+pf(fc.other||0);
@@ -7899,6 +7899,10 @@ function getTresoAccounts(){
   if(!C.treso.accounts.find(function(a){return a.id==='wealth';})){
     C.treso.accounts.push({id:'wealth',name:'Wealthsimple',icon:'📈',color:'#38bdf8',solde:0,type:'invest',auto:false,desc:'Compte de placement'});
   }
+  // Coupons + transport adapté factures aux clients corporatifs, pas encore payés
+  if(!C.treso.accounts.find(function(a){return a.id==='reclam';})){
+    C.treso.accounts.push({id:'reclam',name:'À réclamer',icon:'📞',color:'#fb923c',solde:0,type:'recev',auto:true,desc:'Coupons + STS à facturer'});
+  }
   if(!C.treso.transactions)C.treso.transactions=[];
   return C.treso;
 }
@@ -7917,6 +7921,31 @@ function _compChauffeurs(arr){
 function _compPatron(arr){
   return arr.filter(function(s){return isOwnerShift(s);})
             .reduce(function(a,s){return a+pf(s.comp);},0);
+}
+
+// ── Ce que les clients corporatifs me doivent (coupons + transport adapté) ──
+// Source : les coupons détaillés par client saisis dans le quart, le reste
+// des coupons en bloc, et le STS. Moins ce qui a déjà été encaissé.
+var RECLAM_STS='🚐 Transport adapté (STS)';
+var RECLAM_AUTRES='🎟️ Coupons non détaillés';
+function reclamPending(){
+  var t=getTresoAccounts();
+  var by={};
+  function add(n,v){ if(Math.abs(v)>0.005) by[n]=(by[n]||0)+v; }
+  getArr().forEach(function(s){
+    add(RECLAM_STS,pf(s.sts));
+    var coupTot=pf(s.coup);
+    var det=(s.coupDetails&&s.coupDetails.length)?s.coupDetails:[];
+    var detSum=0;
+    det.forEach(function(c){ var v=pf(c.amt); detSum+=v; add(c.name||RECLAM_AUTRES,v); });
+    add(RECLAM_AUTRES,coupTot-detSum); // coupons saisis sans détail par client
+  });
+  t.transactions.forEach(function(tx){
+    if(tx.accountId!=='reclam'||!tx.reclamClient)return;
+    var signe=(tx.type==='in')?1:-1;
+    by[tx.reclamClient]=(by[tx.reclamClient]||0)+signe*pf(tx.amount);
+  });
+  return by;
 }
 
 // Cash encore chez chaque chauffeur (cumul, toutes périodes confondues) :
@@ -7988,6 +8017,19 @@ function tresoSoldeMois(accountId, refMo){
       if(tx.type==='transfer'&&tx.toAccountId==='cashdrv') tot+=pf(tx.amount);
     });
     return tot;
+  }
+
+  // « À réclamer » : solde CUMULÉ — une facture de coupons reste due
+  // jusqu'à son paiement, peu importe le mois du quart.
+  if(accountId==='reclam'){
+    var pr=reclamPending();
+    var tr=pf(acc.solde);
+    Object.keys(pr).forEach(function(n){tr+=pr[n];});
+    t.transactions.forEach(function(tx){
+      if(tx.accountId==='reclam'&&!tx.reclamClient) tr+=(tx.type==='in'?1:-1)*pf(tx.amount);
+      if(tx.type==='transfer'&&tx.toAccountId==='reclam') tr+=pf(tx.amount);
+    });
+    return tr;
   }
 
   // « À recevoir » : solde CUMULÉ — un crédit accordé ne s'efface pas au
@@ -8094,6 +8136,37 @@ function renderTreso(){
     html+='</div>';
   }
 
+  // ── Coupons / STS à réclamer, par client ──
+  var rPend=reclamPending();
+  var rNames=Object.keys(rPend).filter(function(n){return Math.abs(rPend[n])>0.005;})
+    .sort(function(a,b){return rPend[b]-rPend[a];});
+  if(rNames.length){
+    var rTot=rNames.reduce(function(a,n){return a+rPend[n];},0);
+    html+='<div style="background:rgba(251,146,60,.06);border:1.5px solid rgba(251,146,60,.28);border-radius:14px;padding:13px;margin-bottom:14px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+      +'<div><div style="font-size:10px;color:var(--org);font-weight:800;text-transform:uppercase;letter-spacing:.5px;">📞 À réclamer — cumul</div>'
+      +'<div style="font-size:9px;color:var(--m2);">Coupons et transport adapté pas encore payés</div></div>'
+      +'<div style="font-size:22px;font-weight:900;color:var(--org);">'+fm(rTot)+'</div></div>';
+    // Les 8 plus gros, le reste regroupé (une flotte peut avoir 100 clients)
+    var rTop=rNames.slice(0,8),rRest=rNames.slice(8);
+    rTop.forEach(function(n){
+      html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(251,146,60,.15);gap:8px;">'
+        +'<div style="font-size:11px;font-weight:700;color:var(--m3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">'+_cmpEsc(n)+'</div>'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">'
+        +'<span style="font-size:14px;font-weight:900;color:'+(rPend[n]<0?'var(--red)':'var(--org)')+';">'+fm(rPend[n])+'</span>'
+        +'<button onclick="openTresoReclam(\''+_cmpEsc(n).replace(/'/g,"\\'")+'\')" style="background:rgba(251,146,60,.15);border:1px solid rgba(251,146,60,.4);color:var(--org);border-radius:8px;padding:6px 10px;font-size:10px;font-weight:800;cursor:pointer;">📞</button>'
+        +'</div></div>';
+    });
+    if(rRest.length){
+      var rRestTot=rRest.reduce(function(a,n){return a+rPend[n];},0);
+      html+='<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(251,146,60,.15);font-size:11px;color:var(--m2);">'
+        +'<span>+ '+rRest.length+' autre'+(rRest.length>1?'s':'')+' client'+(rRest.length>1?'s':'')+'</span>'
+        +'<span style="font-weight:800;color:var(--org);">'+fm(rRestTot)+'</span></div>';
+    }
+    html+='<button onclick="openTresoReclam()" style="width:100%;margin-top:9px;background:rgba(251,146,60,.15);border:1.5px solid rgba(251,146,60,.4);color:var(--org);border-radius:10px;padding:11px;font-size:12px;font-weight:800;cursor:pointer;">📞 Encaisser une réclamation</button>';
+    html+='</div>';
+  }
+
   // ── Cartes de comptes (solde du mois sélectionné) ──
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">';
   t.accounts.forEach(function(acc){
@@ -8127,6 +8200,7 @@ function renderTreso(){
   html+='<button onclick="openTresoSoldeEdit()" style="background:rgba(245,200,0,.1);border:1.5px solid rgba(245,200,0,.3);color:var(--gold);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">✏️ Soldes initiaux</button>';
   html+='<button onclick="openTresoCredit()" style="background:rgba(192,132,252,.15);border:1.5px solid rgba(192,132,252,.4);color:var(--pur);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">📤 Crédit accordé</button>';
   html+='<button onclick="openTresoRembours()" style="background:rgba(57,211,83,.15);border:1.5px solid rgba(57,211,83,.4);color:var(--grn);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">💰 Encaisser un crédit</button>';
+  html+='<button onclick="openTresoCompter()" style="grid-column:1/-1;background:rgba(245,200,0,.12);border:1.5px solid rgba(245,200,0,.35);color:var(--gold);border-radius:12px;padding:13px;font-size:13px;font-weight:900;cursor:pointer;">🧮 Compter ma caisse (rapprochement)</button>';
   html+='<button onclick="addTresoAccount()" style="grid-column:1/-1;background:rgba(255,255,255,.05);border:1.5px dashed var(--brd2);color:var(--m2);border-radius:12px;padding:11px;font-size:11px;font-weight:800;cursor:pointer;">➕ Ajouter un compte</button>';
   html+='</div>';
 
@@ -8134,9 +8208,9 @@ function renderTreso(){
   // « Total actif » = ce que je détiens vraiment. Le cash encore chez les
   // chauffeurs est affiché à part : il m'est dû, mais je ne l'ai pas en main.
   var totalActif=0;
-  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv'&&a.id!=='recev';}).forEach(function(a){totalActif+=tresoSolde(a.id);});
+  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv'&&a.id!=='recev'&&a.id!=='reclam';}).forEach(function(a){totalActif+=tresoSolde(a.id);});
   var totalDette=tresoSolde('credit');
-  var aEncaisser=(sep?tresoSolde('cashdrv'):0)+tresoSolde('recev');
+  var aEncaisser=(sep?tresoSolde('cashdrv'):0)+tresoSolde('recev')+tresoSolde('reclam');
   html+='<div style="background:rgba(245,200,0,.07);border:1.5px solid rgba(245,200,0,.2);border-radius:14px;padding:12px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">'
     +'<div><div style="font-size:10px;color:var(--m2);text-transform:uppercase;font-weight:700;">Total actif '+(Math.abs(aEncaisser)>0.005?'<span style="text-transform:none;font-weight:600;">(en ma possession)</span>':'')+'</div>'
     +'<div style="font-size:22px;font-weight:900;color:var(--gold);">'+fm(totalActif)+'</div>'
@@ -8532,6 +8606,123 @@ function saveTresoRembours(){
   lSave();audit('TRESO_CREDIT_RECU',(desc||'—')+'/'+fm(amt));
   document.getElementById('tresoRembModal').remove();
   renderTreso();showToastGrn(fm(amt)+' ajouté à '+expAccLabel(to));
+}
+
+// ═══ ENCAISSER UNE RÉCLAMATION (coupons / STS) ═══
+function openTresoReclam(client){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var pend=reclamPending();
+  var names=Object.keys(pend).filter(function(n){return Math.abs(pend[n])>0.005;})
+    .sort(function(a,b){return pend[b]-pend[a];});
+  if(!names.length){alert('✅ Rien à réclamer : tout est encaissé.');return;}
+  if(!client||names.indexOf(client)<0)client=names[0];
+  var opts=names.map(function(n){
+    return '<option value="'+_cmpEsc(n)+'"'+(n===client?' selected':'')+'>'+_cmpEsc(n)+' — '+fm(pend[n])+'</option>';
+  }).join('');
+  var old=document.getElementById('tresoReclamModal');if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='tresoReclamModal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+  m.innerHTML='<div style="background:var(--s2);border:1.5px solid var(--brd2);border-radius:18px;padding:18px;width:100%;max-width:480px;max-height:90dvh;overflow-y:auto;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--org);margin-bottom:4px;">📞 Encaisser une réclamation</div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-bottom:14px;line-height:1.5;">Un client corporatif (ou le STS) te paie tes coupons. Choisis <b>comment tu as reçu l\'argent</b> : le compte sera augmenté automatiquement.</div>'
+    +'<div class="fi"><label>Client</label><div class="sw"><select id="rcClient" onchange="rcFillMax(true)" style="width:100%;">'+opts+'</select></div></div>'
+    +'<div id="rcMaxLbl" style="font-size:11px;font-weight:800;color:var(--org);margin:-6px 0 10px;"></div>'
+    +'<div class="fi"><label>Montant reçu ($)</label><input id="rcAmt" type="number" step="0.01" inputmode="decimal" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;"></div>'
+    +'<div class="fi"><label>💳 Reçu comment ? (mode de paiement)</label><div class="sw"><select id="rcTo" style="width:100%;">'+_tresoDestOpts((C.treso&&C.treso.lastReclamAcc)||'comm')+'</select></div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-top:4px;line-height:1.5;">Chèque ou virement → Commercial · Comptant → Ma caisse</div></div>'
+    +'<div class="fi"><label>Date</label><input id="rcDate" type="date" value="'+today()+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div class="fi"><label>Note (optionnel)</label><input id="rcNote" placeholder="ex: chèque #1042" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:14px;">'
+    +'<button onclick="document.getElementById(\'tresoReclamModal\').remove()" style="flex:.4;background:rgba(255,255,255,.07);border:1px solid var(--brd);color:var(--m2);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Annuler</button>'
+    +'<button onclick="saveTresoReclam()" style="flex:1;background:rgba(251,146,60,.25);border:1.5px solid rgba(251,146,60,.6);color:var(--org);border-radius:10px;padding:12px;font-size:13px;font-weight:900;cursor:pointer;">📞 Encaisser</button>'
+    +'</div></div>';
+  document.body.appendChild(m);
+  rcFillMax(true);
+}
+function rcFillMax(force){
+  var sel=document.getElementById('rcClient'),amt=document.getElementById('rcAmt'),lbl=document.getElementById('rcMaxLbl');
+  if(!sel||!amt)return;
+  var max=pf(reclamPending()[sel.value]);
+  if(lbl)lbl.textContent='📞 '+fm(max)+' encore dû par ce client';
+  if(force||!amt.value)amt.value=max>0?max.toFixed(2):'';
+}
+function saveTresoReclam(){
+  var client=document.getElementById('rcClient').value;
+  var amt=parseFloat(document.getElementById('rcAmt').value||0);
+  var to=document.getElementById('rcTo').value;
+  var date=document.getElementById('rcDate').value||today();
+  var note=(document.getElementById('rcNote').value||'').trim();
+  if(!amt||amt<=0){alert('Montant invalide.');return;}
+  var max=pf(reclamPending()[client]);
+  if(amt>max+0.005&&!confirm('⚠️ Tu encaisses '+fm(amt)+' alors que ce client ne doit que '+fm(max)+'.\n\nSon solde passera en négatif. Continuer ?'))return;
+  var t=getTresoAccounts();
+  t.transactions.push({id:uid(),date:date,
+    desc:'📞 Réclamation encaissée — '+client+(note?' ('+note+')':''),
+    amount:parseFloat(amt.toFixed(2)),
+    accountId:'reclam',type:'transfer',toAccountId:to,cat:'Coupons',reclamClient:client});
+  C.treso.lastReclamAcc=to;
+  lSave();audit('TRESO_RECLAM',client+'/'+fm(amt));
+  document.getElementById('tresoReclamModal').remove();
+  renderTreso();
+  var reste=max-amt;
+  showToastGrn(fm(amt)+' ajouté à '+expAccLabel(to)+(reste>0.005?' · reste '+fm(reste):''));
+}
+
+// ═══ RAPPROCHEMENT DE CAISSE ═══
+// Je compte mon cash réel : l'app enregistre l'écart et aligne le solde.
+function openTresoCompter(){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var attendu=tresoSolde('cash');
+  var old=document.getElementById('tresoCompteModal');if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='tresoCompteModal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+  m.innerHTML='<div style="background:var(--s2);border:1.5px solid var(--brd2);border-radius:18px;padding:18px;width:100%;max-width:480px;max-height:90dvh;overflow-y:auto;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--gold);margin-bottom:4px;">🧮 Compter ma caisse</div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-bottom:14px;line-height:1.5;">Compte l\'argent que tu as vraiment en main et entre le montant. L\'app enregistre l\'écart et aligne ta caisse.</div>'
+    +'<div style="background:rgba(245,200,0,.07);border:1px solid rgba(245,200,0,.25);border-radius:10px;padding:10px 12px;margin-bottom:12px;">'
+    +'<div style="font-size:10px;color:var(--m2);font-weight:700;text-transform:uppercase;">Selon l\'app</div>'
+    +'<div style="font-size:20px;font-weight:900;color:var(--gold);">'+fm(attendu)+'</div></div>'
+    +'<div class="fi"><label>💵 Montant réellement compté ($)</label><input id="cpAmt" type="number" step="0.01" inputmode="decimal" oninput="cpEcart()" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:12px;font-size:17px;font-weight:900;"></div>'
+    +'<div id="cpEcartLbl" style="font-size:12px;font-weight:800;margin:-4px 0 12px;color:var(--m2);">Entre le montant compté…</div>'
+    +'<div class="fi"><label>Note (optionnel)</label><input id="cpNote" placeholder="ex: comptage du dimanche soir" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:14px;">'
+    +'<button onclick="document.getElementById(\'tresoCompteModal\').remove()" style="flex:.4;background:rgba(255,255,255,.07);border:1px solid var(--brd);color:var(--m2);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Annuler</button>'
+    +'<button onclick="saveTresoCompter('+attendu+')" style="flex:1;background:rgba(245,200,0,.2);border:1.5px solid rgba(245,200,0,.5);color:var(--gold);border-radius:10px;padding:12px;font-size:13px;font-weight:900;cursor:pointer;">🧮 Aligner ma caisse</button>'
+    +'</div></div>';
+  document.body.appendChild(m);
+  window._cpAttendu=attendu;
+}
+function cpEcart(){
+  var el=document.getElementById('cpAmt'),lbl=document.getElementById('cpEcartLbl');
+  if(!el||!lbl)return;
+  if(el.value===''){lbl.textContent='Entre le montant compté…';lbl.style.color='var(--m2)';return;}
+  var d=pf(el.value)-pf(window._cpAttendu);
+  if(Math.abs(d)<0.005){lbl.textContent='✅ Parfait — ta caisse est exacte.';lbl.style.color='var(--grn)';}
+  else if(d<0){lbl.textContent='⚠️ Manque '+fm(Math.abs(d))+' par rapport à l\'app.';lbl.style.color='var(--red)';}
+  else{lbl.textContent='💰 Surplus de '+fm(d)+' par rapport à l\'app.';lbl.style.color='var(--pur)';}
+}
+function saveTresoCompter(attendu){
+  var el=document.getElementById('cpAmt');
+  if(!el||el.value===''){alert('Entre le montant compté.');return;}
+  var reel=pf(el.value);
+  var note=(document.getElementById('cpNote').value||'').trim();
+  var ecart=parseFloat((reel-pf(attendu)).toFixed(2));
+  if(Math.abs(ecart)<0.005){
+    document.getElementById('tresoCompteModal').remove();
+    showToastGrn('✅ Caisse exacte — rien à ajuster');
+    return;
+  }
+  if(!confirm('🧮 RAPPROCHEMENT DE CAISSE\n\nSelon l\'app : '+fm(attendu)+'\nCompté : '+fm(reel)+'\nÉcart : '+(ecart>0?'+':'')+fm(ecart)+'\n\nUn ajustement de '+(ecart>0?'+':'')+fm(ecart)+' sera enregistré pour aligner ta caisse. Confirmer ?'))return;
+  var t=getTresoAccounts();
+  t.transactions.push({id:uid(),date:today(),
+    desc:'🧮 Rapprochement de caisse'+(note?' — '+note:'')+' (app '+fm(attendu)+' → compté '+fm(reel)+')',
+    amount:Math.abs(ecart),accountId:'cash',type:(ecart>0?'in':'out'),cat:'Ajustement caisse',recon:true});
+  lSave();audit('TRESO_RAPPROCHEMENT',fm(attendu)+'→'+fm(reel)+' ('+fm(ecart)+')');
+  document.getElementById('tresoCompteModal').remove();
+  renderTreso();
+  showToastGrn('Caisse alignée à '+fm(reel));
 }
 
 // ── Ajouter un compte personnalisé (Wealthsimple, autre banque, etc.) ──
@@ -8976,7 +9167,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v73-CREDITS-WEALTHSIMPLE';
+var APP_VERSION = '2026-07-29-v74-RECLAMATIONS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
