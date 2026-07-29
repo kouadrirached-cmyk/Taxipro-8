@@ -7977,6 +7977,14 @@ function moisLbl(mk){
   if(p.length<2)return mk;
   return new Date(parseInt(p[0]),parseInt(p[1])-1,1).toLocaleDateString('fr-CA',{month:'long',year:'numeric'});
 }
+// Le dépôt se fait au début du mois suivant, et la compagnie retient le
+// loyer de CE mois-là (ex: coupons de juillet déposés le 1er août → loyer d'août).
+function moisSuivant(mk){
+  var p=(mk||'').split('-');
+  if(p.length<2)return mk;
+  var d=new Date(parseInt(p[0]),parseInt(p[1]),1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+}
 
 // Cash encore chez chaque chauffeur (cumul, toutes périodes confondues) :
 // ce qu'il a déclaré − ce que j'ai encaissé − ce que je lui ai laissé en salaire.
@@ -8168,56 +8176,50 @@ function renderTreso(){
     html+='</div>';
   }
 
-  // ── Coupons / STS à réclamer, par client ──
+  // ── Coupons + STS à réclamer : UNE seule section, organisée par mois
+  // (le rythme réel : on dépose le mois écoulé au début du mois suivant).
+  // Le détail par client est secondaire — tout est réclamé en bloc.
   var rPend=reclamPending();
   var rNames=Object.keys(rPend).filter(function(n){return Math.abs(rPend[n])>0.005;})
     .sort(function(a,b){return rPend[b]-rPend[a];});
-  if(rNames.length){
-    var rTot=rNames.reduce(function(a,n){return a+rPend[n];},0);
-    html+='<div style="background:rgba(251,146,60,.06);border:1.5px solid rgba(251,146,60,.28);border-radius:14px;padding:13px;margin-bottom:14px;">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
-      +'<div><div style="font-size:10px;color:var(--org);font-weight:800;text-transform:uppercase;letter-spacing:.5px;">📞 À réclamer — cumul</div>'
-      +'<div style="font-size:9px;color:var(--m2);">Coupons et transport adapté pas encore payés</div></div>'
-      +'<div style="font-size:22px;font-weight:900;color:var(--org);">'+fm(rTot)+'</div></div>';
-    // Les 8 plus gros, le reste regroupé (une flotte peut avoir 100 clients)
-    var rTop=rNames.slice(0,8),rRest=rNames.slice(8);
-    rTop.forEach(function(n){
-      html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(251,146,60,.15);gap:8px;">'
-        +'<div style="font-size:11px;font-weight:700;color:var(--m3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">'+_cmpEsc(n)+'</div>'
-        +'<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">'
-        +'<span style="font-size:14px;font-weight:900;color:'+(rPend[n]<0?'var(--red)':'var(--org)')+';">'+fm(rPend[n])+'</span>'
-        +'<button onclick="openTresoReclam(\''+_cmpEsc(n).replace(/'/g,"\\'")+'\')" style="background:rgba(251,146,60,.15);border:1px solid rgba(251,146,60,.4);color:var(--org);border-radius:8px;padding:6px 10px;font-size:10px;font-weight:800;cursor:pointer;">📞</button>'
-        +'</div></div>';
-    });
-    if(rRest.length){
-      var rRestTot=rRest.reduce(function(a,n){return a+rPend[n];},0);
-      html+='<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(251,146,60,.15);font-size:11px;color:var(--m2);">'
-        +'<span>+ '+rRest.length+' autre'+(rRest.length>1?'s':'')+' client'+(rRest.length>1?'s':'')+'</span>'
-        +'<span style="font-weight:800;color:var(--org);">'+fm(rRestTot)+'</span></div>';
-    }
-    html+='<button onclick="openTresoReclam()" style="width:100%;margin-top:9px;background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.3);color:var(--org);border-radius:10px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;">📞 Un client m\'a payé directement</button>';
-    html+='</div>';
-  }
-
-  // ── Dépôts à la compagnie : par mois, puis suivi des versements ──
   var parMois=reclamParMois();
   var moisAvecReste=Object.keys(parMois).filter(function(mk){return reclamResteMois(mk)>0.005;}).sort().reverse();
   var depots=getDepots().slice().sort(function(a,b){return (b.dateDepot||'').localeCompare(a.dateDepot||'');});
   var enAttente=depots.filter(function(d){return !d.recu;});
-  if(moisAvecReste.length||depots.length){
-    html+='<div style="background:rgba(255,255,255,.03);border:1.5px solid var(--brd2);border-radius:14px;padding:13px;margin-bottom:14px;">'
-      +'<div style="font-size:10px;color:var(--m3);font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">🏢 Dépôts au bureau de la compagnie</div>'
-      +'<div style="font-size:9px;color:var(--m2);margin-bottom:10px;">La compagnie retient la location des voitures et verse la différence</div>';
+  if(moisAvecReste.length||depots.length||rNames.length){
+    var rTot=moisAvecReste.reduce(function(a,mk){return a+reclamResteMois(mk);},0);
+    html+='<div style="background:rgba(251,146,60,.06);border:1.5px solid rgba(251,146,60,.28);border-radius:14px;padding:13px;margin-bottom:14px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px;">'
+      +'<div><div style="font-size:11px;color:var(--org);font-weight:900;text-transform:uppercase;letter-spacing:.5px;">📞 Coupons + STS à réclamer</div>'
+      +'<div style="font-size:9px;color:var(--m2);line-height:1.5;margin-top:2px;">Tu déposes le mois écoulé au bureau ; ils retiennent le loyer des voitures et te versent la différence.</div></div>'
+      +'<div style="font-size:22px;font-weight:900;color:var(--org);flex-shrink:0;">'+fm(rTot)+'</div></div>';
     if(moisAvecReste.length){
-      html+='<div style="font-size:10px;font-weight:800;color:var(--org);margin-bottom:6px;">📋 À déposer</div>';
+      html+='<div style="font-size:10px;font-weight:800;color:var(--org);margin:10px 0 4px;">📋 Mois à déposer</div>';
       moisAvecReste.slice(0,4).forEach(function(mk){
-        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-top:1px solid var(--brd);gap:8px;">'
-          +'<span style="font-size:12px;font-weight:700;color:var(--m3);text-transform:capitalize;">'+moisLbl(mk)+'</span>'
-          +'<div style="display:flex;align-items:center;gap:8px;">'
-          +'<span style="font-size:14px;font-weight:900;color:var(--org);">'+fm(reclamResteMois(mk))+'</span>'
-          +'<button onclick="openTresoDepot(\''+mk+'\')" style="background:rgba(251,146,60,.18);border:1px solid rgba(251,146,60,.45);color:var(--org);border-radius:8px;padding:6px 11px;font-size:10px;font-weight:800;cursor:pointer;">🏢 Déposer</button>'
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(251,146,60,.15);gap:8px;">'
+          +'<div style="min-width:0;"><div style="font-size:13px;font-weight:800;color:var(--m3);text-transform:capitalize;">'+moisLbl(mk)+'</div>'
+          +'<div style="font-size:9px;color:var(--m2);">déposé début '+moisLbl(moisSuivant(mk)).split(' ')[0]+'</div></div>'
+          +'<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">'
+          +'<span style="font-size:15px;font-weight:900;color:var(--org);">'+fm(reclamResteMois(mk))+'</span>'
+          +'<button onclick="openTresoDepot(\''+mk+'\')" style="background:rgba(251,146,60,.18);border:1px solid rgba(251,146,60,.45);color:var(--org);border-radius:8px;padding:8px 12px;font-size:11px;font-weight:800;cursor:pointer;">🏢 Déposer</button>'
           +'</div></div>';
       });
+    }
+    // Détail par client — informatif seulement (tout part dans le même dépôt)
+    if(rNames.length){
+      html+='<button onclick="C.treso._voirClients=!C.treso._voirClients;renderTreso();" style="width:100%;margin-top:9px;background:none;border:none;color:var(--m2);font-size:10px;font-weight:700;cursor:pointer;padding:6px;text-align:left;">'
+        +(C.treso._voirClients?'▾':'▸')+' Détail par client ('+rNames.length+') — indicatif</button>';
+      if(C.treso._voirClients){
+        html+='<div style="background:rgba(0,0,0,.2);border-radius:10px;padding:9px;">';
+        rNames.slice(0,12).forEach(function(n){
+          html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:11px;gap:8px;">'
+            +'<span style="color:var(--m2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">'+_cmpEsc(n)+'</span>'
+            +'<span style="font-weight:800;color:var(--m3);flex-shrink:0;">'+fm(rPend[n])+'</span></div>';
+        });
+        if(rNames.length>12)html+='<div style="font-size:10px;color:var(--m2);padding-top:4px;">+ '+(rNames.length-12)+' autres</div>';
+        html+='<button onclick="openTresoReclam()" style="width:100%;margin-top:7px;background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.3);color:var(--org);border-radius:9px;padding:8px;font-size:10px;font-weight:800;cursor:pointer;">📞 Un client m\'a payé directement</button>';
+        html+='</div>';
+      }
     }
     if(enAttente.length){
       var attTot=enAttente.reduce(function(a,d){return a+pf(d.net);},0);
@@ -8772,9 +8774,10 @@ function openTresoDepot(mois){
   m.innerHTML='<div style="background:var(--s2);border:1.5px solid var(--brd2);border-radius:18px;padding:18px;width:100%;max-width:480px;max-height:90dvh;overflow-y:auto;">'
     +'<div style="font-size:15px;font-weight:900;color:var(--org);margin-bottom:4px;">🏢 Dépôt à la compagnie</div>'
     +'<div style="font-size:10px;color:var(--m2);margin-bottom:14px;line-height:1.5;">Tu déposes la feuille de coupons et de STS au bureau. La compagnie retient la location des voitures et te verse la différence.</div>'
-    +'<div class="fi"><label>Mois déposé</label><div class="sw"><select id="dpMois" onchange="dpRecalc(true)" style="width:100%;">'+opts+'</select></div></div>'
+    +'<div class="fi"><label>Mois des coupons déposés</label><div class="sw"><select id="dpMois" onchange="dpRecalc(true)" style="width:100%;">'+opts+'</select></div>'
+    +'<div id="dpMoisInfo" style="font-size:10px;color:var(--m2);margin-top:4px;"></div></div>'
     +'<div class="fi"><label>💰 Total déposé (coupons + STS)</label><input id="dpTotal" type="number" step="0.01" inputmode="decimal" oninput="dpRecalc()" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;"></div>'
-    +'<div class="fi"><label>🚗 Retenue location des voitures</label><input id="dpRet" type="number" step="0.01" inputmode="decimal" oninput="dpRecalc()" value="'+ret.total.toFixed(2)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;">'
+    +'<div class="fi"><label id="dpRetLbl">🚗 Retenue — loyer des voitures</label><input id="dpRet" type="number" step="0.01" inputmode="decimal" oninput="dpRecalc()" value="'+ret.total.toFixed(2)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;">'
     +'<div style="font-size:10px;color:var(--m2);margin-top:4px;">'+ret.n+' voiture'+(ret.n>1?'s':'')+' × '+fm(ret.parVoiture)+' — modifiable (réglages : coûts fixes)</div></div>'
     +'<div class="fi"><label>➖ Autre retenue (optionnel)</label><div style="display:flex;gap:7px;">'
     +'<input id="dpAutreLbl" placeholder="ex: assurance" style="flex:1;min-width:0;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;">'
@@ -8802,6 +8805,12 @@ function dpRecalc(remplirTotal){
   var mk=document.getElementById('dpMois').value;
   var tEl=document.getElementById('dpTotal');
   if(remplirTotal&&tEl)tEl.value=reclamResteMois(mk).toFixed(2);
+  // Le loyer retenu est celui du mois OÙ l'on dépose, donc le mois suivant
+  var mSuiv=moisSuivant(mk);
+  var info=document.getElementById('dpMoisInfo');
+  if(info)info.textContent='Déposé au bureau au début de '+moisLbl(mSuiv);
+  var rl=document.getElementById('dpRetLbl');
+  if(rl)rl.textContent='🚗 Retenue — loyer des voitures de '+moisLbl(mSuiv);
   var net=pf(tEl?tEl.value:0)-pf(document.getElementById('dpRet').value)-pf(document.getElementById('dpAutre').value);
   var el=document.getElementById('dpNet'),box=document.getElementById('dpNetBox');
   if(el)el.textContent=fm(net);
@@ -8841,7 +8850,7 @@ function _depotEncaisser(d,acc,date){
   if(d.net>0){
     var t=getTresoAccounts();
     t.transactions.push({id:uid(),date:d.dateRecu,
-      desc:'🏢 Règlement compagnie — '+moisLbl(d.mois)+' (déposé '+fm(d.total)+' − retenue '+fm(d.retenue+d.autre)+')',
+      desc:'🏢 Règlement compagnie — coupons de '+moisLbl(d.mois)+' (déposé '+fm(d.total)+' − loyer '+moisLbl(moisSuivant(d.mois))+' '+fm(d.retenue+d.autre)+')',
       amount:d.net,accountId:d.accRecu,type:'in',cat:'Coupons',depotKey:d.id,auto:true});
   }
 }
@@ -9370,7 +9379,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v75-DEPOT-COMPAGNIE';
+var APP_VERSION = '2026-07-29-v76-DEPOT-CLARIFIE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
