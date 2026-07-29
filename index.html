@@ -8153,6 +8153,9 @@ function renderTreso(){
   var moCoup=moArr.reduce(function(a,s){return a+pf(s.coup);},0);
   var moTip=moArr.reduce(function(a,s){return a+pf(s.pourboire);},0);
 
+  // ── 📋 BILAN en premier : c'est le résumé, il doit être visible sans défiler ──
+  html+=bilanHTML();
+
   // ── Caisse séparée : bandeau + suivi par chauffeur ──
   var sep=tresoCashSepare();
   html+='<div style="background:'+(sep?'rgba(255,107,0,.08)':'rgba(255,255,255,.03)')+';border:1.5px solid '+(sep?'rgba(255,107,0,.3)':'var(--brd)')+';border-radius:12px;padding:11px 13px;margin-bottom:12px;">'
@@ -8316,9 +8319,6 @@ function renderTreso(){
   html+='<button onclick="openTresoCompter()" style="grid-column:1/-1;background:rgba(245,200,0,.12);border:1.5px solid rgba(245,200,0,.35);color:var(--gold);border-radius:12px;padding:13px;font-size:13px;font-weight:900;cursor:pointer;">🧮 Compter ma caisse (rapprochement)</button>';
   html+='<button onclick="addTresoAccount()" style="grid-column:1/-1;background:rgba(255,255,255,.05);border:1.5px dashed var(--brd2);color:var(--m2);border-radius:12px;padding:11px;font-size:11px;font-weight:800;cursor:pointer;">➕ Ajouter un compte</button>';
   html+='</div>';
-
-  // ── 📋 BILAN : actif (avoirs + créances) / passif (dettes) / valeur nette ──
-  html+=bilanHTML();
 
   // ── Résumé mensuel ──
   html+='<div style="margin-bottom:14px;">';
@@ -9522,7 +9522,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v79-BILAN';
+var APP_VERSION = '2026-07-29-v80-BILAN-EN-HAUT';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
