@@ -5007,7 +5007,7 @@ function payeToggle(wkKey,drvName){
     const wkLbl=wkKey.slice(5); // MM-DD
     var msg='💵 Payer '+drvName+' — semaine du '+wkKey+'\n\n';
     if(deductCash&&dd.cash>0){
-      msg+='Salaire : '+fm(dd.sal)+'\n💵 Cash gardé par le chauffeur : −'+fm(dd.cash)+'\n➡️ Tu verses la DIFFÉRENCE : '+fm(net)+'\n\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net)+'\n• Compte Cash : −'+fm(dd.cash)+' (gardé par le chauffeur)';
+      msg+='Salaire : '+fm(dd.sal)+'\n💵 Cash gardé par le chauffeur : −'+fm(dd.cash)+'\n➡️ Tu verses la DIFFÉRENCE : '+fm(net)+'\n\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net)+'\n• '+(tresoCashSepare()?'Chez les chauffeurs':'Compte Cash')+' : −'+fm(dd.cash)+' (gardé par le chauffeur)';
     }else{
       msg+='➡️ Tu verses le salaire complet : '+fm(net)+'\n\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net);
     }
@@ -5017,7 +5017,10 @@ function payeToggle(wkKey,drvName){
       t.transactions.push({id:uid(),date:dk,accountId:'comm',type:'out',amount:parseFloat(net.toFixed(2)),desc:'💼 Salaire '+drvName+' (sem. '+wkLbl+')'+(deductCash&&dd.cash>0?' — différence après cash':''),payeKey:k,auto:true});
     }
     if(deductCash&&dd.cash>0){
-      t.transactions.push({id:uid(),date:dk,accountId:'cash',type:'out',amount:parseFloat(dd.cash.toFixed(2)),desc:'💵 Cash gardé par '+drvName+' (salaire sem. '+wkLbl+')',payeKey:k,auto:true});
+      // En mode caisse séparée, ce cash n'a jamais transité par MA caisse :
+      // il sort directement de ce que le chauffeur avait en main.
+      var srcCash=tresoCashSepare()?'cashdrv':'cash';
+      t.transactions.push({id:uid(),date:dk,accountId:srcCash,type:'out',amount:parseFloat(dd.cash.toFixed(2)),desc:'💵 Cash gardé par '+drvName+' (salaire sem. '+wkLbl+')',payeKey:k,auto:true,drvName:drvName});
     }
     C.payes[k]={paid:true,ts:new Date().toISOString(),by:U.name,net:parseFloat(net.toFixed(2)),cashKept:(deductCash?parseFloat(dd.cash.toFixed(2)):0)};
     audit('PAYE_OK',drvName+'/'+wkKey+'/'+fm(net));
@@ -6217,7 +6220,8 @@ function renderAnalysePro(){
 function renderInvest(){
   var t=getTresoAccounts();
   var actif=0;
-  t.accounts.filter(function(a){return a.type!=='credit';}).forEach(function(a){actif+=tresoSolde(a.id);});
+  // Le cash encore chez les chauffeurs n'est pas investissable : je ne l'ai pas.
+  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv';}).forEach(function(a){actif+=tresoSolde(a.id);});
   var dette=tresoSolde('credit');
   var fc=C.fixedCosts||{};
   var fcMo=pf(fc.insurance)+pf(fc.carRental)+pf(fc.other||0);
@@ -7834,8 +7838,50 @@ function getTresoAccounts(){
       {id:'credit', name:'Crédit/Dette',icon:'📋', color:'#dc2626', solde:0, type:'credit', auto:false, desc:'Ce que tu dois'}
     ];
   }
+  // Caisse secondaire « à encaisser » : ajoutée aux flottes existantes sans
+  // toucher aux comptes déjà en place (elle ne s'affiche qu'en mode séparé).
+  if(!C.treso.accounts.find(function(a){return a.id==='cashdrv';})){
+    C.treso.accounts.push({id:'cashdrv',name:'Chez les chauffeurs',icon:'🫱',color:'#ff6b00',solde:0,type:'cash',auto:true,desc:'Cash déclaré, pas encore encaissé'});
+  }
   if(!C.treso.transactions)C.treso.transactions=[];
   return C.treso;
+}
+
+// ── Mode « caisse séparée » : le comptant des chauffeurs n'entre dans MA
+// caisse qu'au moment où je l'encaisse réellement. Désactivé par défaut
+// (comportement historique inchangé pour les flottes existantes).
+function tresoCashSepare(){ return !!(C.treso&&C.treso.cashSepare); }
+
+// Comptant déclaré par les chauffeurs (quarts non conduits par le patron).
+// Quand le patron conduit, il encaisse lui-même : ça va direct dans sa caisse.
+function _compChauffeurs(arr){
+  return arr.filter(function(s){return !isOwnerShift(s);})
+            .reduce(function(a,s){return a+pf(s.comp);},0);
+}
+function _compPatron(arr){
+  return arr.filter(function(s){return isOwnerShift(s);})
+            .reduce(function(a,s){return a+pf(s.comp);},0);
+}
+
+// Cash encore chez chaque chauffeur (cumul, toutes périodes confondues) :
+// ce qu'il a déclaré − ce que j'ai encaissé − ce que je lui ai laissé en salaire.
+function cashDrvPending(){
+  var t=getTresoAccounts();
+  var by={};
+  getArr().forEach(function(s){
+    if(isOwnerShift(s))return;
+    var c=pf(s.comp);
+    if(!c)return;
+    by[s.driver]=(by[s.driver]||0)+c;
+  });
+  t.transactions.forEach(function(tx){
+    if(tx.accountId!=='cashdrv'||!tx.drvName)return;
+    // 'in' = correction à la hausse ; tout le reste (encaissement, cash laissé
+    // en salaire) sort de la caisse chauffeurs.
+    var signe=(tx.type==='in')?1:-1;
+    by[tx.drvName]=(by[tx.drvName]||0)+signe*pf(tx.amount);
+  });
+  return by;
 }
 
 function tresoSoldeMois(accountId, refMo){
@@ -7859,28 +7905,33 @@ function tresoSoldeMois(accountId, refMo){
 
   if(accountId==='cash'){
     var arr2=getArr().filter(function(s){return inMo(s.date,refMo);});
-    var cash=arr2.reduce(function(a,s){return a+pf(s.comp);},0);
-    var ded=0;
-    if(C.payes){
-      Object.keys(C.payes).forEach(function(k){
-        if(k.indexOf('_deductCash')>=0&&C.payes[k]===true){
-          var parts=k.replace('_deductCash','').split('|');
-          var wkKey=parts[0]; var drvName=parts[1];
-          if(wkKey&&drvName&&inMo(wkKey,refMo)){
-            var refDate=new Date(wkKey+'T12:00:00');
-            ded+=getArr().filter(function(s){return s.driver===drvName&&inWk(s.date,refDate);})
-              .reduce(function(a,s){return a+pf(s.comp);},0);
-          }
-        }
-      });
-    }
+    // Mode séparé : seul le comptant des quarts conduits par le patron entre
+    // directement en caisse. Celui des chauffeurs attend un encaissement.
+    var cash=tresoCashSepare()?_compPatron(arr2):arr2.reduce(function(a,s){return a+pf(s.comp);},0);
     var manuel2=pf(acc.solde);
     t.transactions.forEach(function(tx){
       if(!inMo(tx.date,refMo))return;
       if(tx.accountId==='cash') manuel2+=(tx.type==='in'?1:-1)*pf(tx.amount);
       if(tx.type==='transfer'&&tx.toAccountId==='cash') manuel2+=pf(tx.amount);
     });
-    return manuel2+cash-ded;
+    // Le cash laissé au chauffeur est déjà retiré par la sortie automatique
+    // créée au paiement (payeToggle) : ne pas le déduire une deuxième fois.
+    return manuel2+cash;
+  }
+
+  // ── Caisse secondaire « chez les chauffeurs » ──
+  // Solde CUMULÉ (pas mensuel) : une dette de cash ne disparaît pas au
+  // changement de mois. Les transactions comptent donc toutes périodes.
+  if(accountId==='cashdrv'){
+    var pend=cashDrvPending();
+    var tot=pf(acc.solde);
+    Object.keys(pend).forEach(function(n){tot+=pend[n];});
+    t.transactions.forEach(function(tx){
+      // corrections manuelles sans chauffeur nommé + transferts entrants
+      if(tx.accountId==='cashdrv'&&!tx.drvName) tot+=(tx.type==='in'?1:-1)*pf(tx.amount);
+      if(tx.type==='transfer'&&tx.toAccountId==='cashdrv') tot+=pf(tx.amount);
+    });
+    return tot;
   }
 
   // Autres comptes
@@ -7937,9 +7988,50 @@ function renderTreso(){
   var moCoup=moArr.reduce(function(a,s){return a+pf(s.coup);},0);
   var moTip=moArr.reduce(function(a,s){return a+pf(s.pourboire);},0);
 
+  // ── Caisse séparée : bandeau + suivi par chauffeur ──
+  var sep=tresoCashSepare();
+  html+='<div style="background:'+(sep?'rgba(255,107,0,.08)':'rgba(255,255,255,.03)')+';border:1.5px solid '+(sep?'rgba(255,107,0,.3)':'var(--brd)')+';border-radius:12px;padding:11px 13px;margin-bottom:12px;">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">'
+    +'<div style="flex:1;min-width:0;">'
+    +'<div style="font-size:12px;font-weight:900;color:'+(sep?'var(--neon)':'var(--m2)')+';">🫱 Caisse séparée '+(sep?'— ACTIVE':'— désactivée')+'</div>'
+    +'<div style="font-size:10px;color:var(--m2);line-height:1.5;margin-top:2px;">'
+    +(sep?'Le comptant des chauffeurs attend dans « Chez les chauffeurs » et n\'entre dans ta caisse que quand tu l\'encaisses.'
+        :'Le comptant des chauffeurs entre directement dans ta caisse, même si tu ne l\'as pas encore reçu.')
+    +'</div></div>'
+    +'<button onclick="toggleCashSepare()" style="flex-shrink:0;background:'+(sep?'rgba(255,107,0,.2)':'rgba(255,255,255,.07)')+';border:1.5px solid '+(sep?'rgba(255,107,0,.5)':'var(--brd2)')+';color:'+(sep?'var(--neon)':'var(--m2)')+';border-radius:10px;padding:9px 13px;font-size:11px;font-weight:800;cursor:pointer;">'+(sep?'Désactiver':'Activer')+'</button>'
+    +'</div></div>';
+
+  if(sep){
+    var pend=cashDrvPending();
+    var pendNames=Object.keys(pend).filter(function(n){return Math.abs(pend[n])>0.005;})
+      .sort(function(a,b){return pend[b]-pend[a];});
+    var pendTot=pendNames.reduce(function(a,n){return a+pend[n];},0);
+    html+='<div style="background:rgba(255,107,0,.06);border:1.5px solid rgba(255,107,0,.25);border-radius:14px;padding:13px;margin-bottom:14px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:'+(pendNames.length?'10px':'0')+';">'
+      +'<div><div style="font-size:10px;color:var(--neon);font-weight:800;text-transform:uppercase;letter-spacing:.5px;">🫱 À encaisser — cumul</div>'
+      +'<div style="font-size:9px;color:var(--m2);">Cash déclaré, encore chez les chauffeurs</div></div>'
+      +'<div style="font-size:22px;font-weight:900;color:var(--neon);">'+fm(pendTot)+'</div>'
+      +'</div>';
+    if(pendNames.length){
+      pendNames.forEach(function(n){
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,107,0,.15);">'
+          +'<div style="font-size:12px;font-weight:700;color:var(--m3);">🚗 '+_cmpEsc(n)+'</div>'
+          +'<div style="display:flex;align-items:center;gap:9px;">'
+          +'<span style="font-size:15px;font-weight:900;color:'+(pend[n]<0?'var(--red)':'var(--neon)')+';">'+fm(pend[n])+'</span>'
+          +'<button onclick="openTresoEncaisse(\''+_cmpEsc(n).replace(/'/g,"\\'")+'\')" style="background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:8px;padding:6px 11px;font-size:10px;font-weight:800;cursor:pointer;">💰 Encaisser</button>'
+          +'</div></div>';
+      });
+    }else{
+      html+='<div style="font-size:11px;color:var(--grn);font-weight:700;margin-top:8px;">✅ Tout est encaissé.</div>';
+    }
+    html+='</div>';
+  }
+
   // ── Cartes de comptes (solde du mois sélectionné) ──
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">';
   t.accounts.forEach(function(acc){
+    // La caisse chauffeurs ne s'affiche qu'en mode séparé
+    if(acc.id==='cashdrv'&&!sep)return;
     var solde=tresoSoldeMois(acc.id,selMo);
     var isCredit=acc.type==='credit';
     var col=acc.color;
@@ -7961,6 +8053,7 @@ function renderTreso(){
 
   // ── Boutons d'action rapide ──
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">';
+  if(sep)html+='<button onclick="openTresoEncaisse()" style="grid-column:1/-1;background:rgba(57,211,83,.18);border:1.5px solid rgba(57,211,83,.5);color:var(--grn);border-radius:12px;padding:13px;font-size:13px;font-weight:900;cursor:pointer;">💰 Encaisser le cash d\'un chauffeur</button>';
   html+='<button onclick="openTresoTx(\'in\')" style="background:rgba(57,211,83,.15);border:1.5px solid rgba(57,211,83,.4);color:var(--grn);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">➕ Entrée</button>';
   html+='<button onclick="openTresoTx(\'out\')" style="background:rgba(255,58,58,.15);border:1.5px solid rgba(255,58,58,.4);color:var(--red);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">➖ Sortie</button>';
   html+='<button onclick="openTresoTx(\'transfer\')" style="background:rgba(96,165,250,.15);border:1.5px solid rgba(96,165,250,.4);color:var(--blu);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">🔄 Transfert</button>';
@@ -7968,12 +8061,17 @@ function renderTreso(){
   html+='</div>';
 
   // ── Total général ──
+  // « Total actif » = ce que je détiens vraiment. Le cash encore chez les
+  // chauffeurs est affiché à part : il m'est dû, mais je ne l'ai pas en main.
   var totalActif=0;
-  t.accounts.filter(function(a){return a.type!=='credit';}).forEach(function(a){totalActif+=tresoSolde(a.id);});
+  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv';}).forEach(function(a){totalActif+=tresoSolde(a.id);});
   var totalDette=tresoSolde('credit');
+  var aEncaisser=sep?tresoSolde('cashdrv'):0;
   html+='<div style="background:rgba(245,200,0,.07);border:1.5px solid rgba(245,200,0,.2);border-radius:14px;padding:12px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">'
-    +'<div><div style="font-size:10px;color:var(--m2);text-transform:uppercase;font-weight:700;">Total actif</div>'
-    +'<div style="font-size:22px;font-weight:900;color:var(--gold);">'+fm(totalActif)+'</div></div>'
+    +'<div><div style="font-size:10px;color:var(--m2);text-transform:uppercase;font-weight:700;">Total actif '+(sep?'<span style="text-transform:none;font-weight:600;">(en ma possession)</span>':'')+'</div>'
+    +'<div style="font-size:22px;font-weight:900;color:var(--gold);">'+fm(totalActif)+'</div>'
+    +(sep&&Math.abs(aEncaisser)>0.005?'<div style="font-size:10px;color:var(--neon);font-weight:700;margin-top:2px;">+ '+fm(aEncaisser)+' à encaisser</div>':'')
+    +'</div>'
     +(totalDette>0?'<div style="text-align:right;"><div style="font-size:10px;color:var(--m2);text-transform:uppercase;font-weight:700;">Dette totale</div><div style="font-size:22px;font-weight:900;color:var(--red);">'+fm(totalDette)+'</div></div>':'')
     +'</div>';
 
@@ -8283,6 +8381,97 @@ function openTresoTx(type){
     +'</div>'
     +'</div>';
   document.body.appendChild(modal);
+}
+
+// ── Activer / désactiver la caisse séparée ──
+function toggleCashSepare(){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var t=getTresoAccounts();
+  if(tresoCashSepare()){
+    if(!confirm('Désactiver la caisse séparée ?\n\nLe comptant des chauffeurs retournera directement dans ta caisse, comme avant.\n\nTes encaissements déjà enregistrés sont conservés.'))return;
+    C.treso.cashSepare=false;
+  }else{
+    if(!confirm('🫱 ACTIVER LA CAISSE SÉPARÉE\n\nCe qui change :\n\n• Le comptant déclaré par les chauffeurs va dans « Chez les chauffeurs » au lieu d\'entrer tout de suite dans ta caisse.\n• Ta caisse ne bouge que quand tu touches « 💰 Encaisser ».\n• Le cash que tu laisses à un chauffeur en salaire sort de sa caisse à lui, jamais de la tienne.\n\n➡️ Ensuite, mets ta caisse au vrai montant que tu as en main : ✏️ Soldes initiaux.\n\nRéversible en tout temps.'))return;
+    C.treso.cashSepare=true;
+  }
+  lSave();
+  audit(C.treso.cashSepare?'TRESO_CASH_SEPARE_ON':'TRESO_CASH_SEPARE_OFF');
+  renderTreso();
+  showToastGrn(C.treso.cashSepare?'Caisse séparée activée ✅':'Caisse séparée désactivée');
+}
+
+// ── Encaisser le cash d'un chauffeur ──
+function openTresoEncaisse(drvName){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var pend=cashDrvPending();
+  var names=Object.keys(pend).filter(function(n){return Math.abs(pend[n])>0.005;})
+    .sort(function(a,b){return pend[b]-pend[a];});
+  if(!names.length){alert('✅ Rien à encaisser : tous les chauffeurs sont à jour.');return;}
+  if(!drvName||names.indexOf(drvName)<0)drvName=names[0];
+  var opts=names.map(function(n){
+    return '<option value="'+_cmpEsc(n)+'"'+(n===drvName?' selected':'')+'>'+_cmpEsc(n)+' — '+fm(pend[n])+' à encaisser</option>';
+  }).join('');
+  var old=document.getElementById('tresoEncModal');if(old)old.remove();
+  var modal=document.createElement('div');
+  modal.id='tresoEncModal';
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+  modal.innerHTML='<div style="background:var(--s2);border:1.5px solid var(--brd2);border-radius:18px;padding:18px;width:100%;max-width:480px;max-height:90dvh;overflow-y:auto;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--grn);margin-bottom:4px;">💰 Encaisser le cash d\'un chauffeur</div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-bottom:14px;line-height:1.5;">L\'argent passe de « Chez les chauffeurs » vers ta caisse. Mets le montant que tu as vraiment reçu — s\'il te reste un solde chez lui, il reste affiché à encaisser.</div>'
+    +'<div class="fi"><label>Chauffeur</label><div class="sw"><select id="encDrv" onchange="encFillMax()" style="width:100%;">'+opts+'</select></div></div>'
+    +'<div id="encMaxLbl" style="font-size:11px;font-weight:800;color:var(--neon);margin:-6px 0 10px;"></div>'
+    +'<div class="fi"><label>Montant reçu ($)</label><input id="encAmt" type="number" step="0.01" inputmode="decimal" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;"></div>'
+    +'<div style="display:flex;gap:7px;margin:-4px 0 10px;">'
+    +'<button onclick="encFillMax(true)" style="flex:1;background:rgba(255,107,0,.12);border:1px solid rgba(255,107,0,.3);color:var(--neon);border-radius:8px;padding:8px;font-size:11px;font-weight:800;cursor:pointer;">Tout encaisser</button>'
+    +'</div>'
+    +'<div class="fi"><label>Date</label><input id="encDate" type="date" value="'+today()+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div class="fi"><label>Vers quel compte ?</label><div class="sw"><select id="encTo" style="width:100%;">'
+    +'<option value="cash">💵 Ma caisse (comptant)</option>'
+    +'<option value="comm">🏦 Commercial (déposé à la banque)</option>'
+    +'<option value="perso">👤 Personnel</option>'
+    +'</select></div></div>'
+    +'<div class="fi"><label>Note (optionnel)</label><input id="encNote" placeholder="ex: remis en main propre" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:14px;">'
+    +'<button onclick="document.getElementById(\'tresoEncModal\').remove()" style="flex:.4;background:rgba(255,255,255,.07);border:1px solid var(--brd);color:var(--m2);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Annuler</button>'
+    +'<button onclick="saveTresoEncaisse()" style="flex:1;background:rgba(57,211,83,.25);border:1.5px solid rgba(57,211,83,.6);color:var(--grn);border-radius:10px;padding:12px;font-size:13px;font-weight:900;cursor:pointer;">💰 Encaisser</button>'
+    +'</div></div>';
+  document.body.appendChild(modal);
+  encFillMax(true);
+}
+function encFillMax(force){
+  var sel=document.getElementById('encDrv');
+  var amt=document.getElementById('encAmt');
+  var lbl=document.getElementById('encMaxLbl');
+  if(!sel||!amt)return;
+  var pend=cashDrvPending();
+  var max=pf(pend[sel.value]);
+  if(lbl)lbl.textContent='🫱 '+fm(max)+' encore chez '+sel.value;
+  if(force||!amt.value)amt.value=max>0?max.toFixed(2):'';
+}
+function saveTresoEncaisse(){
+  var drv=document.getElementById('encDrv').value;
+  var amt=parseFloat(document.getElementById('encAmt').value||0);
+  var date=document.getElementById('encDate').value||today();
+  var to=document.getElementById('encTo').value||'cash';
+  var note=(document.getElementById('encNote').value||'').trim();
+  if(!amt||amt<=0){alert('Montant invalide.');return;}
+  var pend=cashDrvPending();
+  var max=pf(pend[drv]);
+  if(amt>max+0.005&&!confirm('⚠️ Tu encaisses '+fm(amt)+' alors que '+drv+' n\'a que '+fm(max)+' de déclaré.\n\nSa caisse passera en négatif. Continuer ?'))return;
+  var t=getTresoAccounts();
+  t.transactions.push({
+    id:uid(),date:date,
+    desc:'💰 Encaissé de '+drv+(note?' — '+note:''),
+    amount:parseFloat(amt.toFixed(2)),
+    accountId:'cashdrv',type:'transfer',toAccountId:to,
+    cat:'Cash chauffeur',drvName:drv
+  });
+  lSave();
+  audit('TRESO_ENCAISSE',drv+'/'+fm(amt));
+  var m=document.getElementById('tresoEncModal');if(m)m.remove();
+  renderTreso();
+  var reste=max-amt;
+  showToastGrn(fm(amt)+' encaissé'+(reste>0.005?' · reste '+fm(reste)+' chez '+drv:''));
 }
 
 function saveTresoTx(type){
@@ -8621,7 +8810,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v70-ECART-COULEURS';
+var APP_VERSION = '2026-07-29-v71-CAISSE-SEPAREE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
