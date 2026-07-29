@@ -8171,13 +8171,17 @@ function renderTreso(){
     var pendNames=Object.keys(pend).filter(function(n){return Math.abs(pend[n])>0.005;})
       .sort(function(a,b){return pend[b]-pend[a];});
     var pendTot=pendNames.reduce(function(a,n){return a+pend[n];},0);
+    if(!pendNames.length){
+      // Rien à encaisser : une seule ligne discrète au lieu d'un gros bloc vide
+      html+='<div style="font-size:11px;color:var(--grn);font-weight:700;padding:8px 2px;margin-bottom:10px;">✅ Cash des chauffeurs : tout est encaissé.</div>';
+    }else{
     html+='<div style="background:rgba(255,107,0,.06);border:1.5px solid rgba(255,107,0,.25);border-radius:14px;padding:13px;margin-bottom:14px;">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:'+(pendNames.length?'10px':'0')+';">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
       +'<div><div style="font-size:10px;color:var(--neon);font-weight:800;text-transform:uppercase;letter-spacing:.5px;">🫱 À encaisser — cumul</div>'
       +'<div style="font-size:9px;color:var(--m2);">Cash déclaré, encore chez les chauffeurs</div></div>'
       +'<div style="font-size:22px;font-weight:900;color:var(--neon);">'+fm(pendTot)+'</div>'
       +'</div>';
-    if(pendNames.length){
+    {
       pendNames.forEach(function(n){
         html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid rgba(255,107,0,.15);">'
           +'<div style="font-size:12px;font-weight:700;color:var(--m3);">🚗 '+_cmpEsc(n)+'</div>'
@@ -8186,10 +8190,9 @@ function renderTreso(){
           +'<button onclick="openTresoEncaisse(\''+_cmpEsc(n).replace(/'/g,"\\'")+'\')" style="background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:8px;padding:6px 11px;font-size:10px;font-weight:800;cursor:pointer;">💰 Encaisser</button>'
           +'</div></div>';
       });
-    }else{
-      html+='<div style="font-size:11px;color:var(--grn);font-weight:700;margin-top:8px;">✅ Tout est encaissé.</div>';
     }
     html+='</div>';
+    }
   }
 
   // ── Coupons + STS à réclamer : UNE seule section, organisée par mois
@@ -8208,7 +8211,7 @@ function renderTreso(){
       +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:4px;">'
       +'<div><div style="font-size:11px;color:var(--org);font-weight:900;text-transform:uppercase;letter-spacing:.5px;">📞 Coupons + STS à réclamer</div>'
       +'<div style="font-size:9px;color:var(--m2);line-height:1.5;margin-top:2px;">Tu déposes le mois écoulé au bureau ; ils retiennent le loyer des voitures et te versent la différence.</div></div>'
-      +'<div style="font-size:22px;font-weight:900;color:var(--org);flex-shrink:0;">'+fm(rTot)+'</div></div>';
+      +'<div style="font-size:22px;font-weight:900;color:'+(rTot>0.005?'var(--org)':'var(--grn)')+';flex-shrink:0;">'+fm(rTot)+'</div></div>';
     if(moisAvecReste.length){
       html+='<div style="font-size:10px;font-weight:800;color:var(--org);margin:10px 0 4px;">📋 Mois à déposer</div>';
       moisAvecReste.slice(0,4).forEach(function(mk){
@@ -8253,17 +8256,26 @@ function renderTreso(){
           +'</div></div>';
       });
     }
-    var regles=depots.filter(function(d){return d.recu;}).slice(0,3);
-    if(regles.length){
-      html+='<div style="font-size:10px;font-weight:800;color:var(--grn);margin:12px 0 6px;">✅ Réglés</div>';
-      regles.forEach(function(d){
-        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--brd);font-size:11px;">'
-          +'<span style="color:var(--m2);text-transform:capitalize;">'+moisLbl(d.mois)+(d.netAttendu!==undefined?' <span style="color:var(--red);">(écart)</span>':'')+'</span>'
-          +'<span style="font-weight:800;color:var(--grn);">'+fm(d.net)+' reçu</span></div>';
-      });
+    // Mois déjà réglés : repliés — l'écran doit montrer ce qui RESTE à faire
+    var regles=depots.filter(function(d){return d.recu;});
+    if(!moisAvecReste.length&&!enAttente.length){
+      html+='<div style="font-size:12px;color:var(--grn);font-weight:800;margin-top:8px;">✅ Rien à réclamer — tout est déposé et réglé.</div>';
     }
-    if(!moisAvecReste.length&&!enAttente.length&&!regles.length){
-      html+='<div style="font-size:11px;color:var(--m2);">Aucun dépôt pour le moment.</div>';
+    if(regles.length){
+      html+='<button onclick="C.treso._voirRegles=!C.treso._voirRegles;renderTreso();" style="width:100%;margin-top:9px;background:none;border:none;color:var(--m2);font-size:10px;font-weight:700;cursor:pointer;padding:6px;text-align:left;">'
+        +(C.treso._voirRegles?'▾':'▸')+' Historique des mois réglés ('+regles.length+')</button>';
+      if(C.treso._voirRegles){
+        html+='<div style="background:rgba(0,0,0,.2);border-radius:10px;padding:9px;">';
+        regles.slice(0,12).forEach(function(d){
+          html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:11px;">'
+            +'<span style="color:var(--m2);text-transform:capitalize;">'+moisLbl(d.mois)+(d.netAttendu!==undefined?' <span style="color:var(--red);">(écart)</span>':'')+'</span>'
+            +'<div style="display:flex;align-items:center;gap:8px;">'
+            +'<span style="font-weight:800;color:var(--grn);">'+fm(d.net)+' reçu</span>'
+            +'<button onclick="supprDepot(\''+d.id+'\')" style="background:rgba(255,58,58,.08);border:1px solid rgba(255,58,58,.25);color:var(--red);border-radius:6px;padding:3px 7px;font-size:10px;cursor:pointer;">🗑️</button>'
+            +'</div></div>';
+        });
+        html+='</div>';
+      }
     }
     html+='</div>';
   }
@@ -9395,7 +9407,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v77-LOYER-PAR-VOITURE';
+var APP_VERSION = '2026-07-29-v78-TRESO-EPUREE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
