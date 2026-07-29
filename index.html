@@ -5203,7 +5203,9 @@ function renderExp(){
   list.innerHTML=Object.entries(grps).sort((a,b)=>b[0].localeCompare(a[0])).map(([k,g])=>
     '<div style="margin-bottom:6px;"><div class="hgt"><span>'+g.lbl+'</span><span style="color:var(--red)">'+fm(g.tot)+'</span></div>'
     +g.items.map(e=>'<div class="expi"><div><div class="expi-t">'+(e.category||'Dépense')+' — '+(e.vehicle||'Général')+'</div><div class="expi-m">'+e.date+(e.desc?' · '+e.desc:'')+'</div>'
-      +(isOwner?'<div style="font-size:10px;font-weight:700;margin-top:3px;color:'+(e.payAcc?'var(--grn)':'var(--neon)')+';">'+(e.payAcc?'✅ Payé — '+expAccLabel(e.payAcc):'⏳ Pas encore payé')+'</div>':'')
+      +(isOwner?(e.payAcc
+        ?'<div style="font-size:10px;font-weight:700;margin-top:3px;color:var(--grn);">✅ Payé — '+expAccLabel(e.payAcc)+'</div>'
+        :'<button onclick="openExpPay(\''+e.id+'\')" style="margin-top:4px;background:rgba(255,107,0,.12);border:1px solid rgba(255,107,0,.35);color:var(--neon);border-radius:7px;padding:4px 9px;font-size:10px;font-weight:800;cursor:pointer;">⏳ Pas encore payé — marquer payée</button>'):'')
       +'</div><div style="text-align:right"><div class="expi-amt">'+fm(e.amount)+'</div>'+(isOwner?'<button class="bdlt" style="margin-top:4px;font-size:10px;" onclick="delExp(\''+e.id+'\')">🗑️</button>':'')+'</div></div>').join('')
     +'</div>'
   ).join('');
@@ -5257,6 +5259,56 @@ function saveExp(){
   closeM('expMov');renderExp();
   if(accId)showToastGrn(fm(amt)+' retiré de '+expAccLabel(accId));
 }
+// ── Marquer payée une dépense saisie sans compte (anciennes dépenses) ──
+function openExpPay(id){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var e=EX[id];if(!e)return;
+  var last=(C.treso&&C.treso.lastExpAcc)||'cash';
+  var opts=expPayAccounts().map(function(a){
+    return '<option value="'+a.id+'"'+(a.id===last?' selected':'')+'>'+a.icon+' '+a.name+(a.type==='credit'?' (dette)':'')+'</option>';
+  }).join('');
+  var old=document.getElementById('expPayModal');if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='expPayModal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+  m.innerHTML='<div style="background:var(--s2);border:1.5px solid var(--brd2);border-radius:18px;padding:18px;width:100%;max-width:480px;max-height:90dvh;overflow-y:auto;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--grn);margin-bottom:4px;">✅ Marquer cette dépense payée</div>'
+    +'<div style="font-size:11px;color:var(--m3);margin-bottom:12px;">'+_cmpEsc(e.category||'Dépense')+' — '+fm(e.amount)+' ('+e.date+')</div>'
+    +'<div class="fi"><label>💳 Payée avec quel compte ?</label><div class="sw"><select id="epAcc" style="width:100%;">'+opts+'</select></div></div>'
+    +'<label style="display:flex;align-items:flex-start;gap:9px;background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.25);border-radius:10px;padding:11px;cursor:pointer;margin-bottom:4px;">'
+    +'<input type="checkbox" id="epDejaDeduit" checked style="width:18px;height:18px;flex-shrink:0;margin-top:1px;">'
+    +'<span style="font-size:11px;font-weight:700;color:var(--m3);line-height:1.5;">Déjà déduit de mon solde<br><span style="font-weight:500;color:var(--m2);font-size:10px;">Coche pour une dépense ancienne : elle est déjà payée et ton solde en tient compte. Décoche seulement si tu veux que le montant soit retiré du compte maintenant.</span></span></label>'
+    +'<div style="display:flex;gap:8px;margin-top:14px;">'
+    +'<button onclick="document.getElementById(\'expPayModal\').remove()" style="flex:.4;background:rgba(255,255,255,.07);border:1px solid var(--brd);color:var(--m2);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Annuler</button>'
+    +'<button onclick="saveExpPay(\''+id+'\')" style="flex:1;background:rgba(57,211,83,.25);border:1.5px solid rgba(57,211,83,.6);color:var(--grn);border-radius:10px;padding:12px;font-size:13px;font-weight:900;cursor:pointer;">✅ Marquer payée</button>'
+    +'</div></div>';
+  document.body.appendChild(m);
+}
+function saveExpPay(id){
+  var e=EX[id];if(!e)return;
+  var accId=document.getElementById('epAcc').value;
+  var dejaDeduit=document.getElementById('epDejaDeduit').checked;
+  e.payAcc=accId;
+  e._m=Date.now(); // horodatage de modification (fusion multi-appareils)
+  if(!dejaDeduit){
+    // La dépense n'a jamais touché la trésorerie : on crée la sortie maintenant
+    var t=getTresoAccounts();
+    var acc=expPayAccounts().find(function(a){return a.id===accId;});
+    t.transactions.push({
+      id:uid(),date:e.date,
+      desc:'💸 '+e.category+(e.vehicle&&e.vehicle!=='Général'?' — '+e.vehicle:'')+(e.desc?' ('+e.desc+')':''),
+      amount:parseFloat(pf(e.amount).toFixed(2)),
+      accountId:accId,type:(acc&&acc.type==='credit')?'in':'out',
+      cat:e.category,expKey:e.id,auto:true
+    });
+  }
+  C.treso.lastExpAcc=accId;
+  lSave();audit('EXP_PAYEE',(e.category||'')+'/'+fm(e.amount)+'/'+accId+(dejaDeduit?'/deja':''));
+  document.getElementById('expPayModal').remove();
+  renderExp();
+  showToastGrn(dejaDeduit?'Marquée payée (solde inchangé)':fm(e.amount)+' retiré de '+expAccLabel(accId));
+}
+
 function delExp(id){
   if(!confirm('Supprimer cette dépense ?'))return;
   const exp=EX[id];
@@ -8664,6 +8716,18 @@ function depensesImpayees(){
   });
   return {total:total,detail:detail};
 }
+// ── Biens durables : voitures, permis/droits de taxi, équipements ──
+// Saisis à la main (l'app ne peut pas les deviner). Chaque bien peut
+// porter un financement encore dû, qui va au passif.
+function getBiens(){ if(!C.biens)C.biens=[]; return C.biens; }
+var BIEN_CATS=[
+  {id:'vehicule',icon:'🚗',lbl:'Véhicule'},
+  {id:'permis',  icon:'🎫',lbl:'Permis / droit de taxi'},
+  {id:'equip',   icon:'🧰',lbl:'Équipement'},
+  {id:'autre',   icon:'📦',lbl:'Autre bien'}
+];
+function bienIcon(cat){var c=BIEN_CATS.find(function(x){return x.id===cat;});return c?c.icon:'📦';}
+
 // Bilan complet : ce que je possède, ce qu'on me doit, ce que je dois
 function calcBilan(){
   var t=getTresoAccounts();
@@ -8687,19 +8751,30 @@ function calcBilan(){
   var totMain=enMain.reduce(function(a,x){return a+x.v;},0);
   var totCreances=creances.reduce(function(a,x){return a+x.v;},0);
 
+  // Biens durables saisis par le propriétaire (voitures, permis, équipement)
+  var biens=getBiens().map(function(b){
+    return {id:b.id,icon:bienIcon(b.cat),name:b.name,v:pf(b.valeur),dette:pf(b.dette)};
+  });
+  var totBiens=biens.reduce(function(a,x){return a+x.v;},0);
+  var totFinancement=biens.reduce(function(a,x){return a+x.dette;},0);
+
   var dettes=[];
   var credit=tresoSolde('credit');
   if(Math.abs(credit)>0.005)dettes.push({icon:'📋',name:'Crédit / dette',v:credit});
+  if(totFinancement>0.005){
+    dettes.push({icon:'🏦',name:'Financement des biens',v:totFinancement,
+      detail:biens.filter(function(b){return b.dette>0.005;}).map(function(b){return {lbl:b.name,date:'',amt:b.dette};})});
+  }
   var sal=salairesDus();
   if(sal.total>0.005)dettes.push({icon:'💼',name:'Salaires à payer',v:sal.total,detail:sal.detail});
   var imp=depensesImpayees();
   if(imp.total>0.005)dettes.push({icon:'💸',name:'Factures non payées',v:imp.total,detail:imp.detail});
   var totPassif=dettes.reduce(function(a,x){return a+x.v;},0);
 
-  return {enMain:enMain,creances:creances,dettes:dettes,
-    totMain:totMain,totCreances:totCreances,
-    totActif:totMain+totCreances,totPassif:totPassif,
-    valeurNette:(totMain+totCreances)-totPassif};
+  return {enMain:enMain,creances:creances,biens:biens,dettes:dettes,
+    totMain:totMain,totCreances:totCreances,totBiens:totBiens,
+    totActif:totMain+totCreances+totBiens,totPassif:totPassif,
+    valeurNette:(totMain+totCreances+totBiens)-totPassif};
 }
 
 function bilanHTML(){
@@ -8724,6 +8799,22 @@ function bilanHTML(){
     h+=ligne('📥','On me doit',b.totCreances,'var(--m3)',true);
     if(C.treso._voirBilan)b.creances.forEach(function(x){h+='<div style="padding-left:14px;">'+ligne(x.icon,x.name,x.v,'var(--neon)')+'</div>';});
   }
+  // Biens durables (voitures, permis de taxi, équipement)
+  h+=ligne('🏛️','Biens et permis',b.totBiens,'var(--m3)',true);
+  if(C.treso._voirBilan){
+    b.biens.forEach(function(x){
+      h+='<div style="padding-left:14px;display:flex;justify-content:space-between;align-items:center;padding-top:4px;padding-bottom:4px;gap:8px;">'
+        +'<span style="font-size:11px;color:var(--m2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">'+x.icon+' '+_cmpEsc(x.name)
+        +(x.dette>0.005?' <span style="color:var(--red);font-size:10px;">(dû '+fm(x.dette)+')</span>':'')+'</span>'
+        +'<span style="font-size:11px;font-weight:800;color:var(--m2);flex-shrink:0;">'+fm(x.v)+'</span>'
+        +'<button onclick="openBienEdit(\''+x.id+'\')" style="background:rgba(96,165,250,.12);border:1px solid rgba(96,165,250,.3);color:var(--blu);border-radius:6px;padding:3px 7px;font-size:10px;cursor:pointer;flex-shrink:0;">✏️</button>'
+        +'</div>';
+    });
+  }
+  if(!b.biens.length){
+    h+='<div style="padding-left:14px;font-size:10px;color:var(--m2);line-height:1.5;">Ajoute tes voitures et tes droits de taxi pour un bilan complet.</div>';
+  }
+  h+='<button onclick="openBienEdit()" style="width:100%;margin:6px 0 2px;background:rgba(255,255,255,.04);border:1.5px dashed var(--brd2);color:var(--m2);border-radius:9px;padding:8px;font-size:10px;font-weight:800;cursor:pointer;">➕ Ajouter une voiture, un permis, un équipement</button>';
 
   // ── PASSIF ──
   h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;margin-top:6px;border-top:1.5px solid rgba(255,58,58,.3);">'
@@ -8751,8 +8842,60 @@ function bilanHTML(){
     +'<span style="font-size:24px;font-weight:900;color:'+(nette>=0?'var(--gold)':'var(--red)')+';">'+fm(nette)+'</span></div>';
   h+='<button onclick="C.treso._voirBilan=!C.treso._voirBilan;renderTreso();" style="width:100%;margin-top:8px;background:none;border:none;color:var(--m2);font-size:10px;font-weight:700;cursor:pointer;padding:6px;text-align:left;">'
     +(C.treso._voirBilan?'▾ Masquer le détail':'▸ Voir le détail ligne par ligne')+'</button>';
-  h+='<div style="font-size:9px;color:var(--m2);line-height:1.5;border-top:1px solid var(--brd);padding-top:7px;">ℹ️ Les voitures, permis et équipements ne sont pas comptés : ce bilan ne couvre que l\'argent et les créances suivis dans l\'app. Pour un bilan comptable officiel, réfère-toi à ton comptable.</div>';
+  h+='<div style="font-size:9px;color:var(--m2);line-height:1.5;border-top:1px solid var(--brd);padding-top:7px;">ℹ️ Les valeurs des biens sont celles que tu saisis (aucun amortissement automatique). Pour un bilan comptable officiel, réfère-toi à ton comptable.</div>';
   return h+'</div>';
+}
+
+// ── Ajouter / modifier un bien durable ──
+function openBienEdit(id){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var b=id?getBiens().find(function(x){return x.id===id;}):null;
+  var catOpts=BIEN_CATS.map(function(c){
+    return '<option value="'+c.id+'"'+((b&&b.cat===c.id)||(!b&&c.id==='vehicule')?' selected':'')+'>'+c.icon+' '+c.lbl+'</option>';
+  }).join('');
+  var old=document.getElementById('bienModal');if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='bienModal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+  m.innerHTML='<div style="background:var(--s2);border:1.5px solid var(--brd2);border-radius:18px;padding:18px;width:100%;max-width:480px;max-height:90dvh;overflow-y:auto;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--gold);margin-bottom:4px;">'+(b?'✏️ Modifier le bien':'🏛️ Ajouter un bien')+'</div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-bottom:14px;line-height:1.5;">Voiture, permis ou droit de taxi, équipement. Mets la valeur que tu estimes aujourd\'hui.</div>'
+    +'<div class="fi"><label>Type</label><div class="sw"><select id="bnCat" style="width:100%;">'+catOpts+'</select></div></div>'
+    +'<div class="fi"><label>Nom / description</label><input id="bnName" value="'+_cmpEsc(b?b.name:'')+'" placeholder="ex: Prius 707 (2021) ou Droit de taxi A-123" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div class="fi"><label>💰 Valeur estimée ($)</label><input id="bnVal" type="number" step="0.01" inputmode="decimal" value="'+(b?pf(b.valeur).toFixed(2):'')+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;"></div>'
+    +'<div class="fi"><label>🏦 Financement encore dû ($) — optionnel</label><input id="bnDette" type="number" step="0.01" inputmode="decimal" value="'+(b&&pf(b.dette)>0?pf(b.dette).toFixed(2):'')+'" placeholder="0.00" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;">'
+    +'<div style="font-size:10px;color:var(--m2);margin-top:4px;">Si tu paies encore ce bien, mets le solde restant : il ira au passif.</div></div>'
+    +'<div style="display:flex;gap:8px;margin-top:14px;">'
+    +(b?'<button onclick="supprBien(\''+b.id+'\')" style="flex:.35;background:rgba(255,58,58,.12);border:1px solid rgba(255,58,58,.35);color:var(--red);border-radius:10px;padding:12px;font-weight:800;cursor:pointer;">🗑️</button>':'')
+    +'<button onclick="document.getElementById(\'bienModal\').remove()" style="flex:.4;background:rgba(255,255,255,.07);border:1px solid var(--brd);color:var(--m2);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Annuler</button>'
+    +'<button onclick="saveBien(\''+(b?b.id:'')+'\')" style="flex:1;background:rgba(245,200,0,.2);border:1.5px solid rgba(245,200,0,.5);color:var(--gold);border-radius:10px;padding:12px;font-size:13px;font-weight:900;cursor:pointer;">✓ Enregistrer</button>'
+    +'</div></div>';
+  document.body.appendChild(m);
+}
+function saveBien(id){
+  var name=(document.getElementById('bnName').value||'').trim();
+  var cat=document.getElementById('bnCat').value;
+  var valeur=pf(document.getElementById('bnVal').value);
+  var dette=pf(document.getElementById('bnDette').value);
+  if(!name){alert('Donne un nom à ce bien.');return;}
+  if(valeur<0||dette<0){alert('Les montants doivent être positifs.');return;}
+  var arr=getBiens();
+  if(id){
+    var b=arr.find(function(x){return x.id===id;});
+    if(b){b.name=name;b.cat=cat;b.valeur=valeur;b.dette=dette;}
+  }else{
+    arr.push({id:uid(),name:name,cat:cat,valeur:valeur,dette:dette,ts:new Date().toISOString()});
+  }
+  lSave();audit(id?'BIEN_EDIT':'BIEN_ADD',name+'/'+fm(valeur));
+  document.getElementById('bienModal').remove();
+  renderTreso();showToastGrn('Bien enregistré');
+}
+function supprBien(id){
+  if(!confirm('Retirer ce bien du bilan ?'))return;
+  C.biens=getBiens().filter(function(x){return x.id!==id;});
+  lSave();audit('BIEN_SUPPR',id);
+  var m=document.getElementById('bienModal');if(m)m.remove();
+  renderTreso();
 }
 
 // ═══ CRÉDITS ACCORDÉS ═══
@@ -9522,7 +9665,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v80-BILAN-EN-HAUT';
+var APP_VERSION = '2026-07-29-v81-BIENS-ET-PERMIS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
