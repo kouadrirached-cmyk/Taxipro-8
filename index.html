@@ -8317,20 +8317,8 @@ function renderTreso(){
   html+='<button onclick="addTresoAccount()" style="grid-column:1/-1;background:rgba(255,255,255,.05);border:1.5px dashed var(--brd2);color:var(--m2);border-radius:12px;padding:11px;font-size:11px;font-weight:800;cursor:pointer;">➕ Ajouter un compte</button>';
   html+='</div>';
 
-  // ── Total général ──
-  // « Total actif » = ce que je détiens vraiment. Le cash encore chez les
-  // chauffeurs est affiché à part : il m'est dû, mais je ne l'ai pas en main.
-  var totalActif=0;
-  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv'&&a.id!=='recev'&&a.id!=='reclam';}).forEach(function(a){totalActif+=tresoSolde(a.id);});
-  var totalDette=tresoSolde('credit');
-  var aEncaisser=(sep?tresoSolde('cashdrv'):0)+tresoSolde('recev')+tresoSolde('reclam');
-  html+='<div style="background:rgba(245,200,0,.07);border:1.5px solid rgba(245,200,0,.2);border-radius:14px;padding:12px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">'
-    +'<div><div style="font-size:10px;color:var(--m2);text-transform:uppercase;font-weight:700;">Total actif '+(Math.abs(aEncaisser)>0.005?'<span style="text-transform:none;font-weight:600;">(en ma possession)</span>':'')+'</div>'
-    +'<div style="font-size:22px;font-weight:900;color:var(--gold);">'+fm(totalActif)+'</div>'
-    +(Math.abs(aEncaisser)>0.005?'<div style="font-size:10px;color:var(--neon);font-weight:700;margin-top:2px;">+ '+fm(aEncaisser)+' à encaisser</div>':'')
-    +'</div>'
-    +(totalDette>0?'<div style="text-align:right;"><div style="font-size:10px;color:var(--m2);text-transform:uppercase;font-weight:700;">Dette totale</div><div style="font-size:22px;font-weight:900;color:var(--red);">'+fm(totalDette)+'</div></div>':'')
-    +'</div>';
+  // ── 📋 BILAN : actif (avoirs + créances) / passif (dettes) / valeur nette ──
+  html+=bilanHTML();
 
   // ── Résumé mensuel ──
   html+='<div style="margin-bottom:14px;">';
@@ -8638,6 +8626,133 @@ function openTresoTx(type){
     +'</div>'
     +'</div>';
   document.body.appendChild(modal);
+}
+
+// ═══ BILAN — ACTIF / PASSIF ═══
+// Salaires encore dus : semaines travaillées non marquées payées.
+// Si le cash a été laissé au chauffeur, seule la différence reste due.
+function salairesDus(){
+  var byWk={};
+  getArr().forEach(function(s){
+    if(isOwnerShift(s))return;
+    var ws=gwS(parseLocalDate(s.date));
+    var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
+    var k=wk+'|'+s.driver;
+    if(!byWk[k])byWk[k]={wk:wk,drv:s.driver,sal:0,cash:0};
+    byWk[k].sal+=calcSalary(s);
+    byWk[k].cash+=pf(s.comp);
+  });
+  var total=0,detail=[];
+  Object.keys(byWk).forEach(function(k){
+    if(C.payes&&C.payes[k]&&C.payes[k].paid)return; // semaine déjà payée
+    var e=byWk[k];
+    var deduit=!!(C.payes&&C.payes[k+'_deductCash']===true);
+    var net=deduit?Math.max(0,e.sal-e.cash):e.sal;
+    if(net>0.005){total+=net;detail.push({wk:e.wk,drv:e.drv,net:net});}
+  });
+  detail.sort(function(a,b){return b.wk.localeCompare(a.wk);});
+  return {total:total,detail:detail};
+}
+// Factures saisies mais pas encore payées (aucun compte choisi)
+function depensesImpayees(){
+  var total=0,detail=[];
+  getExpArr().forEach(function(e){
+    if(e.payAcc)return;
+    var m=pf(e.amount);
+    if(m<=0.005)return;
+    total+=m;detail.push({date:e.date,lbl:(e.category||'Dépense')+(e.desc?' — '+e.desc:''),amt:m});
+  });
+  return {total:total,detail:detail};
+}
+// Bilan complet : ce que je possède, ce qu'on me doit, ce que je dois
+function calcBilan(){
+  var t=getTresoAccounts();
+  var enMain=[],creances=[];
+  t.accounts.forEach(function(a){
+    if(a.type==='credit')return;
+    var solde=tresoSolde(a.id);
+    if(a.id==='cashdrv'){
+      if(tresoCashSepare()&&Math.abs(solde)>0.005)creances.push({icon:a.icon,name:'Cash chez les chauffeurs',v:solde});
+      return;
+    }
+    if(a.id==='reclam'){ if(Math.abs(solde)>0.005)creances.push({icon:a.icon,name:'Coupons + STS à réclamer',v:solde}); return; }
+    if(a.id==='recev'){ if(Math.abs(solde)>0.005)creances.push({icon:a.icon,name:'Crédits accordés',v:solde}); return; }
+    enMain.push({icon:a.icon,name:a.name,v:solde});
+  });
+  // Dépôts remis au bureau mais pas encore versés
+  var attente=getDepots().filter(function(d){return !d.recu;})
+    .reduce(function(a,d){return a+pf(d.net);},0);
+  if(Math.abs(attente)>0.005)creances.push({icon:'⏳',name:'Dépôts en attente de versement',v:attente});
+
+  var totMain=enMain.reduce(function(a,x){return a+x.v;},0);
+  var totCreances=creances.reduce(function(a,x){return a+x.v;},0);
+
+  var dettes=[];
+  var credit=tresoSolde('credit');
+  if(Math.abs(credit)>0.005)dettes.push({icon:'📋',name:'Crédit / dette',v:credit});
+  var sal=salairesDus();
+  if(sal.total>0.005)dettes.push({icon:'💼',name:'Salaires à payer',v:sal.total,detail:sal.detail});
+  var imp=depensesImpayees();
+  if(imp.total>0.005)dettes.push({icon:'💸',name:'Factures non payées',v:imp.total,detail:imp.detail});
+  var totPassif=dettes.reduce(function(a,x){return a+x.v;},0);
+
+  return {enMain:enMain,creances:creances,dettes:dettes,
+    totMain:totMain,totCreances:totCreances,
+    totActif:totMain+totCreances,totPassif:totPassif,
+    valeurNette:(totMain+totCreances)-totPassif};
+}
+
+function bilanHTML(){
+  var b=calcBilan();
+  var nette=b.valeurNette;
+  function ligne(icon,name,v,col,gras){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:11px;gap:8px;">'
+      +'<span style="color:'+(gras?'var(--m3)':'var(--m2)')+';flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;'+(gras?'font-weight:700;':'')+'">'+icon+' '+_cmpEsc(name)+'</span>'
+      +'<span style="font-weight:'+(gras?'900':'800')+';color:'+col+';flex-shrink:0;">'+fm(v)+'</span></div>';
+  }
+  var h='<div style="background:linear-gradient(160deg,rgba(17,14,0,.97),rgba(22,18,0,.95));border:1.5px solid rgba(245,200,0,.3);border-radius:16px;padding:14px;margin-bottom:14px;">'
+    +'<div style="font-size:12px;font-weight:900;color:var(--gold);text-transform:uppercase;letter-spacing:.6px;margin-bottom:2px;">📋 Bilan</div>'
+    +'<div style="font-size:9px;color:var(--m2);margin-bottom:11px;">Ce que je possède, ce qu\'on me doit, ce que je dois</div>';
+
+  // ── ACTIF ──
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-top:1.5px solid rgba(57,211,83,.3);">'
+    +'<span style="font-size:11px;font-weight:900;color:var(--grn);text-transform:uppercase;letter-spacing:.4px;">✅ Actif</span>'
+    +'<span style="font-size:17px;font-weight:900;color:var(--grn);">'+fm(b.totActif)+'</span></div>';
+  h+=ligne('💰','Argent en main',b.totMain,'var(--m3)',true);
+  if(C.treso._voirBilan)b.enMain.forEach(function(x){h+='<div style="padding-left:14px;">'+ligne(x.icon,x.name,x.v,x.v<0?'var(--red)':'var(--m2)')+'</div>';});
+  if(Math.abs(b.totCreances)>0.005){
+    h+=ligne('📥','On me doit',b.totCreances,'var(--m3)',true);
+    if(C.treso._voirBilan)b.creances.forEach(function(x){h+='<div style="padding-left:14px;">'+ligne(x.icon,x.name,x.v,'var(--neon)')+'</div>';});
+  }
+
+  // ── PASSIF ──
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;margin-top:6px;border-top:1.5px solid rgba(255,58,58,.3);">'
+    +'<span style="font-size:11px;font-weight:900;color:var(--red);text-transform:uppercase;letter-spacing:.4px;">➖ Passif</span>'
+    +'<span style="font-size:17px;font-weight:900;color:var(--red);">'+fm(b.totPassif)+'</span></div>';
+  if(!b.dettes.length){
+    h+='<div style="font-size:11px;color:var(--grn);padding:3px 0;">Aucune dette ✅</div>';
+  }else{
+    b.dettes.forEach(function(x){
+      h+=ligne(x.icon,x.name,x.v,'var(--red)',true);
+      if(C.treso._voirBilan&&x.detail){
+        x.detail.slice(0,6).forEach(function(d){
+          var lbl=d.drv?(d.drv+' — sem. '+d.wk):(d.lbl+' ('+d.date+')');
+          h+='<div style="padding-left:14px;">'+ligne('·',lbl,d.net!==undefined?d.net:d.amt,'var(--m2)')+'</div>';
+        });
+        if(x.detail.length>6)h+='<div style="padding-left:14px;font-size:10px;color:var(--m2);">+ '+(x.detail.length-6)+' autres</div>';
+      }
+    });
+  }
+
+  // ── VALEUR NETTE ──
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0 2px;margin-top:8px;border-top:2px solid var(--brd2);">'
+    +'<div><div style="font-size:11px;font-weight:900;color:var(--gold);text-transform:uppercase;letter-spacing:.4px;">💎 Valeur nette</div>'
+    +'<div style="font-size:9px;color:var(--m2);">Actif − passif</div></div>'
+    +'<span style="font-size:24px;font-weight:900;color:'+(nette>=0?'var(--gold)':'var(--red)')+';">'+fm(nette)+'</span></div>';
+  h+='<button onclick="C.treso._voirBilan=!C.treso._voirBilan;renderTreso();" style="width:100%;margin-top:8px;background:none;border:none;color:var(--m2);font-size:10px;font-weight:700;cursor:pointer;padding:6px;text-align:left;">'
+    +(C.treso._voirBilan?'▾ Masquer le détail':'▸ Voir le détail ligne par ligne')+'</button>';
+  h+='<div style="font-size:9px;color:var(--m2);line-height:1.5;border-top:1px solid var(--brd);padding-top:7px;">ℹ️ Les voitures, permis et équipements ne sont pas comptés : ce bilan ne couvre que l\'argent et les créances suivis dans l\'app. Pour un bilan comptable officiel, réfère-toi à ton comptable.</div>';
+  return h+'</div>';
 }
 
 // ═══ CRÉDITS ACCORDÉS ═══
@@ -9407,7 +9522,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v78-TRESO-EPUREE';
+var APP_VERSION = '2026-07-29-v79-BILAN';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
