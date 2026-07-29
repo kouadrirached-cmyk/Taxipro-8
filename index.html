@@ -8748,6 +8748,17 @@ function calcBilan(){
     .reduce(function(a,d){return a+pf(d.net);},0);
   if(Math.abs(attente)>0.005)creances.push({icon:'⏳',name:'Dépôts en attente de versement',v:attente});
 
+  // Créances nominatives saisies dans la section « Ce qu'on te doit »
+  // (prêts à des personnes : montant total − ce qui a déjà été remboursé)
+  var crList=((C.treso&&C.treso.creances)||[]).map(function(c){
+    return {nom:c.nom||'—',reste:Math.max(0,pf(c.montant)-pf(c.paye))};
+  }).filter(function(c){return c.reste>0.005;});
+  var totCrNom=crList.reduce(function(a,c){return a+c.reste;},0);
+  if(totCrNom>0.005){
+    creances.push({icon:'📋',name:'Prêts et créances ('+crList.length+' personne'+(crList.length>1?'s':'')+')',v:totCrNom,
+      sous:crList.sort(function(a,b){return b.reste-a.reste;})});
+  }
+
   var totMain=enMain.reduce(function(a,x){return a+x.v;},0);
   var totCreances=creances.reduce(function(a,x){return a+x.v;},0);
 
@@ -8799,8 +8810,17 @@ function bilanHTML(){
   // regarder ses créances sans se demander si la ligne existe.
   h+=ligne('📥','On me doit',b.totCreances,'var(--m3)',true);
   if(C.treso._voirBilan){
-    if(b.creances.length)b.creances.forEach(function(x){h+='<div style="padding-left:14px;">'+ligne(x.icon,x.name,x.v,'var(--neon)')+'</div>';});
-    else h+='<div style="padding-left:14px;font-size:10px;color:var(--m2);line-height:1.5;">Rien en attente : cash des chauffeurs encaissé, coupons et STS réglés, aucun crédit accordé.</div>';
+    if(b.creances.length)b.creances.forEach(function(x){
+      h+='<div style="padding-left:14px;">'+ligne(x.icon,x.name,x.v,'var(--neon)')+'</div>';
+      // Détail nominatif des prêts (qui te doit combien)
+      if(x.sous)x.sous.slice(0,8).forEach(function(s){
+        h+='<div style="padding-left:28px;display:flex;justify-content:space-between;font-size:10px;color:var(--m2);padding-top:2px;padding-bottom:2px;gap:8px;">'
+          +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">'+_cmpEsc(s.nom)+'</span>'
+          +'<span style="font-weight:700;flex-shrink:0;">'+fm(s.reste)+'</span></div>';
+      });
+      if(x.sous&&x.sous.length>8)h+='<div style="padding-left:28px;font-size:10px;color:var(--m2);">+ '+(x.sous.length-8)+' autres</div>';
+    });
+    else h+='<div style="padding-left:14px;font-size:10px;color:var(--m2);line-height:1.5;">Rien en attente : cash des chauffeurs encaissé, coupons et STS réglés, aucun prêt en cours.</div>';
   }
   // Biens durables (voitures, permis de taxi, équipement)
   h+=ligne('🏛️','Biens et permis',b.totBiens,'var(--m3)',true);
@@ -9668,7 +9688,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v82-CREANCES-VISIBLES';
+var APP_VERSION = '2026-07-29-v83-CREANCES-AU-BILAN';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
