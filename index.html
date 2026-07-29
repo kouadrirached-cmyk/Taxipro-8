@@ -5189,24 +5189,71 @@ function renderExp(){
   });
   list.innerHTML=Object.entries(grps).sort((a,b)=>b[0].localeCompare(a[0])).map(([k,g])=>
     '<div style="margin-bottom:6px;"><div class="hgt"><span>'+g.lbl+'</span><span style="color:var(--red)">'+fm(g.tot)+'</span></div>'
-    +g.items.map(e=>'<div class="expi"><div><div class="expi-t">'+(e.category||'Dépense')+' — '+(e.vehicle||'Général')+'</div><div class="expi-m">'+e.date+(e.desc?' · '+e.desc:'')+'</div></div><div style="text-align:right"><div class="expi-amt">'+fm(e.amount)+'</div>'+(isOwner?'<button class="bdlt" style="margin-top:4px;font-size:10px;" onclick="delExp(\''+e.id+'\')">🗑️</button>':'')+'</div></div>').join('')
+    +g.items.map(e=>'<div class="expi"><div><div class="expi-t">'+(e.category||'Dépense')+' — '+(e.vehicle||'Général')+'</div><div class="expi-m">'+e.date+(e.desc?' · '+e.desc:'')+'</div>'
+      +(isOwner?'<div style="font-size:10px;font-weight:700;margin-top:3px;color:'+(e.payAcc?'var(--grn)':'var(--neon)')+';">'+(e.payAcc?'✅ Payé — '+expAccLabel(e.payAcc):'⏳ Pas encore payé')+'</div>':'')
+      +'</div><div style="text-align:right"><div class="expi-amt">'+fm(e.amount)+'</div>'+(isOwner?'<button class="bdlt" style="margin-top:4px;font-size:10px;" onclick="delExp(\''+e.id+'\')">🗑️</button>':'')+'</div></div>').join('')
     +'</div>'
   ).join('');
+}
+// ── Comptes utilisables pour payer une dépense ──
+// (la caisse « chez les chauffeurs » est exclue : ce n'est pas mon argent)
+function expPayAccounts(){
+  var t=getTresoAccounts();
+  return t.accounts.filter(function(a){return a.id!=='cashdrv';});
+}
+function expAccLabel(accId){
+  if(!accId)return '';
+  var a=expPayAccounts().find(function(x){return x.id===accId;});
+  return a?(a.icon+' '+a.name):accId;
 }
 function openAddExp(){
   editExpId=null;
   document.getElementById('expMTit').innerHTML='➕ Dépense <button class="mclose" onclick="closeM(\'expMov\')">✕</button>';
   const cats=['Réparation','Entretien','Huile','Pneus','Carburant','Assurance','Autre'];
-  document.getElementById('expForm').innerHTML='<div class="fsm"><label>Catégorie</label><div class="sw"><select id="ec-cat">'+cats.map(c=>'<option>'+c+'</option>').join('')+'</select></div></div><div class="fsm"><label>Montant ($)</label><input type="number" inputmode="decimal" id="ec-amt" placeholder="0.00"></div><div class="fsm"><label>Date</label><input type="date" id="ec-date" value="'+today()+'"></div><div class="fsm"><label>Véhicule</label><div class="sw"><select id="ec-veh"><option value="Général">Général</option>'+C.vehicles.map(v=>'<option value="'+(v.model||'Prius')+' '+v.num+'">'+(v.model||'Prius')+' '+v.num+'</option>').join('')+'</select></div></div><div class="fsm"><label>Description</label><input type="text" id="ec-desc" placeholder="Ex: Changement pneus..."></div>';
+  // Compte de paiement : on repropose le dernier utilisé (saisie plus rapide)
+  const last=(C.treso&&C.treso.lastExpAcc)||'';
+  const accOpts='<option value=""'+(last===''?' selected':'')+'>⏳ Pas encore payé</option>'
+    +expPayAccounts().map(function(a){
+      return '<option value="'+a.id+'"'+(last===a.id?' selected':'')+'>'+a.icon+' '+a.name+(a.type==='credit'?' (ajoute à la dette)':'')+'</option>';
+    }).join('');
+  document.getElementById('expForm').innerHTML='<div class="fsm"><label>Catégorie</label><div class="sw"><select id="ec-cat">'+cats.map(c=>'<option>'+c+'</option>').join('')+'</select></div></div><div class="fsm"><label>Montant ($)</label><input type="number" inputmode="decimal" id="ec-amt" placeholder="0.00"></div><div class="fsm"><label>💳 Payé avec</label><div class="sw"><select id="ec-acc">'+accOpts+'</select></div><div style="font-size:10px;color:var(--m2);margin-top:4px;line-height:1.5;">Le montant sera retiré automatiquement de ce compte dans 🏦 Trésorerie.</div></div><div class="fsm"><label>Date</label><input type="date" id="ec-date" value="'+today()+'"></div><div class="fsm"><label>Véhicule</label><div class="sw"><select id="ec-veh"><option value="Général">Général</option>'+C.vehicles.map(v=>'<option value="'+(v.model||'Prius')+' '+v.num+'">'+(v.model||'Prius')+' '+v.num+'</option>').join('')+'</select></div></div><div class="fsm"><label>Description</label><input type="text" id="ec-desc" placeholder="Ex: Changement pneus..."></div>';
   document.getElementById('expMov').classList.add('on');
 }
 function saveExp(){
   const amt=pf(gv('ec-amt'));if(!amt){alert('Montant requis');return;}
-  const exp={id:uid(),category:gv('ec-cat'),amount:amt,date:gv('ec-date'),vehicle:gv('ec-veh'),desc:gv('ec-desc'),createdBy:U.name,ts:new Date().toISOString()};
-  EX[exp.id]=exp;lSave();audit('ADD_EXP',exp.category+'/'+fm(amt));
+  const accId=gv('ec-acc')||'';
+  const exp={id:uid(),category:gv('ec-cat'),amount:amt,date:gv('ec-date'),vehicle:gv('ec-veh'),desc:gv('ec-desc'),payAcc:accId,createdBy:U.name,ts:new Date().toISOString()};
+  EX[exp.id]=exp;
+  // Sortie de trésorerie liée à la dépense (expKey = suppression symétrique)
+  if(accId){
+    const t=getTresoAccounts();
+    const acc=expPayAccounts().find(function(a){return a.id===accId;});
+    // Payer avec le compte Crédit augmente la dette au lieu de vider un solde
+    const txType=(acc&&acc.type==='credit')?'in':'out';
+    t.transactions.push({
+      id:uid(),date:exp.date,
+      desc:'💸 '+exp.category+(exp.vehicle&&exp.vehicle!=='Général'?' — '+exp.vehicle:'')+(exp.desc?' ('+exp.desc+')':''),
+      amount:parseFloat(amt.toFixed(2)),
+      accountId:accId,type:txType,cat:exp.category,
+      expKey:exp.id,auto:true
+    });
+    C.treso.lastExpAcc=accId;
+  }
+  lSave();audit('ADD_EXP',exp.category+'/'+fm(amt)+(accId?'/'+accId:''));
   closeM('expMov');renderExp();
+  if(accId)showToastGrn(fm(amt)+' retiré de '+expAccLabel(accId));
 }
-function delExp(id){if(!confirm('Supprimer cette dépense ?'))return;if(EX[id])window.txpTrashAdd('e',EX[id]);delete EX[id];window.txpTomb('e',id);lSave();renderExp();}
+function delExp(id){
+  if(!confirm('Supprimer cette dépense ?'))return;
+  const exp=EX[id];
+  if(exp)window.txpTrashAdd('e',exp);
+  // Retirer aussi la sortie de trésorerie créée avec la dépense
+  if(exp&&exp.payAcc){
+    const t=getTresoAccounts();
+    t.transactions=t.transactions.filter(function(tx){return tx.expKey!==id;});
+  }
+  delete EX[id];window.txpTomb('e',id);lSave();renderExp();
+}
 
 // ═══ TEAM ═══
 function renderTeam(){
@@ -8810,7 +8857,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v71-CAISSE-SEPAREE';
+var APP_VERSION = '2026-07-29-v72-DEPENSE-COMPTE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
