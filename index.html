@@ -1337,7 +1337,7 @@ body{
         <div style="font-size:11px;color:var(--m2);margin-bottom:10px;line-height:1.5;">Ces montants sont déduits automatiquement dans le rapport de profit mensuel.</div>
         <div class="frow">
           <div class="fsm"><label>🛡️ Assurance / mois ($)</label><input type="number" inputmode="decimal" id="fc-ins" placeholder="880.00"></div>
-          <div class="fsm"><label>🚗 Location / voiture / mois ($)</label><input type="number" inputmode="decimal" id="fc-car" placeholder="850.00"></div>
+          <div class="fsm"><label>🚗 Location — par voiture / mois ($)</label><input type="number" inputmode="decimal" id="fc-car" placeholder="850.00"><div id="fcCarInfo" style="font-size:10px;color:var(--gold);margin-top:4px;font-weight:700;"></div></div>
         </div>
         <div class="fsm"><label>📝 Autre coût fixe (label)</label><input type="text" id="fc-othlbl" placeholder="Ex: Bureau, comptable..."></div>
         <div class="fsm"><label>💵 Autre coût fixe ($)</label><input type="number" inputmode="decimal" id="fc-oth" placeholder="0.00"></div>
@@ -1971,6 +1971,19 @@ function buildCumulMap(arr,field){
 }
 
 // ═══ STORAGE — Firebase + localStorage fallback ═══
+
+// ── Coûts fixes mensuels de l'entreprise ──
+// La location est saisie PAR VOITURE : elle doit être multipliée par le
+// nombre de véhicules actifs (3 Prius × 850 $ = 2 550 $/mois, pas 850 $).
+function nbVehActifs(){
+  return ((typeof C!=='undefined'&&C&&C.vehicles)||[]).filter(function(v){return v.active!==false;}).length||1;
+}
+function fixedCostsMo(){
+  var fc=(typeof C!=='undefined'&&C&&C.fixedCosts)||{insurance:880,carRental:850,other:0};
+  var n=nbVehActifs();
+  var ins=pf(fc.insurance),car=pf(fc.carRental)*n,oth=pf(fc.other||0);
+  return {n:n,parVoiture:pf(fc.carRental),insurance:ins,carRental:car,other:oth,otherLabel:fc.otherLabel||'',total:ins+car+oth};
+}
 
 function applyDefaults(C){
   C.drivers.forEach(d=>{
@@ -4610,7 +4623,7 @@ function insightsHTML(){
   });
   // 7) Point mort (coûts fixes)
   var fc=C.fixedCosts||{};
-  var fcMo=pf(fc.insurance)+pf(fc.carRental)+pf(fc.other||0);
+  var fcMo=fixedCostsMo().total; // location × nb de voitures
   if(fcMo>0){
     var span2=Math.min(_cmpWin,Math.max(1,Math.round((new Date()-_cmpLim())/864e5)));
     var profDay=arr.reduce(function(a,s){return a+calcOwnerProfit(s);},0)/span2;
@@ -5744,6 +5757,9 @@ function renderSet(){
   const fc=C.fixedCosts||{};
   document.getElementById('fc-ins').value=fc.insurance??880;
   document.getElementById('fc-car').value=fc.carRental??850;
+  // Rappel du calcul réel : la location est multipliée par les voitures actives
+  var fcm=fixedCostsMo(),fci=document.getElementById('fcCarInfo');
+  if(fci)fci.textContent='× '+fcm.n+' voiture'+(fcm.n>1?'s':'')+' active'+(fcm.n>1?'s':'')+' = '+fm(fcm.carRental)+' / mois · total coûts fixes '+fm(fcm.total);
   document.getElementById('fc-othlbl').value=fc.otherLabel||'';
   document.getElementById('fc-oth').value=fc.other||0;
   document.getElementById('vehListSet').innerHTML=C.vehicles.map(v=>
@@ -6208,7 +6224,7 @@ function renderAnalysePro(){
   var nJT=Object.keys(joursT).length;
   var ex30=getExpArr().filter(function(e){return e.date&&e.date>s30&&e.date<=sNow;}).reduce(function(a,e){return a+pf(e.amount);},0);
   var fc=C.fixedCosts||{};
-  var fcMo=pf(fc.insurance)+pf(fc.carRental)+pf(fc.other||0);
+  var fcMo=fixedCostsMo().total; // location × nb de voitures
   var pNet=pBrut-ex30-fcMo;
 
   // ── Tuiles principales ──
@@ -6273,7 +6289,7 @@ function renderInvest(){
   t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv'&&a.id!=='recev'&&a.id!=='reclam';}).forEach(function(a){actif+=tresoSolde(a.id);});
   var dette=tresoSolde('credit');
   var fc=C.fixedCosts||{};
-  var fcMo=pf(fc.insurance)+pf(fc.carRental)+pf(fc.other||0);
+  var fcMo=fixedCostsMo().total; // location × nb de voitures
   var coussin=Math.max(fcMo*3,3000); // 3 mois de coûts fixes, min 3000$
   var surplus=Math.max(0,actif-Math.max(dette,0)-coussin);
 
@@ -7191,7 +7207,7 @@ function exportPDFMensuel(moOffset){
 
   // Charges fixes
   var fc = (C && C.fixedCosts) || {insurance:880,carRental:850,other:0};
-  var tFixed = pf(fc.insurance) + pf(fc.carRental) + pf(fc.other||0);
+  var tFixed = fixedCostsMo().total; // location × nb de voitures
   var profitApresCharges = profitNet - tFixed;
 
   // ── Par chauffeur ──
@@ -7337,7 +7353,7 @@ function exportPDFMensuel(moOffset){
   html += '<h3>Charges fixes mensuelles</h3>';
   html += '<table><tr><th>Description</th><th class="tr">Montant</th></tr>';
   if(pf(fc.insurance)>0) html += '<tr><td>🛡️ Assurance flotte</td><td class="tr">'+$(fc.insurance)+'</td></tr>';
-  if(pf(fc.carRental)>0) html += '<tr><td>🏢 Location véhicules / Taxis Unis</td><td class="tr">'+$(fc.carRental)+'</td></tr>';
+  if(pf(fc.carRental)>0) html += '<tr><td>🏢 Location véhicules / Taxis Unis ('+fixedCostsMo().n+' × '+$(fc.carRental)+')</td><td class="tr">'+$(fixedCostsMo().carRental)+'</td></tr>';
   if(pf(fc.other)>0)     html += '<tr><td>📦 '+(fc.otherLabel||'Autres charges fixes')+'</td><td class="tr">'+$(fc.other)+'</td></tr>';
   html += '<tr class="tot"><td>Total charges fixes</td><td class="tr">'+$(tFixed)+'</td></tr></table>';
 
@@ -7968,7 +7984,7 @@ function reclamDeposeMois(mk){
 function reclamResteMois(mk){ return (reclamParMois()[mk]||0)-reclamDeposeMois(mk); }
 // Retenue par défaut : véhicules actifs × location mensuelle par voiture
 function retenueDefaut(){
-  var n=(C.vehicles||[]).filter(function(v){return v.active!==false;}).length||1;
+  var n=nbVehActifs();
   var parVoiture=pf((C.fixedCosts||{}).carRental);
   return {n:n,parVoiture:parVoiture,total:parseFloat((n*parVoiture).toFixed(2))};
 }
@@ -9217,7 +9233,7 @@ function updateRapportPreview(){
   var tProfit=arr.reduce(function(a,s){return a+calcOwnerProfit(s);},0);
   var tExp=expArr.reduce(function(a,e){return a+pf(e.amount);},0);
   var fc=(C&&C.fixedCosts)||{insurance:880,carRental:850,other:0};
-  var tFixed=pf(fc.insurance)+pf(fc.carRental)+pf(fc.other||0);
+  var tFixed=fixedCostsMo().total; // location × nb de voitures
   var profNet=tProfit-tExp-tFixed;
   var ecartsN=arr.filter(function(s){return Math.abs(calcEcart(s))>0.5;}).length;
   var prev=document.getElementById('rapportPreview');
@@ -9379,7 +9395,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v76-DEPOT-CLARIFIE';
+var APP_VERSION = '2026-07-29-v77-LOYER-PAR-VOITURE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
