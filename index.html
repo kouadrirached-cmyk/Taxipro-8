@@ -3154,7 +3154,7 @@ function renderDash(){
         const taxBK=pf(s.taxf)-pf(s.taxd);
         const ratK=kmT>0?(taxBK/kmT):0;
         const kmH=kmT>0?'<div style="font-size:10px;margin-top:2px;">🛣️ '+kmT+' km'+(U.role==='owner'?' · <span style="color:'+(ratK<1?'var(--red)':'var(--grn)')+';">'+ratK.toFixed(2)+'$/km</span>':'')+'</div>':'';
-        return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses</div>'+kmH+'</div><div class="sr-right"><div class="sr-amt">'+fm(s.recette)+'</div><div class="sr-cumul">Cumul: '+fm(cmap[s.id])+'</div>'+(hasEc&&!regle?'<div class="sr-ecart" style="color:'+(ec<0?'var(--red)':'var(--pur)')+';">'+(ec<0?'⚠️ ':'+$')+fm(Math.abs(ec))+'<button onclick="event.stopPropagation();toggleEcartRegle(\''+s.id+'\')" style="margin-left:6px;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:5px;padding:2px 6px;font-size:9px;font-weight:800;cursor:pointer;">✅</button></div>':regle&&hasEc?'<div class="sr-ecart" style="color:var(--grn);">✅ Réglé</div>':'')+'</div></div>'
+        return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses</div>'+kmH+'</div><div class="sr-right"><div class="sr-amt">'+fm(s.recette)+'</div><div class="sr-cumul">Cumul: '+fm(cmap[s.id])+'</div>'+(hasEc&&!regle?'<div class="sr-ecart" style="color:'+(ec>0?'var(--red)':'var(--pur)')+';">'+(ec>0?'⚠️ −':'💰 +')+fm(Math.abs(ec))+'<button onclick="event.stopPropagation();toggleEcartRegle(\''+s.id+'\')" style="margin-left:6px;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:5px;padding:2px 6px;font-size:9px;font-weight:800;cursor:pointer;">✅</button></div>':regle&&hasEc?'<div class="sr-ecart" style="color:var(--grn);">✅ Réglé</div>':'')+'</div></div>'
           +'<div style="display:flex;gap:5px;margin-top:6px;padding-bottom:2px;"><button class="bedt" onclick="event.stopPropagation();openEdit(\''+s.id+'\')">✏️</button><button class="bdlt" onclick="event.stopPropagation();delS(\''+s.id+'\')">🗑️ Supprimer</button></div>';
       }).join('');
       return '<div class="dsc'+(isExp?' expanded':'')+'" id="dsc-'+nm.replace(/\s/g,'_')+'">'
@@ -6341,10 +6341,12 @@ function saveEdit(){
   const rec=parseFloat((comp+card+sts+coup+ext).toFixed(2));
   const driver=gv('edr');const drv=getDrv(driver);
   const isOwn=drv&&drv.role==='owner';const pct=drv?drv.pct:40;
-  const taxNet=taxf-taxd-crs;
-  const salary=isOwn?rec:parseFloat((taxNet*(pct/100)).toFixed(2));
-  const ecart=parseFloat((rec-(taxNet+pour)).toFixed(2));
-  S[editId]=Object.assign({},old,{date:gv('ed'),time:gv('et'),driver,vehicle:gv('ecar'),periode:gv('eper')||old.periode||'jour',isOwner:isOwn,drvPct:pct,taxd,taxf,courses:crs,comp,card,sts,coup,ext,pourboire:pour,essence:pf(gv('eess')),remarque:gv('erem'),recette:rec,salary,ecart,editedBy:U.name,editedAt:new Date().toISOString()});
+  const upd=Object.assign({},old,{date:gv('ed'),time:gv('et'),driver,vehicle:gv('ecar'),periode:gv('eper')||old.periode||'jour',isOwner:isOwn,drvPct:pct,taxd,taxf,courses:crs,comp,card,sts,coup,ext,pourboire:pour,essence:pf(gv('eess')),remarque:gv('erem'),recette:rec,editedBy:U.name,editedAt:new Date().toISOString()});
+  // Valeurs stockées = valeurs affichées : mêmes formules que partout ailleurs
+  // (évite un écart de signe entre un quart créé et un quart modifié).
+  upd.salary=calcSalary(upd);
+  upd.ecart=calcEcart(upd);
+  S[editId]=upd;
   lSave();audit('EDIT',driver+'/'+gv('ed'));
   closeM('editMov');renderWkList();
   const cur=document.querySelector('.pg.on');
@@ -8619,7 +8621,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-17-v69-MAJ-LOGIN';
+var APP_VERSION = '2026-07-29-v70-ECART-COULEURS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
