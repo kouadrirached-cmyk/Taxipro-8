@@ -5199,7 +5199,8 @@ function renderExp(){
 // (la caisse « chez les chauffeurs » est exclue : ce n'est pas mon argent)
 function expPayAccounts(){
   var t=getTresoAccounts();
-  return t.accounts.filter(function(a){return a.id!=='cashdrv';});
+  // On ne peut pas payer avec de l'argent qu'on ne détient pas encore
+  return t.accounts.filter(function(a){return a.id!=='cashdrv'&&a.id!=='recev';});
 }
 function expAccLabel(accId){
   if(!accId)return '';
@@ -6267,8 +6268,9 @@ function renderAnalysePro(){
 function renderInvest(){
   var t=getTresoAccounts();
   var actif=0;
-  // Le cash encore chez les chauffeurs n'est pas investissable : je ne l'ai pas.
-  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv';}).forEach(function(a){actif+=tresoSolde(a.id);});
+  // Ni le cash chez les chauffeurs ni les crédits accordés ne sont
+  // investissables : cet argent n'est pas encore en main.
+  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv'&&a.id!=='recev';}).forEach(function(a){actif+=tresoSolde(a.id);});
   var dette=tresoSolde('credit');
   var fc=C.fixedCosts||{};
   var fcMo=pf(fc.insurance)+pf(fc.carRental)+pf(fc.other||0);
@@ -7890,6 +7892,13 @@ function getTresoAccounts(){
   if(!C.treso.accounts.find(function(a){return a.id==='cashdrv';})){
     C.treso.accounts.push({id:'cashdrv',name:'Chez les chauffeurs',icon:'🫱',color:'#ff6b00',solde:0,type:'cash',auto:true,desc:'Cash déclaré, pas encore encaissé'});
   }
+  // Crédits accordés (argent prêté qu'on me doit) + compte de placement
+  if(!C.treso.accounts.find(function(a){return a.id==='recev';})){
+    C.treso.accounts.push({id:'recev',name:'À recevoir',icon:'📥',color:'#c084fc',solde:0,type:'recev',auto:false,desc:'Crédits accordés, pas encore remboursés'});
+  }
+  if(!C.treso.accounts.find(function(a){return a.id==='wealth';})){
+    C.treso.accounts.push({id:'wealth',name:'Wealthsimple',icon:'📈',color:'#38bdf8',solde:0,type:'invest',auto:false,desc:'Compte de placement'});
+  }
   if(!C.treso.transactions)C.treso.transactions=[];
   return C.treso;
 }
@@ -7979,6 +7988,17 @@ function tresoSoldeMois(accountId, refMo){
       if(tx.type==='transfer'&&tx.toAccountId==='cashdrv') tot+=pf(tx.amount);
     });
     return tot;
+  }
+
+  // « À recevoir » : solde CUMULÉ — un crédit accordé ne s'efface pas au
+  // changement de mois, il reste dû jusqu'à son remboursement.
+  if(accountId==='recev'){
+    var rec=pf(acc.solde);
+    t.transactions.forEach(function(tx){
+      if(tx.accountId==='recev') rec+=(tx.type==='in'?1:-1)*pf(tx.amount);
+      if(tx.type==='transfer'&&tx.toAccountId==='recev') rec+=pf(tx.amount);
+    });
+    return rec;
   }
 
   // Autres comptes
@@ -8105,19 +8125,22 @@ function renderTreso(){
   html+='<button onclick="openTresoTx(\'out\')" style="background:rgba(255,58,58,.15);border:1.5px solid rgba(255,58,58,.4);color:var(--red);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">➖ Sortie</button>';
   html+='<button onclick="openTresoTx(\'transfer\')" style="background:rgba(96,165,250,.15);border:1.5px solid rgba(96,165,250,.4);color:var(--blu);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">🔄 Transfert</button>';
   html+='<button onclick="openTresoSoldeEdit()" style="background:rgba(245,200,0,.1);border:1.5px solid rgba(245,200,0,.3);color:var(--gold);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">✏️ Soldes initiaux</button>';
+  html+='<button onclick="openTresoCredit()" style="background:rgba(192,132,252,.15);border:1.5px solid rgba(192,132,252,.4);color:var(--pur);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">📤 Crédit accordé</button>';
+  html+='<button onclick="openTresoRembours()" style="background:rgba(57,211,83,.15);border:1.5px solid rgba(57,211,83,.4);color:var(--grn);border-radius:12px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;">💰 Encaisser un crédit</button>';
+  html+='<button onclick="addTresoAccount()" style="grid-column:1/-1;background:rgba(255,255,255,.05);border:1.5px dashed var(--brd2);color:var(--m2);border-radius:12px;padding:11px;font-size:11px;font-weight:800;cursor:pointer;">➕ Ajouter un compte</button>';
   html+='</div>';
 
   // ── Total général ──
   // « Total actif » = ce que je détiens vraiment. Le cash encore chez les
   // chauffeurs est affiché à part : il m'est dû, mais je ne l'ai pas en main.
   var totalActif=0;
-  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv';}).forEach(function(a){totalActif+=tresoSolde(a.id);});
+  t.accounts.filter(function(a){return a.type!=='credit'&&a.id!=='cashdrv'&&a.id!=='recev';}).forEach(function(a){totalActif+=tresoSolde(a.id);});
   var totalDette=tresoSolde('credit');
-  var aEncaisser=sep?tresoSolde('cashdrv'):0;
+  var aEncaisser=(sep?tresoSolde('cashdrv'):0)+tresoSolde('recev');
   html+='<div style="background:rgba(245,200,0,.07);border:1.5px solid rgba(245,200,0,.2);border-radius:14px;padding:12px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">'
-    +'<div><div style="font-size:10px;color:var(--m2);text-transform:uppercase;font-weight:700;">Total actif '+(sep?'<span style="text-transform:none;font-weight:600;">(en ma possession)</span>':'')+'</div>'
+    +'<div><div style="font-size:10px;color:var(--m2);text-transform:uppercase;font-weight:700;">Total actif '+(Math.abs(aEncaisser)>0.005?'<span style="text-transform:none;font-weight:600;">(en ma possession)</span>':'')+'</div>'
     +'<div style="font-size:22px;font-weight:900;color:var(--gold);">'+fm(totalActif)+'</div>'
-    +(sep&&Math.abs(aEncaisser)>0.005?'<div style="font-size:10px;color:var(--neon);font-weight:700;margin-top:2px;">+ '+fm(aEncaisser)+' à encaisser</div>':'')
+    +(Math.abs(aEncaisser)>0.005?'<div style="font-size:10px;color:var(--neon);font-weight:700;margin-top:2px;">+ '+fm(aEncaisser)+' à encaisser</div>':'')
     +'</div>'
     +(totalDette>0?'<div style="text-align:right;"><div style="font-size:10px;color:var(--m2);text-transform:uppercase;font-weight:700;">Dette totale</div><div style="font-size:22px;font-weight:900;color:var(--red);">'+fm(totalDette)+'</div></div>':'')
     +'</div>';
@@ -8428,6 +8451,102 @@ function openTresoTx(type){
     +'</div>'
     +'</div>';
   document.body.appendChild(modal);
+}
+
+// ═══ CRÉDITS ACCORDÉS ═══
+// « J'ai prêté / avancé de l'argent » → il sort de mon compte et va dans
+// « À recevoir ». Quand on me rembourse, je choisis sur quel compte
+// l'argent rentre : le montant quitte « À recevoir » et gonfle ce compte.
+function _tresoDestOpts(sel){
+  return expPayAccounts().filter(function(a){return a.type!=='credit';})
+    .map(function(a){return '<option value="'+a.id+'"'+(a.id===sel?' selected':'')+'>'+a.icon+' '+a.name+'</option>';}).join('');
+}
+function openTresoCredit(){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var old=document.getElementById('tresoCredModal');if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='tresoCredModal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+  m.innerHTML='<div style="background:var(--s2);border:1.5px solid var(--brd2);border-radius:18px;padding:18px;width:100%;max-width:480px;max-height:90dvh;overflow-y:auto;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--pur);margin-bottom:4px;">📤 Accorder un crédit</div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-bottom:14px;line-height:1.5;">Argent que tu prêtes ou avances. Il sort du compte choisi et reste affiché dans « À recevoir » jusqu\'au remboursement.</div>'
+    +'<div class="fi"><label>À qui / pourquoi</label><input id="crDesc" placeholder="ex: avance à Marc" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div class="fi"><label>Montant ($)</label><input id="crAmt" type="number" step="0.01" inputmode="decimal" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;"></div>'
+    +'<div class="fi"><label>Sorti de quel compte ?</label><div class="sw"><select id="crFrom" style="width:100%;">'+_tresoDestOpts('cash')+'</select></div></div>'
+    +'<div class="fi"><label>Date</label><input id="crDate" type="date" value="'+today()+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:14px;">'
+    +'<button onclick="document.getElementById(\'tresoCredModal\').remove()" style="flex:.4;background:rgba(255,255,255,.07);border:1px solid var(--brd);color:var(--m2);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Annuler</button>'
+    +'<button onclick="saveTresoCredit()" style="flex:1;background:rgba(192,132,252,.25);border:1.5px solid rgba(192,132,252,.6);color:var(--pur);border-radius:10px;padding:12px;font-size:13px;font-weight:900;cursor:pointer;">📤 Enregistrer</button>'
+    +'</div></div>';
+  document.body.appendChild(m);
+}
+function saveTresoCredit(){
+  var desc=(document.getElementById('crDesc').value||'').trim();
+  var amt=parseFloat(document.getElementById('crAmt').value||0);
+  var from=document.getElementById('crFrom').value;
+  var date=document.getElementById('crDate').value||today();
+  if(!desc){alert('Indique à qui / pourquoi.');return;}
+  if(!amt||amt<=0){alert('Montant invalide.');return;}
+  var t=getTresoAccounts();
+  t.transactions.push({id:uid(),date:date,desc:'📤 Crédit accordé — '+desc,
+    amount:parseFloat(amt.toFixed(2)),accountId:from,type:'transfer',toAccountId:'recev',cat:'Crédit accordé'});
+  lSave();audit('TRESO_CREDIT_DONNE',desc+'/'+fm(amt));
+  document.getElementById('tresoCredModal').remove();
+  renderTreso();showToastGrn(fm(amt)+' en attente de remboursement');
+}
+
+function openTresoRembours(){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var du=tresoSolde('recev');
+  var old=document.getElementById('tresoRembModal');if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='tresoRembModal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+  m.innerHTML='<div style="background:var(--s2);border:1.5px solid var(--brd2);border-radius:18px;padding:18px;width:100%;max-width:480px;max-height:90dvh;overflow-y:auto;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--grn);margin-bottom:4px;">💰 Encaisser un crédit</div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-bottom:12px;line-height:1.5;">On te rembourse. Choisis <b>comment tu as reçu l\'argent</b> : le compte correspondant sera augmenté automatiquement.</div>'
+    +'<div style="background:rgba(192,132,252,.08);border:1px solid rgba(192,132,252,.25);border-radius:10px;padding:9px 11px;margin-bottom:12px;font-size:11px;font-weight:800;color:var(--pur);">📥 '+fm(du)+' encore à recevoir</div>'
+    +'<div class="fi"><label>De qui / quoi</label><input id="rbDesc" placeholder="ex: remboursement Marc" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div class="fi"><label>Montant reçu ($)</label><input id="rbAmt" type="number" step="0.01" inputmode="decimal" value="'+(du>0?du.toFixed(2):'')+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;"></div>'
+    +'<div class="fi"><label>💳 Reçu comment ? (mode de paiement)</label><div class="sw"><select id="rbTo" style="width:100%;">'+_tresoDestOpts((C.treso&&C.treso.lastRembAcc)||'cash')+'</select></div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-top:4px;line-height:1.5;">Comptant → Ma caisse · Interac ou dépôt → Commercial · Virement perso → Personnel</div></div>'
+    +'<div class="fi"><label>Date</label><input id="rbDate" type="date" value="'+today()+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<div style="display:flex;gap:8px;margin-top:14px;">'
+    +'<button onclick="document.getElementById(\'tresoRembModal\').remove()" style="flex:.4;background:rgba(255,255,255,.07);border:1px solid var(--brd);color:var(--m2);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Annuler</button>'
+    +'<button onclick="saveTresoRembours()" style="flex:1;background:rgba(57,211,83,.25);border:1.5px solid rgba(57,211,83,.6);color:var(--grn);border-radius:10px;padding:12px;font-size:13px;font-weight:900;cursor:pointer;">💰 Encaisser</button>'
+    +'</div></div>';
+  document.body.appendChild(m);
+}
+function saveTresoRembours(){
+  var desc=(document.getElementById('rbDesc').value||'').trim();
+  var amt=parseFloat(document.getElementById('rbAmt').value||0);
+  var to=document.getElementById('rbTo').value;
+  var date=document.getElementById('rbDate').value||today();
+  if(!amt||amt<=0){alert('Montant invalide.');return;}
+  var du=tresoSolde('recev');
+  if(amt>du+0.005&&!confirm('⚠️ Tu encaisses '+fm(amt)+' alors qu\'il ne reste que '+fm(du)+' à recevoir.\n\n« À recevoir » passera en négatif. Continuer ?'))return;
+  var t=getTresoAccounts();
+  t.transactions.push({id:uid(),date:date,desc:'💰 Crédit remboursé'+(desc?' — '+desc:''),
+    amount:parseFloat(amt.toFixed(2)),accountId:'recev',type:'transfer',toAccountId:to,cat:'Crédit remboursé'});
+  C.treso.lastRembAcc=to;
+  lSave();audit('TRESO_CREDIT_RECU',(desc||'—')+'/'+fm(amt));
+  document.getElementById('tresoRembModal').remove();
+  renderTreso();showToastGrn(fm(amt)+' ajouté à '+expAccLabel(to));
+}
+
+// ── Ajouter un compte personnalisé (Wealthsimple, autre banque, etc.) ──
+function addTresoAccount(){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var name=prompt('Nom du nouveau compte :\n(ex: Disnat, Compte épargne, Autre carte)');
+  if(!name||!name.trim())return;
+  name=name.trim().slice(0,30);
+  var icon=prompt('Un emoji pour ce compte :','🏦');
+  var t=getTresoAccounts();
+  var id='acc_'+Math.random().toString(36).slice(2,8);
+  t.accounts.push({id:id,name:name,icon:(icon||'🏦').trim().slice(0,4),color:'#8ab4f8',solde:0,type:'bank',auto:false,desc:'Compte ajouté'});
+  lSave();audit('TRESO_ACC_ADD',name);
+  renderTreso();
+  showToastGrn('Compte « '+name+' » ajouté — mets son solde dans ✏️ Soldes initiaux');
 }
 
 // ── Activer / désactiver la caisse séparée ──
@@ -8857,7 +8976,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v72-DEPENSE-COMPTE';
+var APP_VERSION = '2026-07-29-v73-CREDITS-WEALTHSIMPLE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
