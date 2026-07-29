@@ -7948,6 +7948,36 @@ function reclamPending(){
   return by;
 }
 
+// ── Coupons + STS regroupés PAR MOIS (rythme des dépôts à la compagnie) ──
+function reclamParMois(){
+  var by={};
+  getArr().forEach(function(s){
+    var mk=(s.date||'').slice(0,7);
+    if(!mk)return;
+    var v=pf(s.sts)+pf(s.coup);
+    if(Math.abs(v)<0.005)return;
+    by[mk]=(by[mk]||0)+v;
+  });
+  return by;
+}
+function getDepots(){ if(!C.depots)C.depots=[]; return C.depots; }
+function reclamDeposeMois(mk){
+  return getDepots().filter(function(d){return d.mois===mk;})
+    .reduce(function(a,d){return a+pf(d.total);},0);
+}
+function reclamResteMois(mk){ return (reclamParMois()[mk]||0)-reclamDeposeMois(mk); }
+// Retenue par défaut : véhicules actifs × location mensuelle par voiture
+function retenueDefaut(){
+  var n=(C.vehicles||[]).filter(function(v){return v.active!==false;}).length||1;
+  var parVoiture=pf((C.fixedCosts||{}).carRental);
+  return {n:n,parVoiture:parVoiture,total:parseFloat((n*parVoiture).toFixed(2))};
+}
+function moisLbl(mk){
+  var p=(mk||'').split('-');
+  if(p.length<2)return mk;
+  return new Date(parseInt(p[0]),parseInt(p[1])-1,1).toLocaleDateString('fr-CA',{month:'long',year:'numeric'});
+}
+
 // Cash encore chez chaque chauffeur (cumul, toutes périodes confondues) :
 // ce qu'il a déclaré − ce que j'ai encaissé − ce que je lui ai laissé en salaire.
 function cashDrvPending(){
@@ -8022,9 +8052,11 @@ function tresoSoldeMois(accountId, refMo){
   // « À réclamer » : solde CUMULÉ — une facture de coupons reste due
   // jusqu'à son paiement, peu importe le mois du quart.
   if(accountId==='reclam'){
-    var pr=reclamPending();
+    var pr=reclamPending(); // brut par client, moins les paiements directs
     var tr=pf(acc.solde);
     Object.keys(pr).forEach(function(n){tr+=pr[n];});
+    // Ce qui a été déposé au bureau de la compagnie n'est plus à réclamer
+    getDepots().forEach(function(d){ tr-=pf(d.total); });
     t.transactions.forEach(function(tx){
       if(tx.accountId==='reclam'&&!tx.reclamClient) tr+=(tx.type==='in'?1:-1)*pf(tx.amount);
       if(tx.type==='transfer'&&tx.toAccountId==='reclam') tr+=pf(tx.amount);
@@ -8163,7 +8195,58 @@ function renderTreso(){
         +'<span>+ '+rRest.length+' autre'+(rRest.length>1?'s':'')+' client'+(rRest.length>1?'s':'')+'</span>'
         +'<span style="font-weight:800;color:var(--org);">'+fm(rRestTot)+'</span></div>';
     }
-    html+='<button onclick="openTresoReclam()" style="width:100%;margin-top:9px;background:rgba(251,146,60,.15);border:1.5px solid rgba(251,146,60,.4);color:var(--org);border-radius:10px;padding:11px;font-size:12px;font-weight:800;cursor:pointer;">📞 Encaisser une réclamation</button>';
+    html+='<button onclick="openTresoReclam()" style="width:100%;margin-top:9px;background:rgba(251,146,60,.12);border:1px solid rgba(251,146,60,.3);color:var(--org);border-radius:10px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;">📞 Un client m\'a payé directement</button>';
+    html+='</div>';
+  }
+
+  // ── Dépôts à la compagnie : par mois, puis suivi des versements ──
+  var parMois=reclamParMois();
+  var moisAvecReste=Object.keys(parMois).filter(function(mk){return reclamResteMois(mk)>0.005;}).sort().reverse();
+  var depots=getDepots().slice().sort(function(a,b){return (b.dateDepot||'').localeCompare(a.dateDepot||'');});
+  var enAttente=depots.filter(function(d){return !d.recu;});
+  if(moisAvecReste.length||depots.length){
+    html+='<div style="background:rgba(255,255,255,.03);border:1.5px solid var(--brd2);border-radius:14px;padding:13px;margin-bottom:14px;">'
+      +'<div style="font-size:10px;color:var(--m3);font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">🏢 Dépôts au bureau de la compagnie</div>'
+      +'<div style="font-size:9px;color:var(--m2);margin-bottom:10px;">La compagnie retient la location des voitures et verse la différence</div>';
+    if(moisAvecReste.length){
+      html+='<div style="font-size:10px;font-weight:800;color:var(--org);margin-bottom:6px;">📋 À déposer</div>';
+      moisAvecReste.slice(0,4).forEach(function(mk){
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-top:1px solid var(--brd);gap:8px;">'
+          +'<span style="font-size:12px;font-weight:700;color:var(--m3);text-transform:capitalize;">'+moisLbl(mk)+'</span>'
+          +'<div style="display:flex;align-items:center;gap:8px;">'
+          +'<span style="font-size:14px;font-weight:900;color:var(--org);">'+fm(reclamResteMois(mk))+'</span>'
+          +'<button onclick="openTresoDepot(\''+mk+'\')" style="background:rgba(251,146,60,.18);border:1px solid rgba(251,146,60,.45);color:var(--org);border-radius:8px;padding:6px 11px;font-size:10px;font-weight:800;cursor:pointer;">🏢 Déposer</button>'
+          +'</div></div>';
+      });
+    }
+    if(enAttente.length){
+      var attTot=enAttente.reduce(function(a,d){return a+pf(d.net);},0);
+      html+='<div style="font-size:10px;font-weight:800;color:var(--blu);margin:12px 0 6px;">⏳ Déposé — en attente du versement ('+fm(attTot)+')</div>';
+      enAttente.forEach(function(d){
+        html+='<div style="background:rgba(96,165,250,.06);border:1px solid rgba(96,165,250,.25);border-radius:10px;padding:10px;margin-bottom:7px;">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+          +'<div style="flex:1;min-width:0;"><div style="font-size:12px;font-weight:800;color:var(--m3);text-transform:capitalize;">'+moisLbl(d.mois)+'</div>'
+          +'<div style="font-size:9px;color:var(--m2);">Déposé le '+d.dateDepot+' · '+fm(d.total)+' − retenue '+fm(pf(d.retenue)+pf(d.autre))+'</div></div>'
+          +'<div style="text-align:right;"><div style="font-size:16px;font-weight:900;color:var(--blu);">'+fm(d.net)+'</div>'
+          +'<div style="font-size:9px;color:var(--m2);">à recevoir</div></div></div>'
+          +'<div style="display:flex;gap:6px;margin-top:8px;">'
+          +'<button onclick="marquerDepotRecu(\''+d.id+'\')" style="flex:1;background:rgba(57,211,83,.18);border:1px solid rgba(57,211,83,.45);color:var(--grn);border-radius:8px;padding:8px;font-size:11px;font-weight:800;cursor:pointer;">✅ Argent reçu</button>'
+          +'<button onclick="supprDepot(\''+d.id+'\')" style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.3);color:var(--red);border-radius:8px;padding:8px 11px;font-size:11px;font-weight:800;cursor:pointer;">🗑️</button>'
+          +'</div></div>';
+      });
+    }
+    var regles=depots.filter(function(d){return d.recu;}).slice(0,3);
+    if(regles.length){
+      html+='<div style="font-size:10px;font-weight:800;color:var(--grn);margin:12px 0 6px;">✅ Réglés</div>';
+      regles.forEach(function(d){
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--brd);font-size:11px;">'
+          +'<span style="color:var(--m2);text-transform:capitalize;">'+moisLbl(d.mois)+(d.netAttendu!==undefined?' <span style="color:var(--red);">(écart)</span>':'')+'</span>'
+          +'<span style="font-weight:800;color:var(--grn);">'+fm(d.net)+' reçu</span></div>';
+      });
+    }
+    if(!moisAvecReste.length&&!enAttente.length&&!regles.length){
+      html+='<div style="font-size:11px;color:var(--m2);">Aucun dépôt pour le moment.</div>';
+    }
     html+='</div>';
   }
 
@@ -8669,6 +8752,126 @@ function saveTresoReclam(){
   showToastGrn(fm(amt)+' ajouté à '+expAccLabel(to)+(reste>0.005?' · reste '+fm(reste):''));
 }
 
+// ═══ DÉPÔT MENSUEL À LA COMPAGNIE DE TAXI ═══
+// Les coupons et le STS sont déposés au bureau. La compagnie retient la
+// location des voitures et verse la différence sur le compte commercial.
+function openTresoDepot(mois){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var parMois=reclamParMois();
+  var moisDispo=Object.keys(parMois).filter(function(mk){return reclamResteMois(mk)>0.005;}).sort().reverse();
+  if(!moisDispo.length){alert('✅ Rien à déposer : tous les mois sont réglés.');return;}
+  if(!mois||moisDispo.indexOf(mois)<0)mois=moisDispo[0];
+  var ret=retenueDefaut();
+  var opts=moisDispo.map(function(mk){
+    return '<option value="'+mk+'"'+(mk===mois?' selected':'')+'>'+moisLbl(mk)+' — '+fm(reclamResteMois(mk))+'</option>';
+  }).join('');
+  var old=document.getElementById('tresoDepotModal');if(old)old.remove();
+  var m=document.createElement('div');
+  m.id='tresoDepotModal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:9999;display:flex;align-items:flex-end;justify-content:center;padding:16px;';
+  m.innerHTML='<div style="background:var(--s2);border:1.5px solid var(--brd2);border-radius:18px;padding:18px;width:100%;max-width:480px;max-height:90dvh;overflow-y:auto;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--org);margin-bottom:4px;">🏢 Dépôt à la compagnie</div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-bottom:14px;line-height:1.5;">Tu déposes la feuille de coupons et de STS au bureau. La compagnie retient la location des voitures et te verse la différence.</div>'
+    +'<div class="fi"><label>Mois déposé</label><div class="sw"><select id="dpMois" onchange="dpRecalc(true)" style="width:100%;">'+opts+'</select></div></div>'
+    +'<div class="fi"><label>💰 Total déposé (coupons + STS)</label><input id="dpTotal" type="number" step="0.01" inputmode="decimal" oninput="dpRecalc()" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;"></div>'
+    +'<div class="fi"><label>🚗 Retenue location des voitures</label><input id="dpRet" type="number" step="0.01" inputmode="decimal" oninput="dpRecalc()" value="'+ret.total.toFixed(2)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:11px;font-size:15px;font-weight:800;">'
+    +'<div style="font-size:10px;color:var(--m2);margin-top:4px;">'+ret.n+' voiture'+(ret.n>1?'s':'')+' × '+fm(ret.parVoiture)+' — modifiable (réglages : coûts fixes)</div></div>'
+    +'<div class="fi"><label>➖ Autre retenue (optionnel)</label><div style="display:flex;gap:7px;">'
+    +'<input id="dpAutreLbl" placeholder="ex: assurance" style="flex:1;min-width:0;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;">'
+    +'<input id="dpAutre" type="number" step="0.01" inputmode="decimal" placeholder="0.00" oninput="dpRecalc()" style="width:100px;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div></div>'
+    +'<div id="dpNetBox" style="background:rgba(57,211,83,.08);border:1.5px solid rgba(57,211,83,.3);border-radius:12px;padding:12px;margin:12px 0;">'
+    +'<div style="font-size:10px;color:var(--m2);font-weight:700;text-transform:uppercase;">Net à recevoir</div>'
+    +'<div id="dpNet" style="font-size:24px;font-weight:900;color:var(--grn);">$0.00</div></div>'
+    +'<div class="fi"><label>Date du dépôt</label><input id="dpDate" type="date" value="'+today()+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:9px;font-size:12px;"></div>'
+    +'<label style="display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.04);border:1px solid var(--brd2);border-radius:10px;padding:11px;cursor:pointer;margin-bottom:4px;">'
+    +'<input type="checkbox" id="dpRecu" onchange="dpToggleRecu()" style="width:18px;height:18px;">'
+    +'<span style="font-size:12px;font-weight:700;color:var(--m3);">💰 L\'argent est déjà reçu</span></label>'
+    +'<div id="dpAccWrap" style="display:none;margin-top:10px;"><div class="fi"><label>Reçu sur quel compte ?</label><div class="sw"><select id="dpAcc" style="width:100%;">'+_tresoDestOpts('comm')+'</select></div></div></div>'
+    +'<div style="display:flex;gap:8px;margin-top:14px;">'
+    +'<button onclick="document.getElementById(\'tresoDepotModal\').remove()" style="flex:.4;background:rgba(255,255,255,.07);border:1px solid var(--brd);color:var(--m2);border-radius:10px;padding:12px;font-weight:700;cursor:pointer;">Annuler</button>'
+    +'<button onclick="saveTresoDepot()" style="flex:1;background:rgba(251,146,60,.25);border:1.5px solid rgba(251,146,60,.6);color:var(--org);border-radius:10px;padding:12px;font-size:13px;font-weight:900;cursor:pointer;">🏢 Enregistrer le dépôt</button>'
+    +'</div></div>';
+  document.body.appendChild(m);
+  dpRecalc(true);
+}
+function dpToggleRecu(){
+  var w=document.getElementById('dpAccWrap');
+  if(w)w.style.display=document.getElementById('dpRecu').checked?'block':'none';
+}
+function dpRecalc(remplirTotal){
+  var mk=document.getElementById('dpMois').value;
+  var tEl=document.getElementById('dpTotal');
+  if(remplirTotal&&tEl)tEl.value=reclamResteMois(mk).toFixed(2);
+  var net=pf(tEl?tEl.value:0)-pf(document.getElementById('dpRet').value)-pf(document.getElementById('dpAutre').value);
+  var el=document.getElementById('dpNet'),box=document.getElementById('dpNetBox');
+  if(el)el.textContent=fm(net);
+  if(box){
+    var neg=net<0;
+    box.style.background=neg?'rgba(255,58,58,.08)':'rgba(57,211,83,.08)';
+    box.style.borderColor=neg?'rgba(255,58,58,.35)':'rgba(57,211,83,.3)';
+    if(el)el.style.color=neg?'var(--red)':'var(--grn)';
+  }
+}
+function saveTresoDepot(){
+  var mois=document.getElementById('dpMois').value;
+  var total=pf(document.getElementById('dpTotal').value);
+  var retenue=pf(document.getElementById('dpRet').value);
+  var autre=pf(document.getElementById('dpAutre').value);
+  var autreLbl=(document.getElementById('dpAutreLbl').value||'').trim();
+  var date=document.getElementById('dpDate').value||today();
+  var recu=document.getElementById('dpRecu').checked;
+  var acc=recu?document.getElementById('dpAcc').value:'';
+  if(total<=0){alert('Le total déposé doit être supérieur à zéro.');return;}
+  var reste=reclamResteMois(mois);
+  if(total>reste+0.005&&!confirm('⚠️ Tu déposes '+fm(total)+' alors que '+moisLbl(mois)+' ne totalise que '+fm(reste)+'.\n\nContinuer ?'))return;
+  var net=parseFloat((total-retenue-autre).toFixed(2));
+  var d={id:uid(),mois:mois,total:parseFloat(total.toFixed(2)),
+    retenue:parseFloat(retenue.toFixed(2)),autre:parseFloat(autre.toFixed(2)),autreLbl:autreLbl,
+    net:net,dateDepot:date,recu:false,by:U.name,ts:new Date().toISOString()};
+  getDepots().push(d);
+  if(recu)_depotEncaisser(d,acc,date);
+  lSave();audit('TRESO_DEPOT',moisLbl(mois)+'/'+fm(total)+'→net '+fm(net));
+  document.getElementById('tresoDepotModal').remove();
+  renderTreso();
+  showToastGrn(recu?('Dépôt réglé — '+fm(net)+' reçu'):('Dépôt enregistré — '+fm(net)+' en attente'));
+}
+// Crédite le net sur le compte choisi et marque le dépôt comme reçu
+function _depotEncaisser(d,acc,date){
+  d.recu=true;d.dateRecu=date||today();d.accRecu=acc||'comm';
+  if(d.net>0){
+    var t=getTresoAccounts();
+    t.transactions.push({id:uid(),date:d.dateRecu,
+      desc:'🏢 Règlement compagnie — '+moisLbl(d.mois)+' (déposé '+fm(d.total)+' − retenue '+fm(d.retenue+d.autre)+')',
+      amount:d.net,accountId:d.accRecu,type:'in',cat:'Coupons',depotKey:d.id,auto:true});
+  }
+}
+function marquerDepotRecu(id){
+  if(!U||U.role!=='owner'){alert('🔒 Réservé au patron.');return;}
+  var d=getDepots().find(function(x){return x.id===id;});
+  if(!d||d.recu)return;
+  var accs=_tresoDestOpts('comm');
+  var choix=prompt('💰 Argent reçu pour '+moisLbl(d.mois)+'\n\nNet attendu : '+fm(d.net)+'\n\nEntre le montant RÉELLEMENT reçu :',d.net.toFixed(2));
+  if(choix===null)return;
+  var recu=pf(choix);
+  if(recu<=0){alert('Montant invalide.');return;}
+  if(Math.abs(recu-d.net)>0.005){
+    if(!confirm('⚠️ Écart avec le net attendu\n\nAttendu : '+fm(d.net)+'\nReçu : '+fm(recu)+'\nÉcart : '+fm(recu-d.net)+'\n\nLe montant reçu sera enregistré tel quel. Continuer ?'))return;
+    d.netAttendu=d.net;d.net=parseFloat(recu.toFixed(2));
+  }
+  _depotEncaisser(d,'comm',today());
+  lSave();audit('TRESO_DEPOT_RECU',moisLbl(d.mois)+'/'+fm(d.net));
+  renderTreso();
+  showToastGrn(fm(d.net)+' reçu au Commercial');
+}
+function supprDepot(id){
+  if(!confirm('Supprimer ce dépôt ?\n\nLe montant redeviendra « à réclamer » et le versement reçu sera retiré de la trésorerie.'))return;
+  var t=getTresoAccounts();
+  t.transactions=t.transactions.filter(function(tx){return tx.depotKey!==id;});
+  C.depots=getDepots().filter(function(d){return d.id!==id;});
+  lSave();audit('TRESO_DEPOT_SUPPR',id);
+  renderTreso();
+}
+
 // ═══ RAPPROCHEMENT DE CAISSE ═══
 // Je compte mon cash réel : l'app enregistre l'écart et aligne le solde.
 function openTresoCompter(){
@@ -9167,7 +9370,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v74-RECLAMATIONS';
+var APP_VERSION = '2026-07-29-v75-DEPOT-COMPAGNIE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
