@@ -8795,9 +8795,12 @@ function bilanHTML(){
     +'<span style="font-size:17px;font-weight:900;color:var(--grn);">'+fm(b.totActif)+'</span></div>';
   h+=ligne('💰','Argent en main',b.totMain,'var(--m3)',true);
   if(C.treso._voirBilan)b.enMain.forEach(function(x){h+='<div style="padding-left:14px;">'+ligne(x.icon,x.name,x.v,x.v<0?'var(--red)':'var(--m2)')+'</div>';});
-  if(Math.abs(b.totCreances)>0.005){
-    h+=ligne('📥','On me doit',b.totCreances,'var(--m3)',true);
-    if(C.treso._voirBilan)b.creances.forEach(function(x){h+='<div style="padding-left:14px;">'+ligne(x.icon,x.name,x.v,'var(--neon)')+'</div>';});
+  // Toujours affichée, même à zéro : le propriétaire doit savoir où
+  // regarder ses créances sans se demander si la ligne existe.
+  h+=ligne('📥','On me doit',b.totCreances,'var(--m3)',true);
+  if(C.treso._voirBilan){
+    if(b.creances.length)b.creances.forEach(function(x){h+='<div style="padding-left:14px;">'+ligne(x.icon,x.name,x.v,'var(--neon)')+'</div>';});
+    else h+='<div style="padding-left:14px;font-size:10px;color:var(--m2);line-height:1.5;">Rien en attente : cash des chauffeurs encaissé, coupons et STS réglés, aucun crédit accordé.</div>';
   }
   // Biens durables (voitures, permis de taxi, équipement)
   h+=ligne('🏛️','Biens et permis',b.totBiens,'var(--m3)',true);
@@ -9665,7 +9668,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v81-BIENS-ET-PERMIS';
+var APP_VERSION = '2026-07-29-v82-CREANCES-VISIBLES';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
