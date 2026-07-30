@@ -4363,7 +4363,7 @@ function renderAnalyse(){
     });
   }
 
-  c.innerHTML=contribDashHTML()+insightsHTML()+weekdayCompHTML()+duelDrvHTML()+duelVehHTML()+driverCompareHTML()+dailyBreakdownHTML()+vehAnalysisHTML()+html;
+  c.innerHTML=contribDashHTML()+kmHTHtml()+insightsHTML()+weekdayCompHTML()+duelDrvHTML()+duelVehHTML()+driverCompareHTML()+dailyBreakdownHTML()+vehAnalysisHTML()+html;
 }
 
 // ═══════════════════════════════════════════════
@@ -4568,6 +4568,245 @@ function duelVehHTML(){
     +'<div style="font-size:9px;color:var(--m2);margin-top:7px;">NET = profit patron (essence déjà déduite) − réparations/dépenses du véhicule sur la période</div>'
     +'</div>';
   return h;
+}
+
+// ═══════════════════════════════════════════════
+// 🛣️ RENTABILITÉ AU KILOMÈTRE vs TAXIMÈTRE
+// Les tarifs affichés sur la plaque sont HORS TAXES : prise en charge,
+// prix du kilomètre et minute d'attente, différents le jour et le soir.
+// Le taximètre ajoute lui-même la TPS et la TVQ au total facturé au client.
+// Le montant relevé au compteur est donc TAXES INCLUSES : le vrai revenu
+// de l'entreprise est plus bas, et c'est LUI qu'il faut comparer au coût
+// du kilomètre et à la consommation d'essence.
+// ═══════════════════════════════════════════════
+var TARIFS_DEF={
+  jour:{dep:4.10,km:2.05,att:0.77},  // tarif de jour, hors taxes
+  soir:{dep:4.70,km:2.35,att:0.89}   // tarif de soir, hors taxes
+};
+function tarifsTaxi(){
+  var t=(C&&C.tarifs)||{};
+  return {
+    jour:{dep:t.jour&&t.jour.dep!==undefined?pf(t.jour.dep):TARIFS_DEF.jour.dep,
+          km: t.jour&&t.jour.km !==undefined?pf(t.jour.km ):TARIFS_DEF.jour.km,
+          att:t.jour&&t.jour.att!==undefined?pf(t.jour.att):TARIFS_DEF.jour.att},
+    soir:{dep:t.soir&&t.soir.dep!==undefined?pf(t.soir.dep):TARIFS_DEF.soir.dep,
+          km: t.soir&&t.soir.km !==undefined?pf(t.soir.km ):TARIFS_DEF.soir.km,
+          att:t.soir&&t.soir.att!==undefined?pf(t.soir.att):TARIFS_DEF.soir.att}
+  };
+}
+function tarifDuQuart(s){
+  var T=tarifsTaxi();
+  return (s&&s.periode==='soir')?T.soir:T.jour;
+}
+function kmParams(){
+  return {
+    coutKm: (C.coutKm!==undefined&&C.coutKm!==null)?pf(C.coutKm):0.11,      // carburant $/km mesuré
+    taux:   (C.tauxTaxes!==undefined&&C.tauxTaxes!==null)?pf(C.tauxTaxes):14.975, // TPS 5 % + TVQ 9,975 %
+    prixL:  (C.prixLitre!==undefined&&C.prixLitre!==null)?pf(C.prixLitre):1.55,   // prix du litre à la pompe
+    tarifs: tarifsTaxi()
+  };
+}
+function saveKmParams(){
+  function gnum(id){var e=document.getElementById(id);return e?parseFloat(e.value):NaN;}
+  var c=gnum('kmCoutInput'), t=gnum('kmTauxInput'), l=gnum('kmPrixLInput');
+  if(isNaN(c)||c<0){alert('Coût par km invalide.');return;}
+  if(isNaN(t)||t<0||t>100){alert('Taux de taxes invalide.');return;}
+  if(isNaN(l)||l<=0){alert('Prix du litre invalide.');return;}
+  C.coutKm=c;C.tauxTaxes=t;C.prixLitre=l;
+  // Grille tarifaire (affichée seulement si le détail est ouvert)
+  if(document.getElementById('tfJdep')){
+    var g={jour:{dep:gnum('tfJdep'),km:gnum('tfJkm'),att:gnum('tfJatt')},
+           soir:{dep:gnum('tfSdep'),km:gnum('tfSkm'),att:gnum('tfSatt')}};
+    var bad=false;
+    ['jour','soir'].forEach(function(p){['dep','km','att'].forEach(function(k){
+      if(isNaN(g[p][k])||g[p][k]<0)bad=true;
+    });});
+    if(bad){alert('Grille de tarifs invalide.');return;}
+    C.tarifs=g;
+  }
+  lSave();audit('KM_PARAMS',c+'$/km · '+t+'% · '+l+'$/L');
+  renderAnalyse();showToastGrn('Paramètres enregistrés');
+}
+// Analyse d'un ensemble de quarts ayant des kilomètres valides
+function analyseKmHT(arr){
+  var p=kmParams();
+  var avecKm=arr.filter(function(s){return pf(s.kmd)>0&&pf(s.kmf)>0&&pf(s.kmf)>pf(s.kmd);});
+  var km=avecKm.reduce(function(a,s){return a+(pf(s.kmf)-pf(s.kmd));},0);
+  // Recette du compteur, même définition que la paie : fin − début − nb de courses
+  var ttc=avecKm.reduce(function(a,s){return a+(pf(s.taxf)-pf(s.taxd)-pi(s.courses));},0);
+  var ht=p.taux>0?ttc/(1+p.taux/100):ttc;
+  var taxes=ttc-ht;
+  var courses=avecKm.reduce(function(a,s){return a+pi(s.courses);},0);
+  // Tarifs pondérés : chaque quart est jour ou soir
+  var depTot=avecKm.reduce(function(a,s){return a+pi(s.courses)*tarifDuQuart(s).dep;},0);
+  var kmPond=avecKm.reduce(function(a,s){return a+(pf(s.kmf)-pf(s.kmd))*tarifDuQuart(s).km;},0);
+  var tarifKm=km>0?kmPond/km:p.tarifs.jour.km;
+  var attPond=avecKm.reduce(function(a,s){return a+(pf(s.kmf)-pf(s.kmd))*tarifDuQuart(s).att;},0);
+  var tarifAtt=km>0?attPond/km:p.tarifs.jour.att;
+  // Équivalent-kilomètres facturés : ce qui reste après la prise en charge,
+  // converti au tarif kilométrique (l'attente facturée y est incluse).
+  var kmFact=tarifKm>0?Math.max(0,(ht-depTot)/tarifKm):0;
+  var occup=km>0?kmFact/km:0;
+  var carbEstime=km*p.coutKm;
+  var carbReel=avecKm.reduce(function(a,s){return a+pf(s.essence);},0);
+  var carbRef=carbReel>0?carbReel:carbEstime;      // dépense d'essence retenue
+  var coutKmReel=km>0?carbReel/km:0;
+  var litres=p.prixL>0?carbRef/p.prixL:0;
+  var salaires=avecKm.reduce(function(a,s){return a+calcSalary(s);},0);
+  var marge=ht-carbEstime-salaires;
+  var seuilKm=p.coutKm+(km>0?salaires/km:0);       // $ HT à faire par km roulé
+  return {n:avecKm.length,km:km,ttc:ttc,ht:ht,taxes:taxes,courses:courses,
+    carbEstime:carbEstime,carbReel:carbReel,carbRef:carbRef,coutKmReel:coutKmReel,
+    litres:litres,l100:km>0?litres/km*100:0,kmParL:litres>0?km/litres:0,
+    htParL:litres>0?ht/litres:0,pctEss:ht>0?carbRef/ht*100:0,
+    salaires:salaires,marge:marge,coutKm:p.coutKm,taux:p.taux,prixL:p.prixL,
+    tarifKm:tarifKm,tarifAtt:tarifAtt,depTot:depTot,kmFact:kmFact,occup:occup,
+    seuilKm:seuilKm,seuilOccup:tarifKm>0?seuilKm/tarifKm:0,
+    recParCourse:courses>0?ht/courses:0,kmParCourse:courses>0?km/courses:0,
+    htKm:km>0?ht/km:0, salKm:km>0?salaires/km:0, margeKm:km>0?marge/km:0,
+    sansKm:arr.length-avecKm.length};
+}
+function kmHTHtml(){
+  var arr=_cmpArr();
+  var a=analyseKmHT(arr);
+  var p=kmParams();
+  var T=p.tarifs;
+  var h='<div class="card" style="border-color:rgba(96,165,250,.35);">'
+    +'<div class="ctit"><span><span class="ci">🛣️</span>Taximètre, kilomètre et consommation · '+_cmpWin+' derniers jours</span></div>';
+  // Paramètres
+  h+='<div style="background:rgba(10,8,0,.5);border:1px solid var(--brd);border-radius:11px;padding:10px;margin-bottom:11px;">'
+    +'<div style="font-size:9px;color:var(--m2);font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;">⚙️ Mes paramètres</div>'
+    +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">'
+    +'<div style="flex:1;min-width:96px;"><label style="font-size:10px;color:var(--m2);font-weight:700;display:block;margin-bottom:3px;">⛽ Coût $/km</label>'
+    +'<input id="kmCoutInput" type="number" step="0.01" value="'+p.coutKm.toFixed(2)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:8px;font-size:13px;font-weight:800;"></div>'
+    +'<div style="flex:1;min-width:96px;"><label style="font-size:10px;color:var(--m2);font-weight:700;display:block;margin-bottom:3px;">⛽ Prix du litre</label>'
+    +'<input id="kmPrixLInput" type="number" step="0.01" value="'+p.prixL.toFixed(2)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:8px;font-size:13px;font-weight:800;"></div>'
+    +'<div style="flex:1;min-width:96px;"><label style="font-size:10px;color:var(--m2);font-weight:700;display:block;margin-bottom:3px;">🧾 TPS+TVQ (%)</label>'
+    +'<input id="kmTauxInput" type="number" step="0.001" value="'+p.taux+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:8px;font-size:13px;font-weight:800;"></div>'
+    +'<button onclick="saveKmParams()" style="background:rgba(96,165,250,.18);border:1.5px solid rgba(96,165,250,.45);color:var(--blu);border-radius:9px;padding:9px 14px;font-size:12px;font-weight:800;cursor:pointer;">✓</button>'
+    +'</div>'
+    // Grille tarifaire officielle, modifiable si la Ville change les tarifs
+    +'<div style="margin-top:9px;">'
+    +'<div onclick="window._tfOpen=!window._tfOpen;renderAnalyse();" style="cursor:pointer;font-size:10px;color:var(--blu);font-weight:800;">'+(window._tfOpen?'▾':'▸')+' 🧾 Mes tarifs (hors taxes) — jour '+T.jour.km.toFixed(2)+' $/km · soir '+T.soir.km.toFixed(2)+' $/km</div>';
+  if(window._tfOpen){
+    var tfr=function(lbl,pre,t){
+      return '<div style="display:flex;gap:6px;align-items:center;margin-top:6px;">'
+        +'<span style="font-size:10px;color:var(--m3);font-weight:800;width:38px;flex-shrink:0;">'+lbl+'</span>'
+        +'<div style="flex:1;"><label style="font-size:8px;color:var(--m2);display:block;">Départ</label><input id="tf'+pre+'dep" type="number" step="0.05" value="'+t.dep.toFixed(2)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:7px;padding:6px;font-size:12px;font-weight:800;"></div>'
+        +'<div style="flex:1;"><label style="font-size:8px;color:var(--m2);display:block;">$/km</label><input id="tf'+pre+'km" type="number" step="0.05" value="'+t.km.toFixed(2)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:7px;padding:6px;font-size:12px;font-weight:800;"></div>'
+        +'<div style="flex:1;"><label style="font-size:8px;color:var(--m2);display:block;">$/min attente</label><input id="tf'+pre+'att" type="number" step="0.01" value="'+t.att.toFixed(2)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:7px;padding:6px;font-size:12px;font-weight:800;"></div>'
+        +'</div>';
+    };
+    h+=tfr('☀️ Jour','J',T.jour)+tfr('🌙 Soir','S',T.soir)
+      +'<div style="font-size:9px;color:var(--m2);margin-top:5px;">Appuie sur ✓ pour enregistrer. Le quart choisit le tarif jour ou soir selon sa période.</div>';
+  }
+  h+='</div>'
+    +'<div style="font-size:9px;color:var(--m2);margin-top:6px;line-height:1.5;">Tes tarifs sont <b>hors taxes</b> : le taximètre ajoute la TPS + TVQ au client, donc le montant relevé au compteur les contient. Mets 0 % si tu n\'es pas inscrit aux taxes.</div>'
+    +'</div>';
+
+  if(!a.n||a.km<=0){
+    h+='<div style="font-size:11px;color:var(--m2);line-height:1.6;">Aucun quart avec kilométrage sur la période. Remplis <b>Km début</b> et <b>Km fin</b> dans le formulaire de quart pour activer cette analyse.</div>';
+    return h+'</div>';
+  }
+
+  function ligne(lbl,val,col,gras,sub){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--brd);gap:8px;">'
+      +'<span style="font-size:11px;color:'+(gras?'var(--m3)':'var(--m2)')+';'+(gras?'font-weight:800;':'')+'flex:1;min-width:0;">'+lbl
+      +(sub?'<div style="font-size:9px;color:var(--m2);font-weight:400;">'+sub+'</div>':'')+'</span>'
+      +'<span style="font-size:'+(gras?'14px':'13px')+';font-weight:900;color:'+col+';flex-shrink:0;">'+val+'</span></div>';
+  }
+  h+=ligne('🛣️ Kilomètres parcourus',Math.round(a.km).toLocaleString('fr-CA')+' km','var(--m3)',true,a.n+' quart'+(a.n>1?'s':'')+' avec km'+(a.sansKm?' · '+a.sansKm+' sans km (exclus)':'')+(a.courses?' · '+a.courses+' courses':''));
+  h+=ligne('🔢 Taximètre encaissé (taxes incl.)',fm(a.ttc),'var(--gold)',true,'fin − début − nb de courses');
+  if(a.taux>0)h+=ligne('🧾 − TPS + TVQ ('+a.taux+' %)','−'+fm(a.taxes),'var(--red)',false,'ajoutées par le compteur, à remettre à Revenu Québec');
+  h+=ligne('💰 = Revenu hors taxes',fm(a.ht),'var(--grn)',true,'ce que ton entreprise garde réellement');
+  h+=ligne('⛽ − Carburant estimé ('+a.coutKm.toFixed(2)+' $/km)','−'+fm(a.carbEstime),'var(--red)',false,
+    'essence réellement payée : '+fm(a.carbReel)+(Math.abs(a.carbReel-a.carbEstime)>1?(a.carbReel>a.carbEstime?' — soit '+fm(a.carbReel-a.carbEstime)+' de plus que ton estimé':' — soit '+fm(a.carbEstime-a.carbReel)+' de moins que ton estimé'):''));
+  h+=ligne('💼 − Salaires chauffeurs','−'+fm(a.salaires),'var(--red)',false);
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0 4px;margin-top:4px;border-top:2px solid var(--brd2);">'
+    +'<span style="font-size:12px;font-weight:900;color:var(--gold);">✅ Marge propriétaire</span>'
+    +'<span style="font-size:20px;font-weight:900;color:'+(a.marge>=0?'var(--gold)':'var(--red)')+';">'+fm(a.marge)+'</span></div>';
+
+  // ── Face au taximètre : combien de mes km sont réellement facturés ──
+  var pctOcc=a.occup*100, pctSeuil=a.seuilOccup*100;
+  h+='<div style="background:rgba(245,200,0,.06);border:1.5px solid rgba(245,200,0,.28);border-radius:12px;padding:11px;margin-top:11px;">'
+    +'<div style="font-size:10px;color:var(--gold);font-weight:900;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🔢 Face au taximètre</div>'
+    +'<div style="display:flex;height:14px;border-radius:7px;overflow:hidden;background:rgba(255,58,58,.22);margin-bottom:6px;">'
+    +'<div style="width:'+Math.max(0,Math.min(100,pctOcc)).toFixed(1)+'%;background:linear-gradient(90deg,var(--grn),var(--gold));"></div></div>'
+    +'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--m2);font-weight:700;margin-bottom:9px;">'
+    +'<span style="color:var(--grn);">'+pctOcc.toFixed(0)+' % facturés ('+Math.round(a.kmFact).toLocaleString('fr-CA')+' km)</span>'
+    +'<span style="color:var(--red);">'+Math.max(0,100-pctOcc).toFixed(0)+' % à vide ('+Math.round(Math.max(0,a.km-a.kmFact)).toLocaleString('fr-CA')+' km)</span></div>'
+    +ligne('📍 Prises en charge ('+a.courses+' × ~'+(a.courses>0?(a.depTot/a.courses).toFixed(2):'0.00')+' $)',fm(a.depTot),'var(--m3)',false,'départ jour '+T.jour.dep.toFixed(2)+' $ · soir '+T.soir.dep.toFixed(2)+' $')
+    +ligne('🛣️ Tarif kilométrique appliqué',a.tarifKm.toFixed(2)+' $/km','var(--m3)',false,'moyenne pondérée jour/soir, hors taxes')
+    +ligne('💵 Ce que rapporte 1 km roulé',a.htKm.toFixed(2)+' $','var(--grn)',true,'à comparer au tarif de '+a.tarifKm.toFixed(2)+' $ : la différence, c\'est le temps mort et les retours à vide')
+    +(a.courses>0?ligne('🚕 Par course',fm(a.recParCourse),'var(--m3)',false,a.kmParCourse.toFixed(1)+' km parcourus par course'):'')
+    +'<div style="font-size:11px;color:var(--m3);line-height:1.6;margin-top:8px;">'
+    +'💡 Sur <b>'+Math.round(a.km).toLocaleString('fr-CA')+' km</b> roulés, le compteur n\'en a facturé que <b>'+Math.round(a.kmFact).toLocaleString('fr-CA')+' km</b> (attente comprise). '
+    +'Pour couvrir carburant + salaire il te faut <b>'+Math.max(0,Math.min(100,pctSeuil)).toFixed(0)+' %</b> de km facturés — tu es à <b style="color:'+(pctOcc>=pctSeuil?'var(--grn)':'var(--red)')+';">'+pctOcc.toFixed(0)+' %</b>.'
+    +'</div></div>';
+
+  // ── Consommation rapportée au taximètre ──
+  h+='<div style="background:rgba(255,107,53,.06);border:1.5px solid rgba(255,107,53,.28);border-radius:12px;padding:11px;margin-top:10px;">'
+    +'<div style="font-size:10px;color:var(--neon);font-weight:900;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">⛽ Consommation</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Litres (à '+a.prixL.toFixed(2)+' $/L)</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--neon);">'+a.litres.toFixed(0)+' L</div></div>'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Consommation</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--neon);">'+a.l100.toFixed(1)+' L/100</div></div>'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">1 litre rapporte</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--grn);">'+fm(a.htParL)+'</div></div>'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Part du taximètre</div>'
+    +'<div style="font-size:16px;font-weight:900;color:'+(a.pctEss<=15?'var(--grn)':(a.pctEss<=25?'var(--gold)':'var(--red)'))+';">'+a.pctEss.toFixed(1)+' %</div></div>'
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--m3);line-height:1.6;margin-top:8px;">'
+    +'💡 Tu brûles <b>'+a.l100.toFixed(1)+' L aux 100 km</b> et chaque litre te ramène <b>'+fm(a.htParL)+' hors taxes</b>. '
+    +'L\'essence avale <b>'+a.pctEss.toFixed(1)+' %</b> de ta recette'
+    +(a.coutKmReel>0?' — coût réel mesuré : <b>'+a.coutKmReel.toFixed(3)+' $/km</b> contre '+a.coutKm.toFixed(2)+' $ dans tes paramètres.':'.')
+    +'</div></div>';
+
+  // Le chiffre qui compte : par kilomètre
+  h+='<div style="background:rgba(96,165,250,.07);border:1.5px solid rgba(96,165,250,.28);border-radius:12px;padding:11px;margin-top:10px;">'
+    +'<div style="font-size:10px;color:var(--blu);font-weight:900;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Par kilomètre</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Revenu HT</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--grn);">'+a.htKm.toFixed(2)+' $</div></div>'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">⛽ Carburant</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--red);">'+a.coutKm.toFixed(2)+' $</div></div>'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">💼 Salaire</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--neon);">'+a.salKm.toFixed(2)+' $</div></div>'
+    +'<div style="background:rgba(245,200,0,.1);border:1px solid rgba(245,200,0,.3);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--gold);font-weight:800;">✅ Ma marge</div>'
+    +'<div style="font-size:18px;font-weight:900;color:'+(a.margeKm>=0?'var(--gold)':'var(--red)')+';">'+a.margeKm.toFixed(2)+' $</div></div>'
+    +'</div></div>';
+
+  // Lecture concrète du résultat
+  var seuil=a.seuilKm;
+  h+='<div style="background:'+(a.margeKm>=0?'rgba(57,211,83,.07)':'rgba(255,58,58,.08)')+';border:1px solid '+(a.margeKm>=0?'rgba(57,211,83,.25)':'rgba(255,58,58,.3)')+';border-radius:11px;padding:10px 12px;margin-top:9px;font-size:11px;line-height:1.6;">'
+    +(a.margeKm>=0
+      ?'💡 Chaque kilomètre roulé te rapporte <b>'+a.margeKm.toFixed(2)+' $ net</b> après taxes, carburant et salaire. Ton seuil de rentabilité est <b>'+seuil.toFixed(2)+' $/km hors taxes</b>, soit <b>'+(seuil*(1+a.taux/100)).toFixed(2)+' $/km au compteur</b> : en dessous, le kilomètre te coûte de l\'argent.'
+      :'⚠️ Chaque kilomètre roulé te fait perdre <b>'+Math.abs(a.margeKm).toFixed(2)+' $</b>. Il te faudrait au moins <b>'+seuil.toFixed(2)+' $/km hors taxes</b> ('+(seuil*(1+a.taux/100)).toFixed(2)+' $/km au compteur) pour rentrer dans tes frais.')
+    +'</div>';
+
+  // Détail par véhicule : lequel roule le plus rentable
+  var byV={};
+  arr.forEach(function(s){
+    if(!(pf(s.kmd)>0&&pf(s.kmf)>0&&pf(s.kmf)>pf(s.kmd)))return;
+    var v=s.vehicle||'?';
+    if(!byV[v])byV[v]=[];
+    byV[v].push(s);
+  });
+  var vNames=Object.keys(byV);
+  if(vNames.length>1){
+    h+='<div style="font-size:10px;color:var(--m2);font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin:12px 0 5px;">🚗 Marge et consommation par véhicule</div>';
+    vNames.map(function(v){return {v:v,a:analyseKmHT(byV[v])};})
+      .sort(function(x,y){return y.a.margeKm-x.a.margeKm;})
+      .forEach(function(o,i){
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--brd);font-size:11px;gap:8px;">'
+          +'<span style="color:var(--m3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;">'+(i===0?'🏆 ':'')+_cmpEsc(o.v)
+          +'<div style="color:var(--m2);font-size:9px;">'+Math.round(o.a.km).toLocaleString('fr-CA')+' km · '+o.a.l100.toFixed(1)+' L/100 · '+(o.a.occup*100).toFixed(0)+' % facturés</div></span>'
+          +'<span style="font-weight:900;color:'+(o.a.margeKm>=0?'var(--gold)':'var(--red)')+';flex-shrink:0;">'+o.a.margeKm.toFixed(2)+' $/km</span></div>';
+      });
+  }
+  h+='<div style="font-size:9px;color:var(--m2);line-height:1.5;margin-top:9px;">ℹ️ Ne comptent ici que les coûts variables (carburant, salaire). L\'assurance, la location des voitures et les réparations sont des coûts fixes : vois 💹 Profit pour le résultat complet.</div>';
+  return h+'</div>';
 }
 
 // 💡 FAIBLESSES & ÉCONOMIES — détection automatique
@@ -9709,7 +9948,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-29-v84-ANTI-ECRASEMENT-CONFIG';
+var APP_VERSION = '2026-07-30-v85-TAXIMETRE-CONSOMMATION';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
