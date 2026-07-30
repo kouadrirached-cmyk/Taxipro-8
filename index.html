@@ -4666,6 +4666,76 @@ function analyseKmHT(arr){
     htKm:km>0?ht/km:0, salKm:km>0?salaires/km:0, margeKm:km>0?marge/km:0,
     sansKm:arr.length-avecKm.length};
 }
+// ── Prévision d'essence du mois d'après le taximètre ──
+// Le taximètre dit combien j'ai facturé ; l'historique dit combien de
+// kilomètres il faut rouler pour facturer 1 $. En multipliant par mon
+// coût au kilomètre, je sais d'avance ce que l'essence va me coûter
+// ce mois-ci, même pour les quarts dont le kilométrage n'est pas saisi.
+function prevEssenceMois(ym){
+  var p=kmParams();
+  var ref=analyseKmHT(getArr());                 // historique complet = base du ratio
+  var kmParDollar=ref.ttc>0?ref.km/ref.ttc:0;    // km roulés par dollar au compteur
+  var mois=getArr().filter(function(s){return String(s.date||'').slice(0,7)===ym;});
+  function net(s){return pf(s.taxf)-pf(s.taxd)-pi(s.courses);}
+  function aKm(s){return pf(s.kmd)>0&&pf(s.kmf)>0&&pf(s.kmf)>pf(s.kmd);}
+  var ttc=mois.reduce(function(a,s){return a+net(s);},0);
+  var kmSaisis=mois.filter(aKm).reduce(function(a,s){return a+(pf(s.kmf)-pf(s.kmd));},0);
+  var ttcSansKm=mois.filter(function(s){return !aKm(s);}).reduce(function(a,s){return a+net(s);},0);
+  var kmEstime=kmSaisis+ttcSansKm*kmParDollar;   // km connus + km déduits du compteur
+  var essPrevu=kmEstime*p.coutKm;
+  var essPaye=mois.reduce(function(a,s){return a+pf(s.essence);},0);
+  // Projection jusqu'à la fin du mois, au rythme actuel
+  var pr=(ym||'').split('-'), an=parseInt(pr[0]), mo=parseInt(pr[1]);
+  var jMois=(an&&mo)?new Date(an,mo,0).getDate():30;
+  var auj=new Date(), courant=(auj.getFullYear()===an&&auj.getMonth()+1===mo);
+  var jFaits=courant?auj.getDate():jMois;
+  var fact=(courant&&jFaits>0)?jMois/jFaits:1;
+  return {ym:ym,n:mois.length,ttc:ttc,kmSaisis:kmSaisis,kmEstime:kmEstime,
+    partEstimee:kmEstime>0?(kmEstime-kmSaisis)/kmEstime:0,
+    essPrevu:essPrevu,essPaye:essPaye,ecart:essPaye-essPrevu,
+    litres:p.prixL>0?essPrevu/p.prixL:0,
+    kmParDollar:kmParDollar,coutKm:p.coutKm,prixL:p.prixL,
+    essPar100:ttc>0?essPrevu/ttc*100:0,litresPar100:(ttc>0&&p.prixL>0)?essPrevu/p.prixL/ttc*100:0,
+    courant:courant,jFaits:jFaits,jMois:jMois,
+    projTtc:ttc*fact,projEss:essPrevu*fact,projKm:kmEstime*fact,
+    projLitres:p.prixL>0?essPrevu*fact/p.prixL:0};
+}
+function prevEssenceHtml(){
+  var auj=new Date();
+  var ym=auj.getFullYear()+'-'+String(auj.getMonth()+1).padStart(2,'0');
+  var e=prevEssenceMois(ym);
+  if(!e.n||e.ttc<=0)return '';
+  var h='<div style="background:rgba(255,107,53,.06);border:1.5px solid rgba(255,107,53,.3);border-radius:12px;padding:11px;margin-top:10px;">'
+    +'<div style="font-size:10px;color:var(--neon);font-weight:900;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📅 Essence prévue — '+moisLbl(ym)+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Taximètre du mois</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--gold);">'+fm(e.ttc)+'</div></div>'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Kilomètres</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--m3);">'+Math.round(e.kmEstime).toLocaleString('fr-CA')+' km</div></div>'
+    +'<div style="background:rgba(255,107,53,.12);border:1px solid rgba(255,107,53,.3);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--neon);font-weight:800;">⛽ Essence prévue</div>'
+    +'<div style="font-size:18px;font-weight:900;color:var(--neon);">'+fm(e.essPrevu)+'</div></div>'
+    +'<div style="background:rgba(0,0,0,.25);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Litres</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--neon);">'+e.litres.toFixed(0)+' L</div></div>'
+    +'</div>';
+  // Ce qui est déjà sorti de ma poche
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0 0;font-size:11px;gap:8px;">'
+    +'<span style="color:var(--m2);">Essence déjà payée ce mois-ci</span>'
+    +'<span style="font-weight:900;color:var(--m3);">'+fm(e.essPaye)+'</span></div>';
+  if(e.essPaye>0){
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:11px;gap:8px;border-top:1px solid var(--brd);">'
+      +'<span style="color:var(--m2);">'+(e.ecart>0?'Dépassement de la prévision':'Sous la prévision')+'</span>'
+      +'<span style="font-weight:900;color:'+(e.ecart>0?'var(--red)':'var(--grn)')+';">'+(e.ecart>0?'+':'−')+fm(Math.abs(e.ecart))+'</span></div>';
+  }
+  h+='<div style="font-size:11px;color:var(--m3);line-height:1.6;margin-top:8px;">'
+    +'💡 <b>Chaque 100 $ au taximètre te coûte '+e.essPar100.toFixed(2)+' $ d\'essence</b> ('+e.litresPar100.toFixed(1)+' L), parce qu\'il faut rouler '+(e.kmParDollar*100).toFixed(0)+' km pour facturer 100 $.';
+  if(e.courant&&e.jFaits<e.jMois){
+    h+=' Au rythme des '+e.jFaits+' premiers jours, le mois devrait finir à <b>'+fm(e.projTtc)+'</b> au compteur, soit <b>'+fm(e.projEss)+' d\'essence</b> ('+e.projLitres.toFixed(0)+' L).';
+  }
+  if(e.partEstimee>0.02){
+    h+=' <span style="color:var(--m2);font-size:10px;">'+Math.round(e.partEstimee*100)+' % des kilomètres sont déduits du compteur, faute de Km début/fin saisis.</span>';
+  }
+  return h+'</div></div>';
+}
 function kmHTHtml(){
   var arr=_cmpArr();
   var a=analyseKmHT(arr);
@@ -4762,6 +4832,9 @@ function kmHTHtml(){
     +'L\'essence avale <b>'+a.pctEss.toFixed(1)+' %</b> de ta recette'
     +(a.coutKmReel>0?' — coût réel mesuré : <b>'+a.coutKmReel.toFixed(3)+' $/km</b> contre '+a.coutKm.toFixed(2)+' $ dans tes paramètres.':'.')
     +'</div></div>';
+
+  // ── Ce que l'essence va me coûter ce mois-ci, d'après le taximètre ──
+  h+=prevEssenceHtml();
 
   // Le chiffre qui compte : par kilomètre
   h+='<div style="background:rgba(96,165,250,.07);border:1.5px solid rgba(96,165,250,.28);border-radius:12px;padding:11px;margin-top:10px;">'
@@ -9948,7 +10021,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-30-v85-TAXIMETRE-CONSOMMATION';
+var APP_VERSION = '2026-07-30-v86-PREVISION-ESSENCE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
