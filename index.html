@@ -1014,11 +1014,21 @@ body{
         <div class="hname" id="hname"></div>
         <div class="hrole" id="hrole"></div>
       </div>
+      <button id="notifBtn" onclick="ouvrirNotifs()" title="Quarts rentrés"
+              style="display:none;position:relative;align-items:center;justify-content:center;background:rgba(245,200,0,.14);border:1px solid rgba(245,200,0,.4);color:var(--gold);border-radius:10px;width:34px;height:32px;font-size:15px;cursor:pointer;margin-right:6px;">🔔<span id="notifPastille" style="display:none;position:absolute;top:-5px;right:-5px;background:var(--red);color:#fff;border-radius:999px;min-width:17px;height:17px;font-size:10px;font-weight:900;align-items:center;justify-content:center;padding:0 4px;">0</span></button>
       <button class="hdeco" onclick="doLogout()">Déco.</button>
       <div id="syncStatus" style="font-size:10px;font-weight:700;min-width:52px;text-align:center;"></div>
     </div>
   </div>
   <div class="chkbar-sm"></div>
+
+  <!-- 🔔 Panneau des quarts rentrés par les chauffeurs (patron seulement) -->
+  <div id="notifOverlay" onclick="if(event.target===this)fermerNotifs()"
+       style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9998;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto;">
+    <div style="background:var(--s2);border:1px solid var(--brd2);border-radius:16px;padding:16px;max-width:460px;width:100%;margin-top:40px;box-shadow:0 24px 60px rgba(0,0,0,.6);">
+      <div id="notifCorps"></div>
+    </div>
+  </div>
 
   <!-- TAB BAR EN HAUT -->
   <div class="tbar" id="tbarEl">
@@ -2189,8 +2199,21 @@ function startRealtimeSync(){
   _unlistenFb=window._fb.listen((type,data)=>{
     if(!U)return; // not logged in, ignore
     if(type==='shifts'){
+      // Repérer les quarts vraiment nouveaux AVANT de fusionner, pour pouvoir
+      // alerter le patron sans le déranger pour ses propres saisies.
+      var _avant=S||{};
+      var _entrants=[];
+      if(U.role==='owner'){
+        for(var _k in data){
+          if(!_avant[_k]&&data[_k]&&data[_k].createdBy&&data[_k].createdBy!==U.name
+             &&!(window.TOMB&&window.TOMB.has&&window.TOMB.has('s',_k))){
+            _entrants.push(data[_k]);
+          }
+        }
+      }
       S=window.txpMerge(S,data,'s');
       lSaveLocal();
+      _entrants.forEach(function(sh){try{notifQuartRecu(sh);}catch(e){}});
       // Le local contient des quarts absents du cloud → renvoyer l'union (anti-perte)
       if(Object.keys(S).length>Object.keys(data).length)_schedulePushBack();
       _refreshAfterSync();
@@ -2242,6 +2265,7 @@ function _refreshAfterSync(){
     if(name==='exp')renderExp();
   }
   renderSoldeBar();
+  if(typeof renderNotifBadge==='function')renderNotifBadge();
 }
 
 // Renvoi de l'union vers Firebase (débounce anti-boucle)
@@ -2398,6 +2422,7 @@ async function doLogin(){
   ['tb-stats','tb-team','tb-set','tb-profit','tb-analyse','tb-paye','tb-audit2','tb-treso','tb-planveh'].forEach(t=>{
     document.getElementById(t).style.display=U.role==='owner'?'flex':'none';
   });
+  renderNotifBadge();
   document.getElementById('tb-sched').style.display='flex';
   document.getElementById('tb-fleet').style.display='flex';
   document.getElementById('tb-clean').style.display='flex';
@@ -2430,6 +2455,11 @@ async function doLogin(){
 }
 function doLogout(){
   audit('LOGOUT');U=null;
+  // 🔒 Effacer le panneau des notifications : il contient le profit du
+  // patron et l'appareil peut passer aux mains d'un chauffeur.
+  if(typeof viderNotifs==='function')viderNotifs();
+  var _nb=document.getElementById('notifBtn');
+  if(_nb)_nb.style.display='none';
   if(_lockT){clearTimeout(_lockT);_lockT=null;}
   document.getElementById('app').style.display='none';
   document.getElementById('loginScreen').style.display='block';
@@ -2805,6 +2835,152 @@ function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn
   const ok=document.getElementById('shiftOk');
   ok.style.display='block';setTimeout(function(){ok.style.display='none';},2000);
   resetForm();calc();renderWkList();renderSoldeBar();
+}
+
+// ═══════════════════════════════════════════════
+// 🔔 NOTIFICATIONS — QUARTS RENTRÉS PAR LES CHAUFFEURS
+// Le patron veut savoir, sans avoir à fouiller, dès qu'un chauffeur
+// rentre son quart : son taximètre, son salaire, et ce qu'il reste
+// au patron. Réservé au patron : un chauffeur ne voit jamais ça.
+// Le repère « déjà vu » est gardé sur l'appareil (localStorage) et
+// non dans la config synchronisée : chaque appareil suit son propre
+// fil, et deux téléphones ne se marchent pas dessus.
+// ═══════════════════════════════════════════════
+function _notifKey(){
+  return SK+'_notifvu_'+((U&&U.id)||'x');
+}
+function notifDernierVu(){
+  return pf(localStorage.getItem(_notifKey())||0);
+}
+function notifMarquerVu(){
+  try{localStorage.setItem(_notifKey(),String(Date.now()));}catch(e){}
+  renderNotifBadge();
+}
+// Les quarts rentrés par quelqu'un d'autre depuis la dernière visite
+function notifNouveaux(){
+  if(!U||U.role!=='owner')return [];
+  var vu=notifDernierVu();
+  return getArr().filter(function(sh){
+    if(!sh.ts)return false;
+    if(sh.createdBy===U.name)return false;      // ce que j'ai saisi moi-même
+    return new Date(sh.ts).getTime()>vu;
+  });
+}
+function renderNotifBadge(){
+  var b=document.getElementById('notifBtn');
+  if(!b)return;
+  if(!U||U.role!=='owner'){b.style.display='none';return;}
+  b.style.display='flex';
+  var n=notifNouveaux().length;
+  var pt=document.getElementById('notifPastille');
+  if(pt){
+    pt.textContent=n>9?'9+':String(n);
+    pt.style.display=n>0?'flex':'none';
+  }
+  b.style.opacity=n>0?'1':'.55';
+}
+// Une ligne par quart : taximètre, salaire, profit patron, écart
+function _notifLigne(sh){
+  var net=pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses);
+  var sal=calcSalary(sh), pro=calcOwnerProfit(sh), ec=calcEcart(sh);
+  var qd=new Date(sh.ts);
+  var quand=isNaN(qd)?'':qd.toLocaleString('fr-CA',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+  var h='<div style="background:rgba(0,0,0,.25);border:1px solid var(--brd);border-radius:12px;padding:12px;margin-bottom:9px;">'
+    +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:9px;">'
+    +'<div style="min-width:0;"><div style="font-size:13px;font-weight:900;color:var(--m3);overflow:hidden;text-overflow:ellipsis;">'
+    +(isOwnerShift(sh)?'👑 ':'🚗 ')+_cmpEsc(sh.driver||'?')+'</div>'
+    +'<div style="font-size:10px;color:var(--m2);">'+_cmpEsc(sh.vehicle||'')+' · '+_cmpEsc(sh.date||'')+(sh.periode?' · '+_cmpEsc(sh.periode):'')+'</div>'
+    +'<div style="font-size:9px;color:var(--m2);">rentré '+quand+'</div></div>'
+    +'<div style="text-align:right;flex-shrink:0;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Taximètre</div>'
+    +'<div style="font-size:16px;font-weight:900;color:var(--gold);">'+fm(net)+'</div></div>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'
+    +'<div style="background:rgba(0,0,0,.3);border-radius:9px;padding:8px;text-align:center;">'
+    +'<div style="font-size:9px;color:var(--m2);font-weight:700;">💼 Salaire</div>'
+    +'<div style="font-size:14px;font-weight:900;color:var(--neon);">'+fm(sal)+'</div></div>'
+    +'<div style="background:rgba(245,200,0,.1);border:1px solid rgba(245,200,0,.3);border-radius:9px;padding:8px;text-align:center;">'
+    +'<div style="font-size:9px;color:var(--gold);font-weight:800;">✅ Mon profit</div>'
+    +'<div style="font-size:15px;font-weight:900;color:'+(pro>=0?'var(--gold)':'var(--red)')+';">'+fm(pro)+'</div></div>'
+    +'</div>';
+  if(Math.abs(ec)>0.009){
+    h+='<div style="margin-top:7px;text-align:center;font-size:11px;font-weight:900;color:'+(ec>0?'var(--red)':'var(--pur)')+';">'
+      +(ec>0?'⚠️ Manque '+fm(ec):'💰 Surplus '+fm(-ec))+'</div>';
+  }
+  return h+'</div>';
+}
+function viderNotifs(){
+  var c=document.getElementById('notifCorps');
+  if(c)c.innerHTML='';
+  var ov=document.getElementById('notifOverlay');
+  if(ov)ov.style.display='none';
+}
+function ouvrirNotifs(){
+  // 🔒 Le panneau contient le profit du patron : personne d'autre n'y touche,
+  // et on efface ce qui restait affiché si ce n'est pas lui.
+  if(!U||U.role!=='owner'){viderNotifs();return;}
+  var nouveaux=notifNouveaux();
+  // À défaut de nouveautés, montrer les derniers quarts rentrés par les chauffeurs
+  var liste=nouveaux;
+  var titre='🔔 '+nouveaux.length+' quart'+(nouveaux.length>1?'s':'')+' rentré'+(nouveaux.length>1?'s':'');
+  if(!nouveaux.length){
+    liste=getArr().filter(function(sh){return sh.createdBy&&sh.createdBy!==U.name;}).slice(0,5);
+    titre='🔔 Rien de nouveau';
+  }
+  var totPro=liste.reduce(function(a,sh){return a+calcOwnerProfit(sh);},0);
+  var totNet=liste.reduce(function(a,sh){return a+(pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses));},0);
+  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;">'
+    +'<div style="font-size:15px;font-weight:900;color:var(--m3);">'+titre+'</div>'
+    +'<button onclick="fermerNotifs()" style="background:rgba(255,255,255,.08);border:1px solid var(--brd2);color:var(--m3);border-radius:9px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer;">✕</button>'
+    +'</div>';
+  if(!liste.length){
+    h+='<div style="font-size:12px;color:var(--m2);line-height:1.6;">Aucun quart rentré par un chauffeur pour l\'instant. Dès qu\'un chauffeur enregistre son quart sur son téléphone, il apparaît ici avec son taximètre et ton profit.</div>';
+  }else{
+    if(nouveaux.length){
+      h+='<div style="background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.3);border-radius:12px;padding:11px;margin-bottom:11px;">'
+        +'<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--m2);font-weight:700;margin-bottom:4px;"><span>Taximètre cumulé</span><span style="color:var(--gold);font-weight:900;">'+fm(totNet)+'</span></div>'
+        +'<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;"><span style="color:var(--gold);">✅ Mon profit sur ces quarts</span><span style="color:'+(totPro>=0?'var(--gold)':'var(--red)')+';">'+fm(totPro)+'</span></div>'
+        +'</div>';
+    }else{
+      h+='<div style="font-size:11px;color:var(--m2);margin-bottom:10px;">Voici les derniers quarts rentrés par tes chauffeurs.</div>';
+    }
+    liste.forEach(function(sh){h+=_notifLigne(sh);});
+  }
+  // Alerte système : seulement si l'appareil ne l'a pas encore accordée
+  if(typeof Notification!=='undefined'&&Notification.permission!=='granted'){
+    h+='<button onclick="activerNotifsSysteme()" style="width:100%;background:rgba(96,165,250,.18);border:1.5px solid rgba(96,165,250,.45);color:var(--blu);border-radius:11px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;margin-top:4px;">🔔 M\'alerter sur ce téléphone</button>'
+      +'<div style="font-size:9px;color:var(--m2);line-height:1.5;margin-top:6px;">L\'alerte s\'affiche quand TaxiPro est ouvert ou en arrière-plan sur ce téléphone.</div>';
+  }
+  if(nouveaux.length){
+    h+='<button onclick="notifMarquerVu();fermerNotifs();" style="width:100%;background:rgba(57,211,83,.16);border:1.5px solid rgba(57,211,83,.4);color:var(--grn);border-radius:11px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;margin-top:8px;">✓ J\'ai vu</button>';
+  }
+  var ov=document.getElementById('notifOverlay');
+  document.getElementById('notifCorps').innerHTML=h;
+  ov.style.display='flex';
+}
+function fermerNotifs(){
+  viderNotifs();
+  renderNotifBadge();
+}
+function activerNotifsSysteme(){
+  if(typeof Notification==='undefined'){alert('Ce navigateur ne gère pas les alertes.');return;}
+  Notification.requestPermission().then(function(p){
+    if(p==='granted'){showToastGrn('Alertes activées');ouvrirNotifs();}
+    else alert('Alertes refusées. Tu peux les réactiver dans les réglages du navigateur.');
+  });
+}
+// Appelé quand un quart arrive d'un autre appareil pendant que l'app est ouverte
+function notifQuartRecu(sh){
+  if(!U||U.role!=='owner')return;
+  var pro=calcOwnerProfit(sh), ec=calcEcart(sh);
+  var txt=(sh.driver||'Un chauffeur')+' · '+fm(pro)+' pour toi'
+    +(Math.abs(ec)>0.009?(ec>0?' · manque '+fm(ec):' · surplus '+fm(-ec)):'');
+  showToastGrn('🔔 '+txt);
+  renderNotifBadge();
+  try{
+    if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+      new Notification('Quart rentré — '+(sh.vehicle||''),{body:txt,tag:'txp-'+sh.id});
+    }
+  }catch(e){}
 }
 
 function showToastGrn(msg){
@@ -10021,7 +10197,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-30-v86-PREVISION-ESSENCE';
+var APP_VERSION = '2026-07-31-v87-NOTIF-QUARTS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
