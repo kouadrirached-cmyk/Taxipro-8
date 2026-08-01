@@ -2850,7 +2850,15 @@ function _notifKey(){
   return SK+'_notifvu_'+((U&&U.id)||'x');
 }
 function notifDernierVu(){
-  return pf(localStorage.getItem(_notifKey())||0);
+  var v=localStorage.getItem(_notifKey());
+  if(v===null||v===undefined||v===''){
+    // Première fois sur cet appareil : on part d'aujourd'hui, sinon le
+    // patron reçoit d'un coup tous les quarts jamais rentrés depuis le début.
+    var maintenant=Date.now();
+    try{localStorage.setItem(_notifKey(),String(maintenant));}catch(e){}
+    return maintenant;
+  }
+  return pf(v);
 }
 function notifMarquerVu(){
   try{localStorage.setItem(_notifKey(),String(Date.now()));}catch(e){}
@@ -2928,9 +2936,14 @@ function ouvrirNotifs(){
   }
   var totPro=liste.reduce(function(a,sh){return a+calcOwnerProfit(sh);},0);
   var totNet=liste.reduce(function(a,sh){return a+(pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses));},0);
-  var h='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;">'
+  var MAX=25, trop=Math.max(0,liste.length-MAX);
+  var affichee=liste.slice(0,MAX);
+  var h='<div style="position:sticky;top:-16px;background:var(--s2);padding:4px 0 10px;margin:-4px 0 4px;z-index:2;">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
     +'<div style="font-size:15px;font-weight:900;color:var(--m3);">'+titre+'</div>'
-    +'<button onclick="fermerNotifs()" style="background:rgba(255,255,255,.08);border:1px solid var(--brd2);color:var(--m3);border-radius:9px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer;">✕</button>'
+    +'<button onclick="fermerNotifs()" style="background:rgba(255,255,255,.08);border:1px solid var(--brd2);color:var(--m3);border-radius:9px;padding:7px 12px;font-size:12px;font-weight:800;cursor:pointer;flex-shrink:0;">✕</button>'
+    +'</div>'
+    +(nouveaux.length?'<button onclick="notifMarquerVu();fermerNotifs();" style="width:100%;background:rgba(57,211,83,.18);border:1.5px solid rgba(57,211,83,.45);color:var(--grn);border-radius:11px;padding:11px;font-size:12px;font-weight:800;cursor:pointer;margin-top:9px;">✓ Tout marquer comme vu</button>':'')
     +'</div>';
   if(!liste.length){
     h+='<div style="font-size:12px;color:var(--m2);line-height:1.6;">Aucun quart rentré par un chauffeur pour l\'instant. Dès qu\'un chauffeur enregistre son quart sur son téléphone, il apparaît ici avec son taximètre et ton profit.</div>';
@@ -2943,7 +2956,12 @@ function ouvrirNotifs(){
     }else{
       h+='<div style="font-size:11px;color:var(--m2);margin-bottom:10px;">Voici les derniers quarts rentrés par tes chauffeurs.</div>';
     }
-    liste.forEach(function(sh){h+=_notifLigne(sh);});
+    affichee.forEach(function(sh){h+=_notifLigne(sh);});
+    if(trop>0){
+      h+='<div style="text-align:center;font-size:11px;color:var(--m2);padding:8px 0 4px;line-height:1.5;">'
+        +'… et '+trop+' quart'+(trop>1?'s':'')+' plus ancien'+(trop>1?'s':'')+'.<br>'
+        +'<span style="font-size:10px;">Tout est gardé dans 📋 Historique.</span></div>';
+    }
   }
   // Alerte système : seulement si l'appareil ne l'a pas encore accordée
   if(typeof Notification!=='undefined'&&Notification.permission!=='granted'){
@@ -2951,7 +2969,7 @@ function ouvrirNotifs(){
       +'<div style="font-size:9px;color:var(--m2);line-height:1.5;margin-top:6px;">L\'alerte s\'affiche quand TaxiPro est ouvert ou en arrière-plan sur ce téléphone.</div>';
   }
   if(nouveaux.length){
-    h+='<button onclick="notifMarquerVu();fermerNotifs();" style="width:100%;background:rgba(57,211,83,.16);border:1.5px solid rgba(57,211,83,.4);color:var(--grn);border-radius:11px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;margin-top:8px;">✓ J\'ai vu</button>';
+    h+='<button onclick="notifMarquerVu();fermerNotifs();" style="width:100%;background:rgba(57,211,83,.16);border:1.5px solid rgba(57,211,83,.4);color:var(--grn);border-radius:11px;padding:12px;font-size:12px;font-weight:800;cursor:pointer;margin-top:8px;">✓ Tout marquer comme vu</button>';
   }
   var ov=document.getElementById('notifOverlay');
   document.getElementById('notifCorps').innerHTML=h;
@@ -10197,7 +10215,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-07-31-v87-NOTIF-QUARTS';
+var APP_VERSION = '2026-08-01-v88-NOTIF-EFFACER';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
