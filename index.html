@@ -2927,13 +2927,12 @@ function ouvrirNotifs(){
   // et on efface ce qui restait affiché si ce n'est pas lui.
   if(!U||U.role!=='owner'){viderNotifs();return;}
   var nouveaux=notifNouveaux();
-  // À défaut de nouveautés, montrer les derniers quarts rentrés par les chauffeurs
+  // Rien de nouveau = panneau vide. Ne PAS rappeler les derniers quarts :
+  // une liste pleine donne l'impression que rien n'a été effacé.
   var liste=nouveaux;
-  var titre='🔔 '+nouveaux.length+' quart'+(nouveaux.length>1?'s':'')+' rentré'+(nouveaux.length>1?'s':'');
-  if(!nouveaux.length){
-    liste=getArr().filter(function(sh){return sh.createdBy&&sh.createdBy!==U.name;}).slice(0,5);
-    titre='🔔 Rien de nouveau';
-  }
+  var titre=nouveaux.length
+    ? '🔔 '+nouveaux.length+' quart'+(nouveaux.length>1?'s':'')+' rentré'+(nouveaux.length>1?'s':'')
+    : '🔔 Rien de nouveau';
   var totPro=liste.reduce(function(a,sh){return a+calcOwnerProfit(sh);},0);
   var totNet=liste.reduce(function(a,sh){return a+(pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses));},0);
   var MAX=25, trop=Math.max(0,liste.length-MAX);
@@ -2946,15 +2945,18 @@ function ouvrirNotifs(){
     +(nouveaux.length?'<button onclick="notifMarquerVu();fermerNotifs();" style="width:100%;background:rgba(57,211,83,.18);border:1.5px solid rgba(57,211,83,.45);color:var(--grn);border-radius:11px;padding:11px;font-size:12px;font-weight:800;cursor:pointer;margin-top:9px;">✓ Tout marquer comme vu</button>':'')
     +'</div>';
   if(!liste.length){
-    h+='<div style="font-size:12px;color:var(--m2);line-height:1.6;">Aucun quart rentré par un chauffeur pour l\'instant. Dès qu\'un chauffeur enregistre son quart sur son téléphone, il apparaît ici avec son taximètre et ton profit.</div>';
+    h+='<div style="text-align:center;padding:22px 6px 8px;">'
+      +'<div style="font-size:34px;line-height:1;margin-bottom:10px;">✅</div>'
+      +'<div style="font-size:13px;font-weight:800;color:var(--m3);margin-bottom:6px;">Tu es à jour</div>'
+      +'<div style="font-size:11px;color:var(--m2);line-height:1.6;">Dès qu\'un chauffeur rentre son quart, il apparaît ici avec son taximètre et ton profit.</div>'
+      +'<button onclick="fermerNotifs();goPage(\'hist\');" style="background:rgba(255,255,255,.06);border:1px solid var(--brd2);color:var(--m3);border-radius:10px;padding:10px 16px;font-size:11px;font-weight:800;cursor:pointer;margin-top:14px;">📋 Voir tout l\'historique</button>'
+      +'</div>';
   }else{
     if(nouveaux.length){
       h+='<div style="background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.3);border-radius:12px;padding:11px;margin-bottom:11px;">'
         +'<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--m2);font-weight:700;margin-bottom:4px;"><span>Taximètre cumulé</span><span style="color:var(--gold);font-weight:900;">'+fm(totNet)+'</span></div>'
         +'<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;"><span style="color:var(--gold);">✅ Mon profit sur ces quarts</span><span style="color:'+(totPro>=0?'var(--gold)':'var(--red)')+';">'+fm(totPro)+'</span></div>'
         +'</div>';
-    }else{
-      h+='<div style="font-size:11px;color:var(--m2);margin-bottom:10px;">Voici les derniers quarts rentrés par tes chauffeurs.</div>';
     }
     affichee.forEach(function(sh){h+=_notifLigne(sh);});
     if(trop>0){
@@ -10215,7 +10217,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-01-v88-NOTIF-EFFACER';
+var APP_VERSION = '2026-08-01-v89-NOTIF-VIDE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
