@@ -2914,6 +2914,27 @@ function _notifLigne(sh){
     h+='<div style="margin-top:7px;text-align:center;font-size:11px;font-weight:900;color:'+(ec>0?'var(--red)':'var(--pur)')+';">'
       +(ec>0?'⚠️ Manque '+fm(ec):'💰 Surplus '+fm(-ec))+'</div>';
   }
+  // Le calcul en toutes lettres : sans ça, impossible de recoller les
+  // chiffres soi-même, et le patron se demande où est passé son 60 %.
+  var drv=getDrv(sh.driver);
+  var pct=drv?pf(drv.pct):pf(sh.drvPct);
+  var ess=pf(sh.essence), pour=pf(sh.pourboire);
+  var partPatron=isOwnerShift(sh)?net:net*(1-pct/100);
+  var det='<b>'+fm(net)+'</b>'
+    +(isOwnerShift(sh)?' <span style="color:var(--m2);">(tu conduis : 100 %)</span>'
+                      :' × <b>'+(100-pct)+' %</b> = <b>'+fm(partPatron)+'</b>');
+  if(ess>0.005)det+=' − ⛽ <b>'+fm(ess)+'</b>';
+  det+=' = <b style="color:var(--gold);">'+fm(pro)+'</b>';
+  h+='<div style="margin-top:8px;padding-top:7px;border-top:1px solid var(--brd);font-size:10px;color:var(--m2);line-height:1.7;">'
+    +'✅ '+det;
+  if(!isOwnerShift(sh)){
+    var detS=fm(net)+' × <b>'+pct+' %</b> = <b>'+fm(net*pct/100)+'</b>';
+    if(pour>0.005)detS+=' + 💵 pourboire <b>'+fm(pour)+'</b>';
+    if(ess>0.005&&sh.essencePar==='chauf')detS+=' + ⛽ essence avancée <b>'+fm(ess)+'</b>';
+    detS+=' = <b style="color:var(--neon);">'+fm(sal)+'</b>';
+    h+='<br>💼 '+detS;
+  }
+  h+='</div>';
   return h+'</div>';
 }
 function viderNotifs(){
@@ -10313,7 +10334,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-01-v90-BILAN-EVOLUTION';
+var APP_VERSION = '2026-08-02-v91-NOTIF-DETAIL-CALCUL';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
