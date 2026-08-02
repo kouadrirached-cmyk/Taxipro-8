@@ -7064,6 +7064,9 @@ function renderProfit(){
 
   let html='';
 
+  // ⛽ Semaine par voiture, essence sortie à la fin
+  html+=hebdoHTML();
+
   // Fixed costs info box
   html+='<div class="card" style="margin-bottom:13px;">'
     +'<div class="ctit"><span><span class="ci">🏢</span>Coûts fixes — '+nbVeh+' voiture'+(nbVeh>1?'s':'')+'</span></div>'
@@ -9348,6 +9351,110 @@ function calcBilan(){
 // mois est exactement celle de la page 💹 Profit, pour que les deux
 // écrans ne se contredisent jamais.
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+// ⛽ DÉCOMPTE HEBDOMADAIRE PAR VOITURE
+// Le carburant ne se consomme pas dans le quart où il est acheté :
+// un chauffeur fait le plein, le suivant roule avec. Attribuer
+// l'essence à un quart précis fausse donc CE quart-là. Ici on la
+// sort une seule fois, à la fin de la semaine, sur la voiture qui
+// l'a réellement brûlée. Le total, lui, est identique — c'est la
+// même somme, regroupée autrement.
+// ═══════════════════════════════════════════════
+function semaineKey(ds){
+  var ws=gwS(parseLocalDate(ds));
+  return ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
+}
+function semaineLbl(key){
+  var p=key.split('-');
+  var ws=new Date(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2]));
+  var we=new Date(ws); we.setDate(we.getDate()+6);
+  var f=function(d){return d.toLocaleDateString('fr-CA',{day:'numeric',month:'short'});};
+  return f(ws)+' au '+f(we);
+}
+// Regroupe les quarts par semaine puis par voiture
+function hebdoVehicules(nbSemaines){
+  var lim=nbSemaines||8;
+  var sem={};
+  getArr().forEach(function(sh){
+    if(!sh.date)return;
+    var k=semaineKey(sh.date);
+    if(!sem[k])sem[k]={key:k,lbl:semaineLbl(k),veh:{}};
+    var v=sh.vehicle||'—';
+    if(!sem[k].veh[v])sem[k].veh[v]={nom:v,net:0,part:0,salaires:0,essence:0,quarts:0};
+    var c=sem[k].veh[v];
+    var net=pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses);
+    var ess=pf(sh.essence);
+    c.net+=net;
+    // Part du patron AVANT le carburant : on remet l'essence que
+    // calcOwnerProfit avait déjà retirée, pour la ressortir plus bas.
+    c.part+=calcOwnerProfit(sh)+ess;
+    c.salaires+=calcSalary(sh);
+    c.essence+=ess;
+    c.quarts++;
+  });
+  return Object.keys(sem).sort().reverse().slice(0,lim).map(function(k){
+    var s=sem[k];
+    var lignes=Object.keys(s.veh).sort().map(function(v){
+      var c=s.veh[v];
+      c.profit=c.part-c.essence;
+      c.essKm=0;
+      return c;
+    });
+    var tot=lignes.reduce(function(a,c){
+      a.net+=c.net;a.part+=c.part;a.salaires+=c.salaires;
+      a.essence+=c.essence;a.profit+=c.profit;a.quarts+=c.quarts;return a;
+    },{net:0,part:0,salaires:0,essence:0,profit:0,quarts:0});
+    return {key:k,lbl:s.lbl,vehicules:lignes,total:tot};
+  });
+}
+function hebdoHTML(){
+  var sem=hebdoVehicules(8);
+  if(!sem.length)return '';
+  var ouvert=window._hebdoOpen===undefined?true:!!window._hebdoOpen;
+  var h='<div class="card" style="border-color:rgba(255,107,53,.32);">'
+    +'<div class="ctit" onclick="window._hebdoOpen=!(window._hebdoOpen===undefined?true:window._hebdoOpen);renderProfit();" style="cursor:pointer;">'
+    +'<span><span class="ci">⛽</span>Semaine par voiture — essence déduite à la fin</span>'
+    +'<span style="font-size:11px;color:var(--m2);font-weight:800;">'+(ouvert?'▾':'▸')+'</span></div>';
+  if(!ouvert)return h+'</div>';
+  h+='<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:12px;">'
+    +'Un chauffeur fait le plein, le suivant roule avec : compter l\'essence sur un quart précis fausse ce quart-là. '
+    +'Ici elle sort <b>une seule fois par semaine</b>, sur la voiture qui l\'a brûlée.</div>';
+  sem.forEach(function(w,iw){
+    var t=w.total;
+    h+='<div style="border:1px solid var(--brd);border-radius:12px;padding:11px;margin-bottom:10px;background:rgba(0,0,0,.2);">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:9px;">'
+      +'<div><div style="font-size:12px;font-weight:900;color:var(--m3);">'+(iw===0?'📆 Cette semaine':'📆 '+_cmpEsc(w.lbl))+'</div>'
+      +'<div style="font-size:9px;color:var(--m2);">'+(iw===0?_cmpEsc(w.lbl)+' · ':'')+t.quarts+' quart'+(t.quarts>1?'s':'')+' · '+w.vehicules.length+' voiture'+(w.vehicules.length>1?'s':'')+'</div></div>'
+      +'<div style="text-align:right;flex-shrink:0;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Profit entreprise</div>'
+      +'<div style="font-size:19px;font-weight:900;color:'+(t.profit>=0?'var(--gold)':'var(--red)')+';">'+fm(t.profit)+'</div></div>'
+      +'</div>';
+    w.vehicules.forEach(function(c){
+      h+='<div style="border-top:1px solid var(--brd);padding:9px 0 5px;">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+        +'<span style="font-size:12px;font-weight:800;color:var(--m3);overflow:hidden;text-overflow:ellipsis;">🚗 '+_cmpEsc(c.nom)+'</span>'
+        +'<span style="font-size:14px;font-weight:900;color:'+(c.profit>=0?'var(--gold)':'var(--red)')+';flex-shrink:0;">'+fm(c.profit)+'</span></div>'
+        +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;font-size:9px;">'
+        +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Taximètre <b style="color:var(--gold);">'+fm(c.net)+'</b></span>'
+        +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Ta part <b style="color:var(--m3);">'+fm(c.part)+'</b></span>'
+        +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Salaires <b style="color:var(--neon);">'+fm(c.salaires)+'</b></span>'
+        +'<span style="background:rgba(255,107,53,.14);border:1px solid rgba(255,107,53,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">⛽ Essence <b style="color:var(--neon);">−'+fm(c.essence)+'</b></span>'
+        +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">'+c.quarts+' quart'+(c.quarts>1?'s':'')+'</span>'
+        +'</div></div>';
+    });
+    // Récapitulatif de la semaine, à l'échelle de l'entreprise
+    h+='<div style="border-top:2px solid var(--brd2);margin-top:7px;padding-top:9px;font-size:11px;">'
+      +'<div style="display:flex;justify-content:space-between;padding:2px 0;"><span style="color:var(--m2);">🔢 Taximètre de la semaine</span><span style="font-weight:900;color:var(--gold);">'+fm(t.net)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;padding:2px 0;"><span style="color:var(--m2);">💼 Salaires versés</span><span style="font-weight:900;color:var(--neon);">−'+fm(t.salaires)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;padding:2px 0;"><span style="color:var(--m2);">⛽ Essence, toutes voitures</span><span style="font-weight:900;color:var(--neon);">−'+fm(t.essence)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;padding:6px 0 0;margin-top:4px;border-top:1px solid var(--brd);">'
+      +'<span style="font-weight:900;color:var(--gold);">✅ Profit entreprise</span>'
+      +'<span style="font-weight:900;font-size:15px;color:'+(t.profit>=0?'var(--gold)':'var(--red)')+';">'+fm(t.profit)+'</span></div>'
+      +'</div></div>';
+  });
+  h+='<div style="font-size:9px;color:var(--m2);line-height:1.6;">ℹ️ Ce profit est celui de l\'exploitation : l\'assurance et la location des voitures ne sont pas encore retirées, elles sont mensuelles et apparaissent plus bas.</div>';
+  return h+'</div>';
+}
+
 function resultatMensuel(){
   var fx=fixedCostsMo().total;
   var mois={};
@@ -10334,7 +10441,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-02-v91-NOTIF-DETAIL-CALCUL';
+var APP_VERSION = '2026-08-02-v92-HEBDO-VOITURE-ESSENCE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
