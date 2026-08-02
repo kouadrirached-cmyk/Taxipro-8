@@ -8736,6 +8736,7 @@ function renderTreso(){
 
   // ── 📋 BILAN en premier : c'est le résumé, il doit être visible sans défiler ──
   html+=bilanHTML();
+  html+=evolutionHTML();
 
   // ── Caisse séparée : bandeau + suivi par chauffeur ──
   var sep=tresoCashSepare();
@@ -9315,6 +9316,101 @@ function calcBilan(){
     totMain:totMain,totCreances:totCreances,totBiens:totBiens,
     totActif:totMain+totCreances+totBiens,totPassif:totPassif,
     valeurNette:(totMain+totCreances+totBiens)-totPassif};
+}
+
+// ═══════════════════════════════════════════════
+// 📈 ÉVOLUTION DU BILAN, MOIS PAR MOIS
+// Les soldes de comptes sont des valeurs d'AUJOURD'HUI : l'app ne
+// garde pas de photo du passé. On reconstitue donc la valeur nette de
+// chaque fin de mois en remontant le temps depuis la valeur actuelle,
+// en retirant le résultat de chaque mois écoulé. L'arithmétique du
+// mois est exactement celle de la page 💹 Profit, pour que les deux
+// écrans ne se contredisent jamais.
+// ═══════════════════════════════════════════════
+function resultatMensuel(){
+  var fx=fixedCostsMo().total;
+  var mois={};
+  getArr().forEach(function(sh){
+    if(!sh.date)return;
+    var d=parseLocalDate(sh.date);
+    var k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    if(!mois[k])mois[k]={key:k,shifts:[],dep:0};
+    mois[k].shifts.push(sh);
+  });
+  getExpArr().forEach(function(e){
+    if(!e.date)return;
+    var k=String(e.date).slice(0,7);
+    if(!mois[k])mois[k]={key:k,shifts:[],dep:0};
+    mois[k].dep+=pf(e.amount);
+  });
+  return Object.keys(mois).sort().map(function(k){
+    var m=mois[k];
+    var recette=m.shifts.reduce(function(a,sh){return a+pf(sh.recette);},0);
+    var salaires=m.shifts.reduce(function(a,sh){return a+calcSalary(sh);},0);
+    var essence=m.shifts.reduce(function(a,sh){return a+pf(sh.essence);},0);
+    var net=recette-salaires-essence-m.dep-fx;
+    return {key:k,lbl:moisLbl(k),recette:recette,salaires:salaires,essence:essence,
+      depenses:m.dep,fixes:fx,net:net,nbQuarts:m.shifts.length};
+  });
+}
+// Valeur nette reconstituée à la fin de chaque mois
+function bilanEvolution(){
+  var lignes=resultatMensuel();
+  if(!lignes.length)return [];
+  var nette=calcBilan().valeurNette;
+  // On part d'aujourd'hui et on remonte : la valeur de fin du mois M-1
+  // est celle d'aujourd'hui moins tout ce qui a été gagné depuis.
+  for(var i=lignes.length-1;i>=0;i--){
+    lignes[i].nette=nette;              // valeur à la fin de ce mois
+    nette=nette-lignes[i].net;          // avant ce mois
+  }
+  lignes.forEach(function(l,i){
+    l.avant=i>0?lignes[i-1].nette:(l.nette-l.net);
+    l.variation=l.nette-l.avant;
+  });
+  return lignes.reverse();              // le plus récent en premier
+}
+function evolutionHTML(){
+  var lignes=bilanEvolution();
+  if(!lignes.length)return '';
+  var ouvert=!!window._evoOpen;
+  var h='<div style="background:rgba(10,8,0,.45);border:1px solid var(--brd);border-radius:13px;padding:12px;margin-bottom:14px;">'
+    +'<div onclick="window._evoOpen=!window._evoOpen;renderTreso();" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+    +'<span style="font-size:12px;font-weight:900;color:var(--gold);">📈 Évolution mois par mois</span>'
+    +'<span style="font-size:11px;color:var(--m2);font-weight:800;">'+(ouvert?'▾ masquer':'▸ '+lignes.length+' mois')+'</span>'
+    +'</div>';
+  if(!ouvert)return h+'</div>';
+  h+='<div style="font-size:9px;color:var(--m2);line-height:1.5;margin:9px 0 11px;">Valeur nette reconstituée à la fin de chaque mois, à partir de ta valeur d\'aujourd\'hui et du résultat de chaque mois.</div>';
+  lignes.forEach(function(l){
+    var monte=l.net>=0;
+    h+='<div style="border-top:1px solid var(--brd);padding:10px 0;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+      +'<div style="min-width:0;"><div style="font-size:12px;font-weight:800;color:var(--m3);text-transform:capitalize;">'+_cmpEsc(l.lbl)+'</div>'
+      +'<div style="font-size:9px;color:var(--m2);">'+l.nbQuarts+' quart'+(l.nbQuarts>1?'s':'')+'</div></div>'
+      +'<div style="text-align:right;flex-shrink:0;">'
+      +'<div style="font-size:9px;color:var(--m2);font-weight:700;">Valeur nette</div>'
+      +'<div style="font-size:15px;font-weight:900;color:'+(l.nette>=0?'var(--gold)':'var(--red)')+';">'+fm(l.nette)+'</div>'
+      +'<div style="font-size:10px;font-weight:900;color:'+(monte?'var(--grn)':'var(--red)')+';">'+(monte?'▲ +':'▼ −')+fm(Math.abs(l.net)).replace('-','')+'</div>'
+      +'</div></div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;font-size:9px;">'
+      +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Recettes <b style="color:var(--gold);">'+fm(l.recette)+'</b></span>'
+      +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Salaires <b style="color:var(--neon);">'+fm(l.salaires)+'</b></span>'
+      +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Essence <b style="color:var(--red);">'+fm(l.essence)+'</b></span>'
+      +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Dépenses <b style="color:var(--red);">'+fm(l.depenses)+'</b></span>'
+      +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Coûts fixes <b style="color:var(--red);">'+fm(l.fixes)+'</b></span>'
+      +'</div></div>';
+  });
+  // Lecture d'ensemble : où en suis-je sur toute la période ?
+  var total=lignes.reduce(function(a,l){return a+l.net;},0);
+  var moy=total/lignes.length;
+  var meilleur=lignes.reduce(function(a,l){return l.net>a.net?l:a;},lignes[0]);
+  var pire=lignes.reduce(function(a,l){return l.net<a.net?l:a;},lignes[0]);
+  h+='<div style="border-top:2px solid var(--brd2);margin-top:6px;padding-top:11px;font-size:11px;line-height:1.6;color:var(--m3);">'
+    +'💡 Sur '+lignes.length+' mois, ta valeur nette a '+(total>=0?'monté de <b style="color:var(--grn);">':'baissé de <b style="color:var(--red);">')+fm(Math.abs(total))+'</b>, soit <b>'+fm(moy)+' par mois</b> en moyenne.<br>'
+    +'Meilleur mois : <b style="text-transform:capitalize;">'+_cmpEsc(meilleur.lbl)+'</b> ('+fm(meilleur.net)+') · '
+    +'Plus dur : <b style="text-transform:capitalize;">'+_cmpEsc(pire.lbl)+'</b> ('+fm(pire.net)+')'
+    +'</div>';
+  return h+'</div>';
 }
 
 function bilanHTML(){
@@ -10217,7 +10313,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-01-v89-NOTIF-VIDE';
+var APP_VERSION = '2026-08-01-v90-BILAN-EVOLUTION';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
