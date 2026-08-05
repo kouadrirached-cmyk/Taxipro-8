@@ -8760,6 +8760,8 @@ function renderTreso(){
 
   // ── 📋 BILAN en premier : c'est le résumé, il doit être visible sans défiler ──
   html+=bilanHTML();
+  html+=investirHTML();
+  html+=taxesHTML();
   html+=evolutionHTML();
 
   // ── Caisse séparée : bandeau + suivi par chauffeur ──
@@ -9334,12 +9336,292 @@ function calcBilan(){
   if(sal.total>0.005)dettes.push({icon:'💼',name:'Salaires à payer',v:sal.total,detail:sal.detail});
   var imp=depensesImpayees();
   if(imp.total>0.005)dettes.push({icon:'💸',name:'Factures non payées',v:imp.total,detail:imp.detail});
+  // Les taxes encaissées pour Revenu Québec ne m'appartiennent pas
+  var tax=(typeof taxesDues==='function')?taxesDues():{total:0,detail:[]};
+  if(tax.total>0.005)dettes.push({icon:'🧾',name:'TPS et TVQ à remettre',v:tax.total,detail:tax.detail});
   var totPassif=dettes.reduce(function(a,x){return a+x.v;},0);
 
   return {enMain:enMain,creances:creances,biens:biens,dettes:dettes,
     totMain:totMain,totCreances:totCreances,totBiens:totBiens,
     totActif:totMain+totCreances+totBiens,totPassif:totPassif,
     valeurNette:(totMain+totCreances+totBiens)-totPassif};
+}
+
+// ═══════════════════════════════════════════════
+// 🧾 TPS ET TVQ — CE QUE JE DOIS À REVENU QUÉBEC
+// Le taximètre facture taxes incluses : chaque course encaissée
+// contient 14,975 % qui ne m'appartiennent pas. En face, la taxe
+// payée sur l'essence, les réparations et la location se récupère
+// (CTI et RTI). Le net des deux est ce qu'il faut remettre.
+// L'assurance est EXONÉRÉE : aucune taxe à récupérer dessus.
+// La dette n'entre au bilan que si le patron confirme être inscrit.
+// ═══════════════════════════════════════════════
+var CAT_SANS_TAXE = ['Assurance'];
+function taxeParams(){
+  var t=(C&&C.taxes)||{};
+  return {
+    inscrit: t.inscrit===true,                                  // opt-in explicite
+    tps: t.tps!==undefined?pf(t.tps):5,
+    tvq: t.tvq!==undefined?pf(t.tvq):9.975,
+    periode: t.periode||'trimestre',
+    depTTC: t.depTTC!==false,                                   // dépenses saisies taxes incluses
+    location: t.location!==false,                               // récupérer la taxe sur la location
+    remis: t.remis||{}
+  };
+}
+function saveTaxeParams(o){
+  C.taxes=Object.assign({},C.taxes||{},o);
+  lSave();
+  if(typeof renderTreso==='function')renderTreso();
+}
+// Clé et libellé de la période fiscale d'une date
+function taxePeriodeKey(ds,mode){
+  var d=parseLocalDate(ds), an=d.getFullYear(), mo=d.getMonth();
+  if(mode==='mois')return an+'-'+String(mo+1).padStart(2,'0');
+  if(mode==='annee')return String(an);
+  return an+'-T'+(Math.floor(mo/3)+1);
+}
+function taxePeriodeLbl(k){
+  if(/^\d{4}$/.test(k))return 'Année '+k;
+  if(/^\d{4}-T\d$/.test(k)){
+    var p=k.split('-T'), t=parseInt(p[1]);
+    var mois=[['janvier','mars'],['avril','juin'],['juillet','septembre'],['octobre','décembre']][t-1];
+    return t+'ᵉ trimestre '+p[0]+' ('+mois[0]+' à '+mois[1]+')';
+  }
+  return moisLbl(k);
+}
+// Nombre de mois couverts par une période, pour étaler la location
+function taxeNbMois(k){
+  if(/^\d{4}$/.test(k))return 12;
+  if(/^\d{4}-T\d$/.test(k))return 3;
+  return 1;
+}
+function taxesPeriodes(){
+  var p=taxeParams();
+  var diviseur=100+p.tps+p.tvq;                 // un montant TTC contient ce total
+  var per={};
+  function bloc(k){
+    if(!per[k])per[k]={key:k,lbl:taxePeriodeLbl(k),ttc:0,achats:0,exonere:0,quarts:0};
+    return per[k];
+  }
+  getArr().forEach(function(sh){
+    if(!sh.date)return;
+    var b=bloc(taxePeriodeKey(sh.date,p.periode));
+    b.ttc+=pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses);
+    b.achats+=pf(sh.essence);                   // le carburant donne droit au crédit
+    b.quarts++;
+  });
+  getExpArr().forEach(function(e){
+    if(!e.date)return;
+    var b=bloc(taxePeriodeKey(e.date,p.periode));
+    if(CAT_SANS_TAXE.indexOf(e.category)>=0)b.exonere+=pf(e.amount);
+    else b.achats+=pf(e.amount);
+  });
+  var fc=fixedCostsMo();
+  return Object.keys(per).sort().reverse().map(function(k){
+    var b=per[k];
+    if(p.location)b.achats+=fc.carRental*taxeNbMois(k);   // location des voitures, taxable
+    var tpsP=b.ttc*p.tps/diviseur;
+    var tvqP=b.ttc*p.tvq/diviseur;
+    var base=p.depTTC?(b.achats/diviseur*100):b.achats;   // ramener les achats hors taxes
+    var cti=base*p.tps/100, rti=base*p.tvq/100;
+    var net=(tpsP+tvqP)-(cti+rti);
+    return {key:k,lbl:b.lbl,quarts:b.quarts,ttc:b.ttc,ht:b.ttc/diviseur*100,
+      tpsPercue:tpsP,tvqPercue:tvqP,percu:tpsP+tvqP,
+      achats:b.achats,exonere:b.exonere,cti:cti,rti:rti,credits:cti+rti,
+      net:net,remis:!!p.remis[k],locationIncluse:p.location?fc.carRental*taxeNbMois(k):0};
+  });
+}
+// Ce qui reste dû à Revenu Québec, toutes périodes non remises
+function taxesDues(){
+  var p=taxeParams();
+  if(!p.inscrit)return {total:0,detail:[]};
+  var det=taxesPeriodes().filter(function(x){return !x.remis&&x.net>0.005;});
+  return {total:det.reduce(function(a,x){return a+x.net;},0),
+    detail:det.map(function(x){return {lbl:x.lbl,date:'',amt:x.net};})};
+}
+function taxeToggleRemis(k){
+  var p=taxeParams(), r=Object.assign({},p.remis);
+  if(r[k])delete r[k]; else r[k]=true;
+  saveTaxeParams({remis:r});
+}
+function taxesHTML(){
+  var p=taxeParams();
+  var periodes=taxesPeriodes();
+  var ouvert=!!window._taxOpen;
+  var dues=taxesDues();
+  var h='<div style="background:rgba(10,8,0,.45);border:1px solid '+(p.inscrit&&dues.total>0.005?'rgba(255,58,58,.4)':'var(--brd)')+';border-radius:13px;padding:12px;margin-bottom:14px;">'
+    +'<div onclick="window._taxOpen=!window._taxOpen;renderTreso();" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+    +'<span style="font-size:12px;font-weight:900;color:var(--gold);">🧾 TPS et TVQ à remettre</span>'
+    +'<span style="font-size:11px;font-weight:900;color:'+(p.inscrit?(dues.total>0.005?'var(--red)':'var(--grn)'):'var(--m2)')+';">'
+    +(p.inscrit?fm(dues.total):'inactif')+' '+(ouvert?'▾':'▸')+'</span></div>';
+  if(!ouvert)return h+'</div>';
+
+  // L'interrupteur qui décide si la dette entre au bilan
+  h+='<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:11px;padding:11px;margin:11px 0;">'
+    +'<label style="display:flex;align-items:center;gap:10px;cursor:pointer;">'
+    +'<input type="checkbox" '+(p.inscrit?'checked':'')+' onchange="saveTaxeParams({inscrit:this.checked})" style="width:20px;height:20px;flex-shrink:0;">'
+    +'<span style="font-size:12px;font-weight:800;color:var(--m3);">Je suis inscrit aux fichiers TPS et TVQ</span></label>'
+    +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">Tant que c\'est décoché, les chiffres ci-dessous sont affichés à titre indicatif et n\'entrent pas dans ton bilan. Une fois coché, le montant non remis devient une <b>dette</b> au bilan — parce que c\'en est une.</div>';
+  if(p.inscrit){
+    h+='<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">'
+      +['mois','trimestre','annee'].map(function(m){
+        var lbl={mois:'Mensuel',trimestre:'Trimestriel',annee:'Annuel'}[m];
+        return '<button onclick="saveTaxeParams({periode:\''+m+'\'})" style="flex:1;min-width:80px;background:'+(p.periode===m?'rgba(245,200,0,.2)':'rgba(255,255,255,.05)')+';border:1px solid '+(p.periode===m?'rgba(245,200,0,.5)':'var(--brd2)')+';color:'+(p.periode===m?'var(--gold)':'var(--m2)')+';border-radius:9px;padding:8px;font-size:11px;font-weight:800;cursor:pointer;">'+lbl+'</button>';
+      }).join('')+'</div>'
+      +'<label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin-top:10px;">'
+      +'<input type="checkbox" '+(p.location?'checked':'')+' onchange="saveTaxeParams({location:this.checked})" style="width:17px;height:17px;flex-shrink:0;">'
+      +'<span style="font-size:10px;color:var(--m2);">Récupérer aussi la taxe sur la location des voitures</span></label>'
+      +'<label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin-top:6px;">'
+      +'<input type="checkbox" '+(p.depTTC?'checked':'')+' onchange="saveTaxeParams({depTTC:this.checked})" style="width:17px;height:17px;flex-shrink:0;">'
+      +'<span style="font-size:10px;color:var(--m2);">Mes dépenses sont saisies taxes incluses</span></label>';
+  }
+  h+='</div>';
+
+  if(!periodes.length){
+    h+='<div style="font-size:11px;color:var(--m2);line-height:1.6;">Aucun quart saisi : rien à calculer pour l\'instant.</div>';
+    return h+'</div>';
+  }
+  periodes.slice(0,6).forEach(function(x){
+    h+='<div style="border:1px solid '+(x.remis?'rgba(57,211,83,.3)':'var(--brd)')+';border-radius:12px;padding:11px;margin-bottom:9px;background:rgba(0,0,0,.2);'+(x.remis?'opacity:.65;':'')+'">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">'
+      +'<div style="min-width:0;"><div style="font-size:12px;font-weight:800;color:var(--m3);">'+_cmpEsc(x.lbl)+'</div>'
+      +'<div style="font-size:9px;color:var(--m2);">'+x.quarts+' quart'+(x.quarts>1?'s':'')+' · '+fm(x.ttc)+' encaissé</div></div>'
+      +'<div style="text-align:right;flex-shrink:0;"><div style="font-size:9px;color:var(--m2);font-weight:700;">'+(x.remis?'Remis':'À remettre')+'</div>'
+      +'<div style="font-size:17px;font-weight:900;color:'+(x.remis?'var(--grn)':(x.net>0?'var(--red)':'var(--grn)'))+';">'+fm(x.net)+'</div></div></div>'
+      +'<div style="font-size:10px;line-height:1.9;color:var(--m2);border-top:1px solid var(--brd);padding-top:7px;">'
+      +'<div style="display:flex;justify-content:space-between;"><span>Recettes hors taxes</span><span style="color:var(--m3);font-weight:800;">'+fm(x.ht)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;"><span>TPS perçue ('+p.tps+' %)</span><span style="color:var(--gold);font-weight:800;">'+fm(x.tpsPercue)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;"><span>TVQ perçue ('+p.tvq+' %)</span><span style="color:var(--gold);font-weight:800;">'+fm(x.tvqPercue)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;"><span>Achats taxables</span><span style="color:var(--m3);font-weight:800;">'+fm(x.achats)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;"><span>− CTI (TPS récupérée)</span><span style="color:var(--grn);font-weight:800;">−'+fm(x.cti)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;"><span>− RTI (TVQ récupérée)</span><span style="color:var(--grn);font-weight:800;">−'+fm(x.rti)+'</span></div>'
+      +(x.exonere>0.005?'<div style="display:flex;justify-content:space-between;"><span>Assurance (exonérée)</span><span style="color:var(--m2);">'+fm(x.exonere)+'</span></div>':'')
+      +'</div>'
+      +'<button onclick="taxeToggleRemis(\''+x.key+'\')" style="width:100%;background:'+(x.remis?'rgba(255,255,255,.06)':'rgba(57,211,83,.16)')+';border:1px solid '+(x.remis?'var(--brd2)':'rgba(57,211,83,.4)')+';color:'+(x.remis?'var(--m2)':'var(--grn)')+';border-radius:9px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;margin-top:9px;">'
+      +(x.remis?'↩️ Annuler « remis »':'✓ Marquer comme remis')+'</button>'
+      +'</div>';
+  });
+  h+='<div style="font-size:9px;color:var(--m2);line-height:1.6;">ℹ️ Le taximètre facture taxes incluses : la TPS et la TVQ sont extraites du montant encaissé. L\'assurance est exonérée, aucune taxe n\'est récupérable dessus. Ces chiffres préparent ta déclaration — c\'est ton comptable qui la signe.</div>';
+  return h+'</div>';
+}
+
+// ═══════════════════════════════════════════════
+// 💎 COMBIEN JE PEUX INVESTIR SANS ME METTRE À SEC
+// Tout le liquide n'est pas à moi : une partie est promise aux
+// chauffeurs, aux fournisseurs, à Revenu Québec et au loyer du mois
+// prochain. Ce qui reste APRÈS ces engagements et APRÈS un coussin
+// de sécurité, c'est ça qui peut aller travailler.
+// L'app calcule ce montant — elle ne dit jamais dans QUOI investir.
+// ═══════════════════════════════════════════════
+function investParams(){
+  var t=(C&&C.invest)||{};
+  return {
+    coussinMois: t.coussinMois!==undefined?pf(t.coussinMois):1,   // mois de coûts fixes gardés d'avance
+    inclurePerso: t.inclurePerso===true,                          // le compte perso compte-t-il ?
+    objectif: pf(t.objectif||0)                                   // objectif de placement
+  };
+}
+function saveInvestParams(o){
+  C.invest=Object.assign({},C.invest||{},o);
+  lSave();
+  if(typeof renderTreso==='function')renderTreso();
+}
+function capaciteInvestir(){
+  var p=investParams(), t=getTresoAccounts();
+  // Liquide réellement disponible : banque et comptant, rien d'autre.
+  var liquide=0, detailLiquide=[];
+  t.accounts.forEach(function(a){
+    if(a.id==='cashdrv')return;                       // pas encore encaissé
+    if(a.type==='recev'||a.type==='credit'||a.type==='invest')return;
+    if(a.id==='perso'&&!p.inclurePerso)return;
+    var v=tresoSolde(a.id);
+    liquide+=v;
+    detailLiquide.push({icon:a.icon,name:a.name,v:v});
+  });
+  // Ce qui est déjà promis à quelqu'un d'autre
+  var sal=salairesDus().total;
+  var fact=depensesImpayees().total;
+  var tax=(typeof taxesDues==='function')?taxesDues().total:0;
+  var fc=fixedCostsMo();
+  var loyer=fc.carRental;                             // location du mois prochain, déjà due
+  var engagements=sal+fact+tax+loyer;
+  // Coussin : de quoi tenir sans rentrée d'argent
+  var coussin=fc.total*p.coussinMois;
+  var libre=liquide-engagements-coussin;
+  var investi=tresoSolde('wealth');
+  var patrimoine=liquide+investi;
+  return {liquide:liquide,detailLiquide:detailLiquide,
+    salaires:sal,factures:fact,taxes:tax,loyer:loyer,engagements:engagements,
+    coussin:coussin,coussinMois:p.coussinMois,coutFixeMois:fc.total,
+    libre:libre,investi:investi,patrimoine:patrimoine,
+    partInvestie:patrimoine>0?investi/patrimoine*100:0,
+    objectif:p.objectif,
+    resteObjectif:p.objectif>0?Math.max(0,p.objectif-investi):0};
+}
+function investirHTML(){
+  var c=capaciteInvestir();
+  var ouvert=window._invOpen===undefined?true:!!window._invOpen;
+  var positif=c.libre>0.005;
+  var h='<div style="background:linear-gradient(160deg,rgba(0,20,30,.95),rgba(0,14,24,.95));border:1.5px solid '+(positif?'rgba(56,189,248,.45)':'var(--brd2)')+';border-radius:16px;padding:14px;margin-bottom:14px;">'
+    +'<div onclick="window._invOpen=!(window._invOpen===undefined?true:window._invOpen);renderTreso();" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+    +'<span style="font-size:12px;font-weight:900;color:var(--blu);text-transform:uppercase;letter-spacing:.5px;">💎 Argent qui peut travailler</span>'
+    +'<span style="font-size:11px;color:var(--m2);font-weight:800;">'+(ouvert?'▾':'▸')+'</span></div>';
+  if(!ouvert)return h+'</div>';
+
+  h+='<div style="text-align:center;padding:14px 0 10px;">'
+    +'<div style="font-size:10px;color:var(--m2);font-weight:700;text-transform:uppercase;letter-spacing:.5px;">'+(positif?'Tu peux placer jusqu\'à':'Rien à placer pour l\'instant')+'</div>'
+    +'<div style="font-size:32px;font-weight:900;letter-spacing:-1px;color:'+(positif?'var(--blu)':'var(--m2)')+';">'+fm(Math.max(0,c.libre))+'</div>'
+    +(positif?'':'<div style="font-size:11px;color:var(--red);font-weight:800;margin-top:4px;">Il te manque '+fm(-c.libre)+' pour couvrir tes engagements et ton coussin</div>')
+    +'</div>';
+
+  function lg(lbl,v,col,sous){
+    return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;font-size:11px;gap:8px;">'
+      +'<span style="color:var(--m2);flex:1;min-width:0;">'+lbl+(sous?'<div style="font-size:9px;color:var(--m2);opacity:.75;">'+sous+'</div>':'')+'</span>'
+      +'<span style="font-weight:900;color:'+col+';flex-shrink:0;">'+v+'</span></div>';
+  }
+  h+='<div style="border-top:1px solid var(--brd);padding-top:8px;">'
+    +lg('💵 Liquide en banque et en caisse',fm(c.liquide),'var(--grn)',
+        c.detailLiquide.filter(function(d){return Math.abs(d.v)>0.005;}).map(function(d){return d.icon+' '+_cmpEsc(d.name)+' '+fm(d.v);}).join(' · '))
+    +(c.salaires>0.005?lg('💼 − Salaires à payer','−'+fm(c.salaires),'var(--red)'):'')
+    +(c.factures>0.005?lg('💸 − Factures non payées','−'+fm(c.factures),'var(--red)'):'')
+    +(c.taxes>0.005?lg('🧾 − TPS et TVQ à remettre','−'+fm(c.taxes),'var(--red)','cet argent est à Revenu Québec'):'')
+    +lg('🚗 − Location des voitures','−'+fm(c.loyer),'var(--red)','retenue au prochain dépôt')
+    +lg('🛡️ − Coussin de sécurité','−'+fm(c.coussin),'var(--org)',c.coussinMois+' mois de coûts fixes ('+fm(c.coutFixeMois)+'/mois)')
+    +'<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0 2px;margin-top:5px;border-top:2px solid var(--brd2);">'
+    +'<span style="font-size:12px;font-weight:900;color:'+(positif?'var(--blu)':'var(--m2)')+';">💎 Libre de placer</span>'
+    +'<span style="font-size:17px;font-weight:900;color:'+(positif?'var(--blu)':'var(--red)')+';">'+fm(c.libre)+'</span></div>'
+    +'</div>';
+
+  // Le coussin se règle : c'est le seul curseur qui compte vraiment
+  h+='<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:11px;padding:11px;margin-top:11px;">'
+    +'<div style="font-size:10px;color:var(--m2);font-weight:800;margin-bottom:8px;">🛡️ Combien de mois d\'avance je garde</div>'
+    +'<div style="display:flex;gap:7px;flex-wrap:wrap;">'
+    +[0,1,2,3].map(function(m){
+      return '<button onclick="saveInvestParams({coussinMois:'+m+'})" style="flex:1;min-width:58px;background:'+(c.coussinMois===m?'rgba(56,189,248,.2)':'rgba(255,255,255,.05)')+';border:1px solid '+(c.coussinMois===m?'rgba(56,189,248,.5)':'var(--brd2)')+';color:'+(c.coussinMois===m?'var(--blu)':'var(--m2)')+';border-radius:9px;padding:9px 4px;font-size:11px;font-weight:800;cursor:pointer;">'+(m===0?'Aucun':m+' mois')+'</button>';
+    }).join('')+'</div>'
+    +'<label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin-top:10px;">'
+    +'<input type="checkbox" '+(investParams().inclurePerso?'checked':'')+' onchange="saveInvestParams({inclurePerso:this.checked})" style="width:17px;height:17px;flex-shrink:0;">'
+    +'<span style="font-size:10px;color:var(--m2);">Compter aussi mon compte personnel</span></label>'
+    +'</div>';
+
+  // Ce qui travaille déjà
+  h+='<div style="border-top:1px solid var(--brd);margin-top:12px;padding-top:11px;">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+    +'<div><div style="font-size:11px;font-weight:800;color:var(--m3);">📈 Déjà placé</div>'
+    +'<div style="font-size:9px;color:var(--m2);">'+c.partInvestie.toFixed(0)+' % de ton argent disponible travaille</div></div>'
+    +'<div style="font-size:18px;font-weight:900;color:var(--blu);">'+fm(c.investi)+'</div></div>'
+    +'<div style="display:flex;height:9px;border-radius:5px;overflow:hidden;background:rgba(255,255,255,.07);margin-top:8px;">'
+    +'<div style="width:'+Math.max(0,Math.min(100,c.partInvestie)).toFixed(1)+'%;background:linear-gradient(90deg,var(--blu),var(--grn));"></div></div>'
+    +'<div style="display:flex;justify-content:space-between;font-size:9px;color:var(--m2);margin-top:5px;">'
+    +'<span>📈 Placé '+fm(c.investi)+'</span><span>💵 Liquide '+fm(c.liquide)+'</span></div>'
+    +'</div>';
+
+  h+='<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:11px;">'
+    +'ℹ️ Ce montant est ce qui reste une fois tout le monde payé et ton coussin mis de côté. '
+    +'<b>L\'app ne te dit pas dans quoi placer</b> — ça, c\'est ta décision et celle de ton conseiller. '
+    +'Souviens-toi que placer un montant, c\'est accepter de ne plus l\'avoir tout de suite.</div>';
+  return h+'</div>';
 }
 
 // ═══════════════════════════════════════════════
@@ -10441,7 +10723,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-02-v92-HEBDO-VOITURE-ESSENCE';
+var APP_VERSION = '2026-08-02-v93-INVESTIR-ET-TAXES';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
