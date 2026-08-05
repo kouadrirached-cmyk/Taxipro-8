@@ -8761,6 +8761,7 @@ function renderTreso(){
   // ── 📋 BILAN en premier : c'est le résumé, il doit être visible sans défiler ──
   html+=bilanHTML();
   html+=investirHTML();
+  html+=placementHTML();
   html+=taxesHTML();
   html+=evolutionHTML();
 
@@ -9519,6 +9520,7 @@ function investParams(){
   return {
     coussinMois: t.coussinMois!==undefined?pf(t.coussinMois):1,   // mois de coûts fixes gardés d'avance
     inclurePerso: t.inclurePerso===true,                          // le compte perso compte-t-il ?
+    cible: pf(t.cible||0),                                        // part du disponible à garder placée
     objectif: pf(t.objectif||0)                                   // objectif de placement
   };
 }
@@ -9559,6 +9561,104 @@ function capaciteInvestir(){
     objectif:p.objectif,
     resteObjectif:p.objectif>0?Math.max(0,p.objectif-investi):0};
 }
+// ── Suivi du compte de placement et regle de rééquilibrage ──
+// L'app ne passe AUCUN ordre : elle calcule l'écart entre ce que le
+// patron veut garder placé et ce qu'il a réellement placé, puis lui
+// dit quoi virer. Le virement, c'est lui qui le fait, chez son
+// courtier. Aucune clé d'accès à un compte de courtage n'entre ici.
+function placementSuivi(){
+  var p=investParams(), c=capaciteInvestir();
+  var t=getTresoAccounts();
+  // Ce qui est réellement parti vers le placement, et ce qui en est revenu
+  var verse=0, retire=0;
+  (t.transactions||[]).forEach(function(x){
+    if(x.type==='transfer'&&x.toAccountId==='wealth')verse+=pf(x.amount);
+    else if(x.type==='transfer'&&x.accountId==='wealth')retire+=pf(x.amount);
+    else if(x.accountId==='wealth'&&x.type==='in')verse+=pf(x.amount);
+    else if(x.accountId==='wealth'&&x.type==='out')retire+=pf(x.amount);
+  });
+  var investi=c.investi;
+  var apport=verse-retire;                      // argent de poche mis dedans
+  var gain=investi-apport;                      // le reste, c'est le rendement
+  var dispo=c.liquide+investi;                  // patrimoine mobilisable
+  var cible=pf(p.cible||0);                     // part visée, en %
+  var cibleMontant=dispo*cible/100;
+  // Garde-fou : on ne propose jamais de placer plus que ce qui est libre
+  var maxPlacable=investi+Math.max(0,c.libre);
+  var vise=Math.min(cibleMontant,maxPlacable);
+  var ecart=vise-investi;
+  // Aucune cible fixée = aucun conseil. Sans ce garde-fou, l'app
+  // conseillait de tout retirer dès que la cible valait zéro.
+  var action=(cible<=0||Math.abs(ecart)<25)?'rien':(ecart>0?'placer':'retirer');
+  return {investi:investi,apport:apport,gain:gain,
+    rendement:apport>0.005?gain/apport*100:0,
+    dispo:dispo,cible:cible,cibleMontant:cibleMontant,vise:vise,
+    ecart:ecart,libre:c.libre,action:action,
+    bride:cible>0&&cibleMontant>maxPlacable+0.005};
+}
+function placementHTML(){
+  var p=investParams();
+  if(!pf(p.cible)&&tresoSolde('wealth')<0.005&&!window._plaOpen)return '';
+  var s=placementSuivi();
+  var ouvert=window._plaOpen===undefined?true:!!window._plaOpen;
+  var h='<div style="background:rgba(10,8,0,.45);border:1px solid var(--brd);border-radius:13px;padding:12px;margin-bottom:14px;">'
+    +'<div onclick="window._plaOpen=!(window._plaOpen===undefined?true:window._plaOpen);renderTreso();" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+    +'<span style="font-size:12px;font-weight:900;color:var(--gold);">📈 Mon placement</span>'
+    +'<span style="font-size:11px;color:var(--m2);font-weight:800;">'+fm(s.investi)+' '+(ouvert?'▾':'▸')+'</span></div>';
+  if(!ouvert)return h+'</div>';
+
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:11px 0;">'
+    +'<div style="background:rgba(0,0,0,.3);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Argent mis dedans</div>'
+    +'<div style="font-size:15px;font-weight:900;color:var(--m3);">'+fm(s.apport)+'</div></div>'
+    +'<div style="background:rgba(0,0,0,.3);border-radius:9px;padding:9px;text-align:center;"><div style="font-size:9px;color:var(--m2);font-weight:700;">Valeur aujourd\'hui</div>'
+    +'<div style="font-size:15px;font-weight:900;color:var(--blu);">'+fm(s.investi)+'</div></div>'
+    +'</div>';
+  if(Math.abs(s.apport)>0.005){
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:10px;background:'+(s.gain>=0?'rgba(57,211,83,.1)':'rgba(255,58,58,.1)')+';border:1px solid '+(s.gain>=0?'rgba(57,211,83,.3)':'rgba(255,58,58,.3)')+';font-size:11px;">'
+      +'<span style="color:var(--m2);font-weight:700;">'+(s.gain>=0?'📈 Gain':'📉 Perte')+'</span>'
+      +'<span style="font-weight:900;color:'+(s.gain>=0?'var(--grn)':'var(--red)')+';">'+fm(s.gain)+' ('+(s.gain>=0?'+':'')+s.rendement.toFixed(1)+' %)</span></div>'
+      +'<div style="font-size:9px;color:var(--m2);line-height:1.5;margin-top:6px;">Mets à jour le solde du compte Wealthsimple pour que ce chiffre reste juste : l\'app ne le lit pas toute seule.</div>';
+  }
+
+  // La règle : quelle part de mon argent je veux garder placée
+  h+='<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:11px;padding:11px;margin-top:11px;">'
+    +'<div style="font-size:10px;color:var(--m2);font-weight:800;margin-bottom:8px;">🎯 Part de mon argent que je veux garder placée</div>'
+    +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'
+    +[0,25,50,75].map(function(m){
+      return '<button onclick="saveInvestParams({cible:'+m+'})" style="flex:1;min-width:54px;background:'+(s.cible===m?'rgba(245,200,0,.2)':'rgba(255,255,255,.05)')+';border:1px solid '+(s.cible===m?'rgba(245,200,0,.5)':'var(--brd2)')+';color:'+(s.cible===m?'var(--gold)':'var(--m2)')+';border-radius:9px;padding:9px 4px;font-size:11px;font-weight:800;cursor:pointer;">'+(m===0?'Aucune':m+' %')+'</button>';
+    }).join('')+'</div>';
+  if(s.cible>0){
+    h+='<div style="font-size:10px;color:var(--m2);line-height:1.7;margin-top:9px;">'
+      +'Sur <b>'+fm(s.dispo)+'</b> disponibles, viser '+s.cible+' % ferait <b>'+fm(s.cibleMontant)+'</b> placés.'
+      +(s.bride?'<br><span style="color:var(--org);">⚠️ Limité à '+fm(s.vise)+' : le reste est déjà promis (salaires, taxes, loyer, coussin).</span>':'')
+      +'</div>';
+  }
+  h+='</div>';
+
+  // Ce qu'il y aurait à faire, aujourd'hui
+  if(s.cible>0){
+    var col=s.action==='placer'?'var(--grn)':(s.action==='retirer'?'var(--org)':'var(--m2)');
+    h+='<div style="border:1.5px solid '+col+';border-radius:12px;padding:12px;margin-top:11px;background:rgba(0,0,0,.25);">'
+      +'<div style="font-size:10px;color:var(--m2);font-weight:800;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;">Aujourd\'hui</div>';
+    if(s.action==='rien'){
+      h+='<div style="font-size:12px;font-weight:800;color:var(--grn);">✅ Rien à faire, tu es sur ta cible.</div>';
+    }else if(s.action==='placer'){
+      h+='<div style="font-size:13px;font-weight:900;color:var(--grn);">⬆️ Tu pourrais virer '+fm(s.ecart)+' vers ton placement</div>'
+        +'<button onclick="openTresoTx(\'transfer\')" style="width:100%;background:rgba(57,211,83,.16);border:1.5px solid rgba(57,211,83,.4);color:var(--grn);border-radius:10px;padding:11px;font-size:12px;font-weight:800;cursor:pointer;margin-top:9px;">🔄 Enregistrer le virement</button>';
+    }else{
+      h+='<div style="font-size:13px;font-weight:900;color:var(--org);">⬇️ Tu devrais retirer '+fm(-s.ecart)+' de ton placement</div>'
+        +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-top:5px;">Ta trésorerie est descendue : cet argent est réclamé ailleurs.</div>'
+        +'<button onclick="openTresoTx(\'transfer\')" style="width:100%;background:rgba(255,107,53,.16);border:1.5px solid rgba(255,107,53,.4);color:var(--neon);border-radius:10px;padding:11px;font-size:12px;font-weight:800;cursor:pointer;margin-top:9px;">🔄 Enregistrer le retrait</button>';
+    }
+    h+='</div>';
+  }
+
+  h+='<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:11px;">'
+    +'⚠️ TaxiPro <b>ne passe aucun ordre en bourse</b> et n\'est reliée à aucun courtier. Elle calcule l\'écart avec ta cible ; le virement, c\'est toi qui le fais. '
+    +'Aucun mot de passe ni clé de courtage ne doit jamais être saisi dans cette application.</div>';
+  return h+'</div>';
+}
+
 function investirHTML(){
   var c=capaciteInvestir();
   var ouvert=window._invOpen===undefined?true:!!window._invOpen;
@@ -10723,7 +10823,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-02-v93-INVESTIR-ET-TAXES';
+var APP_VERSION = '2026-08-02-v94-SUIVI-PLACEMENT';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
