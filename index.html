@@ -2891,6 +2891,11 @@ function renderNotifBadge(){
 function _notifLigne(sh){
   var net=pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses);
   var sal=calcSalary(sh), pro=calcOwnerProfit(sh), ec=calcEcart(sh);
+  // Ma part du quart = le partage 60/40, sans l'essence : le carburant
+  // mis par un chauffeur sert au suivant, c'est une charge de la
+  // compagnie qu'on sort une fois par semaine, pas un cout du quart.
+  var _d=getDrv(sh.driver), _p=_d?pf(_d.pct):pf(sh.drvPct);
+  var part=isOwnerShift(sh)?net:net*(1-_p/100);
   var qd=new Date(sh.ts);
   var quand=isNaN(qd)?'':qd.toLocaleString('fr-CA',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
   var h='<div style="background:rgba(0,0,0,.25);border:1px solid var(--brd);border-radius:12px;padding:12px;margin-bottom:9px;">'
@@ -2907,8 +2912,8 @@ function _notifLigne(sh){
     +'<div style="font-size:9px;color:var(--m2);font-weight:700;">💼 Salaire</div>'
     +'<div style="font-size:14px;font-weight:900;color:var(--neon);">'+fm(sal)+'</div></div>'
     +'<div style="background:rgba(245,200,0,.1);border:1px solid rgba(245,200,0,.3);border-radius:9px;padding:8px;text-align:center;">'
-    +'<div style="font-size:9px;color:var(--gold);font-weight:800;">✅ Mon profit</div>'
-    +'<div style="font-size:15px;font-weight:900;color:'+(pro>=0?'var(--gold)':'var(--red)')+';">'+fm(pro)+'</div></div>'
+    +'<div style="font-size:9px;color:var(--gold);font-weight:800;">✅ Ma part</div>'
+    +'<div style="font-size:15px;font-weight:900;color:'+(part>=0?'var(--gold)':'var(--red)')+';">'+fm(part)+'</div></div>'
     +'</div>';
   if(Math.abs(ec)>0.009){
     h+='<div style="margin-top:7px;text-align:center;font-size:11px;font-weight:900;color:'+(ec>0?'var(--red)':'var(--pur)')+';">'
@@ -2916,15 +2921,12 @@ function _notifLigne(sh){
   }
   // Le calcul en toutes lettres : sans ça, impossible de recoller les
   // chiffres soi-même, et le patron se demande où est passé son 60 %.
-  var drv=getDrv(sh.driver);
-  var pct=drv?pf(drv.pct):pf(sh.drvPct);
+  var pct=_p;
   var ess=pf(sh.essence), pour=pf(sh.pourboire);
-  var partPatron=isOwnerShift(sh)?net:net*(1-pct/100);
   var det='<b>'+fm(net)+'</b>'
     +(isOwnerShift(sh)?' <span style="color:var(--m2);">(tu conduis : 100 %)</span>'
-                      :' × <b>'+(100-pct)+' %</b> = <b>'+fm(partPatron)+'</b>');
-  if(ess>0.005)det+=' − ⛽ <b>'+fm(ess)+'</b>';
-  det+=' = <b style="color:var(--gold);">'+fm(pro)+'</b>';
+                      :' × <b>'+(100-pct)+' %</b>');
+  det+=' = <b style="color:var(--gold);">'+fm(part)+'</b>';
   h+='<div style="margin-top:8px;padding-top:7px;border-top:1px solid var(--brd);font-size:10px;color:var(--m2);line-height:1.7;">'
     +'✅ '+det;
   if(!isOwnerShift(sh)){
@@ -2933,6 +2935,10 @@ function _notifLigne(sh){
     if(ess>0.005&&sh.essencePar==='chauf')detS+=' + ⛽ essence avancée <b>'+fm(ess)+'</b>';
     detS+=' = <b style="color:var(--neon);">'+fm(sal)+'</b>';
     h+='<br>💼 '+detS;
+  }
+  if(ess>0.005){
+    h+='<br><span style="color:var(--neon);">⛽ '+fm(ess)+' mis dans '+_cmpEsc(sh.vehicle||'la voiture')
+      +'</span> <span style="opacity:.8;">— porté aux charges de la compagnie, pas à ce quart</span>';
   }
   h+='</div>';
   return h+'</div>';
@@ -2956,6 +2962,8 @@ function ouvrirNotifs(){
     : '🔔 Rien de nouveau';
   var totPro=liste.reduce(function(a,sh){return a+calcOwnerProfit(sh);},0);
   var totNet=liste.reduce(function(a,sh){return a+(pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses));},0);
+  var totEss=liste.reduce(function(a,sh){return a+pf(sh.essence);},0);
+  var totPart=totPro+totEss;   // la part 60/40 avant carburant
   var MAX=25, trop=Math.max(0,liste.length-MAX);
   var affichee=liste.slice(0,MAX);
   var h='<div style="position:sticky;top:-16px;background:var(--s2);padding:4px 0 10px;margin:-4px 0 4px;z-index:2;">'
@@ -2976,7 +2984,9 @@ function ouvrirNotifs(){
     if(nouveaux.length){
       h+='<div style="background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.3);border-radius:12px;padding:11px;margin-bottom:11px;">'
         +'<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--m2);font-weight:700;margin-bottom:4px;"><span>Taximètre cumulé</span><span style="color:var(--gold);font-weight:900;">'+fm(totNet)+'</span></div>'
-        +'<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;"><span style="color:var(--gold);">✅ Mon profit sur ces quarts</span><span style="color:'+(totPro>=0?'var(--gold)':'var(--red)')+';">'+fm(totPro)+'</span></div>'
+        +'<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:900;"><span style="color:var(--gold);">✅ Ma part sur ces quarts</span><span style="color:'+(totPart>=0?'var(--gold)':'var(--red)')+';">'+fm(totPart)+'</span></div>'
+        +(totEss>0.005?'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--m2);margin-top:5px;padding-top:5px;border-top:1px solid var(--brd);"><span>⛽ Essence mise dans les voitures</span><span style="color:var(--neon);font-weight:800;">'+fm(totEss)+'</span></div>'
+          +'<div style="font-size:9px;color:var(--m2);line-height:1.5;margin-top:4px;">Le carburant est une charge de la compagnie : il sort une fois par semaine, dans 💹 Profit → Semaine par voiture.</div>':'')
         +'</div>';
     }
     affichee.forEach(function(sh){h+=_notifLigne(sh);});
@@ -10823,7 +10833,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-02-v94-SUIVI-PLACEMENT';
+var APP_VERSION = '2026-08-06-v95-ESSENCE-CHARGE-COMPAGNIE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
