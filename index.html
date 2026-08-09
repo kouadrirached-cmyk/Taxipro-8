@@ -1945,19 +1945,26 @@ function isOwnerShift(s){
   var d=getDrv(s&&s.driver);
   return !!(d&&d.role==='owner');
 }
+// Le taximètre net d'un quart : fin − début − les courses (la redevance
+// par course n'est le revenu de personne). C'est la SEULE base qui doit
+// servir au partage 60/40, à la paie et à l'affichage — trois écrans
+// utilisaient le compteur brut et gonflaient la part du patron.
+function taxNetQuart(s){
+  return pf(s.taxf)-pf(s.taxd)-pi(s.courses);
+}
 function calcSalary(s){
   // Salaire = argent PAYÉ à un chauffeur employé.
   // Quand le patron conduit : aucun salaire versé (il ne se paie pas un salaire de chauffeur).
   if(isOwnerShift(s))return 0;
   const drv=getDrv(s.driver);
   if(!drv)return 0;
-  const net=pf(s.taxf)-pf(s.taxd)-pi(s.courses);
+  const net=taxNetQuart(s);
   const essRmb=(s.essencePar==='chauf')?pf(s.essence):0; // essence remboursée au chauffeur
   return parseFloat((net*(drv.pct/100)+pf(s.pourboire)+essRmb).toFixed(2));
 }
 function calcOwnerProfit(s){
   // Profit qui reste à l'entreprise / au patron.
-  const net=pf(s.taxf)-pf(s.taxd)-pi(s.courses);
+  const net=taxNetQuart(s);
   // Quand le patron conduit : 100 % du net reste à l'entreprise (moins l'essence).
   if(isOwnerShift(s))return parseFloat((net-pf(s.essence)).toFixed(2));
   const drv=getDrv(s.driver);
@@ -3165,7 +3172,7 @@ function siHTML(s,cumulMap){
   const hasEc=Math.abs(ecart)>0.5;
   const ownShift=isOwnerShift(s);
   const ownProfit=calcOwnerProfit(s);
-  const taxNet=pf(s.taxf)-pf(s.taxd); // Taximètre brut (sans courses) pour affichage
+  const taxNet=taxNetQuart(s);
   const isOwnerView=U&&U.role==='owner';
   const dd=new Date(s.date);
   const dlbl=dd.toLocaleDateString('fr-CA',{weekday:'short',month:'short',day:'numeric'});
@@ -3476,7 +3483,7 @@ function renderDash(){
           .map(function(e){
             var nm=e[0],d=e[1];
             // Calcul taximètre net réel depuis les shifts
-            var taxNet=d.shifts.reduce(function(a,s){return a+(pf(s.taxf)-pf(s.taxd));},0);
+            var taxNet=d.shifts.reduce(function(a,s){return a+taxNetQuart(s);},0);
             var own60=taxNet*(ownerPct/100);
             var recette=d.rec;
             // Vérification : la recette doit couvrir le 60%
@@ -3521,11 +3528,11 @@ function renderDash(){
     const arrSorted=[...arr].sort((a,b)=>b.date.localeCompare(a.date)||(b.time||'').localeCompare(a.time||''));
     const wkArr=getArr().filter(s=>inWk(s.date,new Date())&&s.driver===U.name);
     const wkCumul=wkArr.reduce((a,s)=>a+calcSalary(s),0);
-    const wkTaxNet=wkArr.reduce((a,s)=>a+(pf(s.taxf)-pf(s.taxd)),0);
+    const wkTaxNet=wkArr.reduce((a,s)=>a+taxNetQuart(s),0);
     // Quarts détaillés avec taximètre net + écart
     const drvShiftRows=arrSorted.map(s=>{
       const sal=calcSalary(s);
-      const taxNet=pf(s.taxf)-pf(s.taxd); // Taximètre brut sans courses
+      const taxNet=taxNetQuart(s);
       const ec=calcEcart(s);
       const hasEc=Math.abs(ec)>0.5;
       const dd=new Date(s.date);
@@ -3701,7 +3708,7 @@ var _histWkExpanded={}; // accordéon semaine : clé = "driverName|wkKey" ou "wk
 function _shiftCard(s, isOwner){
   var sal=calcSalary(s);
   var ec=calcEcart(s);
-  var taxNet=pf(s.taxf)-pf(s.taxd);
+  var taxNet=taxNetQuart(s);
   var ownShift=isOwnerShift(s);
   var ownProfit=calcOwnerProfit(s);
   var own60=taxNet*(C.ownerShare/100);
@@ -3782,7 +3789,7 @@ function _groupByWeek(shifts){
     }
     var w=byWk[wk];
     w.rec+=s.recette; w.sal+=calcSalary(s); w.profit+=calcOwnerProfit(s);
-    var tn=pf(s.taxf)-pf(s.taxd);
+    var tn=taxNetQuart(s);
     w.taxNet+=tn; w.own60+=tn*(C.ownerShare/100);
     w.crs+=(s.courses||0); w.n++;
     if(Math.abs(calcEcart(s))>0.5)w.ecarts++;
@@ -4466,7 +4473,7 @@ function renderAnalyse(){
     allByDRank[s.driver].sal+=calcSalary(s);
     allByDRank[s.driver].profit+=calcOwnerProfit(s);
     allByDRank[s.driver].n++;
-    allByDRank[s.driver].taxNet+=pf(s.taxf)-pf(s.taxd);
+    allByDRank[s.driver].taxNet+=taxNetQuart(s);
   });
   const rankList=Object.entries(allByDRank)
     .filter(([nm])=>{const d=getDrv(nm);return d&&d.role!=='owner';})
@@ -8026,7 +8033,7 @@ function exportPDFMensuel(moOffset){
     html += '<table style="margin-top:6px;"><tr><th>Date</th><th>Véh.</th><th class="tr">Taxi net</th><th class="tr">Recette</th><th class="tr">Salaire</th><th class="tr">Écart</th></tr>';
     d.shifts.sort(function(a,b){return a.date.localeCompare(b.date);}).forEach(function(s){
       var ec=calcEcart(s);
-      var taxN=pf(s.taxf)-pf(s.taxd);
+      var taxN=taxNetQuart(s);
       var hasEc=Math.abs(ec)>0.5;
       html += '<tr'+(hasEc?' class="ecart-row"':'')+'>'
         +'<td>'+s.date+'</td>'
@@ -10833,7 +10840,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-06-v95-ESSENCE-CHARGE-COMPAGNIE';
+var APP_VERSION = '2026-08-07-v96-BASE-6040-UNIQUE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
