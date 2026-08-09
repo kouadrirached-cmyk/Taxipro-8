@@ -3754,6 +3754,19 @@ function _shiftCard(s, isOwner){
     h+='<div style="font-size:8px;color:var(--grn);font-weight:700;text-transform:uppercase;margin-bottom:2px;">💼 Sal. chauf.</div>';
     h+='<div style="font-size:13px;font-weight:900;color:var(--grn);">'+fm(sal)+'</div></div>';
     h+='</div>';
+    // Le calcul en toutes lettres : sans lui, impossible de retrouver
+    // son chiffre soi-même, et un salaire « trop élevé » ressemble à
+    // une erreur alors que c'est le pourboire qui s'ajoute.
+    var pctD=(getDrv(s.driver)||{}).pct;
+    pctD=(pctD===undefined||pctD===null)?pf(s.drvPct):pf(pctD);
+    h+='<div style="font-size:9px;color:var(--m2);line-height:1.8;margin-bottom:6px;padding-top:6px;border-top:1px solid var(--brd);">'
+      +'👑 '+fm(taxNet)+' × '+(100-pctD)+' % = <b style="color:var(--gold);">'+fm(taxNet*(100-pctD)/100)+'</b>'
+      +'<br>💼 '+fm(taxNet)+' × '+pctD+' %'
+      +(pf(s.pourboire)>0.005?' + 🪙 '+fm(s.pourboire)+' de pourboire':'')
+      +' = <b style="color:var(--grn);">'+fm(sal)+'</b>'
+      +(pf(s.essence)>0.005?'<br>⛽ '+fm(s.essence)+' d\'essence — charge de la compagnie'
+        +(essenceAvancee(s)>0.005?', avancée par le chauffeur et à lui rembourser':''):'')
+      +'</div>';
   }
   if(ptags)h+='<div style="margin-bottom:6px;">'+ptags+'</div>';
   if(Math.abs(ec)>0.5&&(ec>0||isOwner)){
@@ -10977,7 +10990,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-07-v97-AUDIT-ESSENCE-AVANCEE';
+var APP_VERSION = '2026-08-07-v98-DETAIL-CALCUL-HISTORIQUE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
