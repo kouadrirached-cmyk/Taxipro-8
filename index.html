@@ -1959,8 +1959,15 @@ function calcSalary(s){
   const drv=getDrv(s.driver);
   if(!drv)return 0;
   const net=taxNetQuart(s);
-  const essRmb=(s.essencePar==='chauf')?pf(s.essence):0; // essence remboursée au chauffeur
-  return parseFloat((net*(drv.pct/100)+pf(s.pourboire)+essRmb).toFixed(2));
+  // L'essence avancée par le chauffeur N'EST PAS un salaire : c'est une
+  // avance qu'on lui rembourse à part. La mêler à la paie faussait le
+  // salaire affiché ET la faisait déduire deux fois du profit mensuel,
+  // une fois dans les salaires et une fois dans le poste carburant.
+  return parseFloat((net*(drv.pct/100)+pf(s.pourboire)).toFixed(2));
+}
+// Essence sortie de la poche du chauffeur, à lui rembourser
+function essenceAvancee(s){
+  return (s&&s.essencePar==='chauf')?pf(s.essence):0;
 }
 function calcOwnerProfit(s){
   // Profit qui reste à l'entreprise / au patron.
@@ -2939,13 +2946,14 @@ function _notifLigne(sh){
   if(!isOwnerShift(sh)){
     var detS=fm(net)+' × <b>'+pct+' %</b> = <b>'+fm(net*pct/100)+'</b>';
     if(pour>0.005)detS+=' + 💵 pourboire <b>'+fm(pour)+'</b>';
-    if(ess>0.005&&sh.essencePar==='chauf')detS+=' + ⛽ essence avancée <b>'+fm(ess)+'</b>';
+
     detS+=' = <b style="color:var(--neon);">'+fm(sal)+'</b>';
     h+='<br>💼 '+detS;
   }
   if(ess>0.005){
     h+='<br><span style="color:var(--neon);">⛽ '+fm(ess)+' mis dans '+_cmpEsc(sh.vehicle||'la voiture')
-      +'</span> <span style="opacity:.8;">— porté aux charges de la compagnie, pas à ce quart</span>';
+      +'</span> <span style="opacity:.8;">— charge de la compagnie, pas de ce quart'
+      +(essenceAvancee(sh)>0.005?' · avancé par le chauffeur, à lui rembourser':'')+'</span>';
   }
   h+='</div>';
   return h+'</div>';
@@ -5581,15 +5589,20 @@ function payeToggle(wkKey,drvName){
     // ── PAIEMENT : sortie automatique de la Trésorerie ──
     const dd=payeWeekCalc(wkKey,drvName);
     const deductCash=C.payes[k+'_deductCash']===true;
-    const net=deductCash?Math.max(0,dd.sal-dd.cash):dd.sal;
+    // Ce qu'on lui doit : sa paie PLUS l'essence qu'il a avancée
+    const du=dd.sal+dd.ess;
+    const net=deductCash?Math.max(0,du-dd.cash):du;
     const today=new Date();
     const dk=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
     const wkLbl=wkKey.slice(5); // MM-DD
     var msg='💵 Payer '+drvName+' — semaine du '+wkKey+'\n\n';
+    msg+='Salaire (part '+((getDrv(drvName)||{}).pct||40)+' % + pourboires) : '+fm(dd.sal)+'\n';
+    if(dd.ess>0.005)msg+='⛽ Essence qu\'il a avancée : +'+fm(dd.ess)+'\n';
+    msg+='Total dû : '+fm(du)+'\n\n';
     if(deductCash&&dd.cash>0){
-      msg+='Salaire : '+fm(dd.sal)+'\n💵 Cash gardé par le chauffeur : −'+fm(dd.cash)+'\n➡️ Tu verses la DIFFÉRENCE : '+fm(net)+'\n\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net)+'\n• '+(tresoCashSepare()?'Chez les chauffeurs':'Compte Cash')+' : −'+fm(dd.cash)+' (gardé par le chauffeur)';
+      msg+='💵 Cash gardé par le chauffeur : −'+fm(dd.cash)+'\n➡️ Tu verses la DIFFÉRENCE : '+fm(net)+'\n\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net)+'\n• '+(tresoCashSepare()?'Chez les chauffeurs':'Compte Cash')+' : −'+fm(dd.cash)+' (gardé par le chauffeur)';
     }else{
-      msg+='➡️ Tu verses le salaire complet : '+fm(net)+'\n\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net);
+      msg+='➡️ Tu verses : '+fm(net)+'\n\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net);
     }
     if(!confirm(msg+'\n\nConfirmer ?'))return;
     // Transactions automatiques
@@ -5695,7 +5708,8 @@ function renderPaye(){
       const isPaid=!isCurWk&&C.payes[k]&&C.payes[k].paid;
       const paidTs=isPaid?new Date(C.payes[k].ts).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
       const deductCash=C.payes[k+'_deductCash']===true;
-      const net=deductCash?Math.max(0,dd.sal-dd.cash):dd.sal;
+      const du=dd.sal+dd.ess;
+      const net=deductCash?Math.max(0,du-dd.cash):du;
       const hasCash=dd.cash>0;
       const hasEss=dd.ess>0;
 
@@ -5704,10 +5718,10 @@ function renderPaye(){
         +'<div class="paye-drv">🚗 '+drvName+'</div>'
         // Salaire brut
         +'<div style="display:flex;align-items:baseline;gap:8px;margin-top:3px;">'
-        +'<div class="paye-amt">'+(deductCash&&hasCash?'<span style="text-decoration:line-through;font-size:14px;color:var(--m2);">'+fm(dd.sal)+'</span> <span style="color:var(--gold);">'+fm(net)+'</span>':fm(dd.sal))+'</div>'
+        +'<div class="paye-amt">'+(deductCash&&hasCash?'<span style="text-decoration:line-through;font-size:14px;color:var(--m2);">'+fm(du)+'</span> <span style="color:var(--gold);">'+fm(net)+'</span>':fm(du))+'</div>'
         +(hasCash?'<div style="font-size:10px;color:var(--pur);font-weight:700;">💵 cash: '+fm(dd.cash)+'</div>':'')
-        +(hasEss?'<div style="font-size:10px;color:var(--neon);font-weight:700;">⛽ ess. remb.: '+fm(dd.ess)+'</div>':'')
         +'</div>'
+        +(hasEss?'<div style="font-size:10px;color:var(--m2);margin-top:3px;">💼 paie '+fm(dd.sal)+' + ⛽ essence avancée '+fm(dd.ess)+'</div>':'')
         // Toggle enlever cash
         +(hasCash&&!isPaid&&!isCurWk
           ?'<div style="margin-top:6px;">'
@@ -9264,8 +9278,9 @@ function salairesDus(){
     var ws=gwS(parseLocalDate(s.date));
     var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
     var k=wk+'|'+s.driver;
-    if(!byWk[k])byWk[k]={wk:wk,drv:s.driver,sal:0,cash:0};
+    if(!byWk[k])byWk[k]={wk:wk,drv:s.driver,sal:0,cash:0,ess:0};
     byWk[k].sal+=calcSalary(s);
+    byWk[k].ess+=essenceAvancee(s);   // avance à rembourser, pas du salaire
     byWk[k].cash+=pf(s.comp);
   });
   var total=0,detail=[];
@@ -9273,8 +9288,9 @@ function salairesDus(){
     if(C.payes&&C.payes[k]&&C.payes[k].paid)return; // semaine déjà payée
     var e=byWk[k];
     var deduit=!!(C.payes&&C.payes[k+'_deductCash']===true);
-    var net=deduit?Math.max(0,e.sal-e.cash):e.sal;
-    if(net>0.005){total+=net;detail.push({wk:e.wk,drv:e.drv,net:net});}
+    var du=e.sal+e.ess;                       // paie + essence avancée
+    var net=deduit?Math.max(0,du-e.cash):du;
+    if(net>0.005){total+=net;detail.push({wk:e.wk,drv:e.drv,net:net,sal:e.sal,ess:e.ess});}
   });
   detail.sort(function(a,b){return b.wk.localeCompare(a.wk);});
   return {total:total,detail:detail};
@@ -10840,7 +10856,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-07-v96-BASE-6040-UNIQUE';
+var APP_VERSION = '2026-08-07-v96-BASE-6040-ET-ESSENCE-AVANCEE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
