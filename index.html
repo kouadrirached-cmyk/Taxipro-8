@@ -1342,6 +1342,10 @@ body{
         <div style="font-size:11px;color:var(--m2);margin-bottom:12px;">Choisissez l'apparence visuelle de TaxiPro. Le choix est sauvegardé sur cet appareil.</div>
         <div id="themeGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;"></div>
       </div>
+      <div class="card" id="cardRedevance">
+        <div class="ctit"><span><span class="ci">🚕</span>Redevance par course</span></div>
+        <div id="rdvContent"></div>
+      </div>
       <div class="card">
         <div class="ctit"><span><span class="ci">🏢</span>Coûts fixes mensuels (entreprise)</span></div>
         <div style="font-size:11px;color:var(--m2);margin-bottom:10px;line-height:1.5;">Ces montants sont déduits automatiquement dans le rapport de profit mensuel.</div>
@@ -1949,8 +1953,43 @@ function isOwnerShift(s){
 // par course n'est le revenu de personne). C'est la SEULE base qui doit
 // servir au partage 60/40, à la paie et à l'affichage — trois écrans
 // utilisaient le compteur brut et gonflaient la part du patron.
+// La redevance par course : montant retire du compteur avant tout
+// partage. Historiquement code en dur a 1,00 $. Le vrai montant fixe
+// par la Commission peut differer, et surtout : il ne faut le retirer
+// QUE s'il est deja compris dans le total du taximetre.
+function redevanceParams(){
+  var r=(typeof C!=='undefined'&&C&&C.redevance)||{};
+  return {
+    montant: r.montant!==undefined?pf(r.montant):1,
+    deduire: r.deduire!==false
+  };
+}
+function redevanceQuart(s){
+  var r=redevanceParams();
+  return r.deduire?pi(s.courses)*r.montant:0;
+}
 function taxNetQuart(s){
-  return pf(s.taxf)-pf(s.taxd)-pi(s.courses);
+  return pf(s.taxf)-pf(s.taxd)-redevanceQuart(s);
+}
+function saveRedevance(){
+  var m=parseFloat(document.getElementById('rdv-montant').value);
+  var d=document.getElementById('rdv-deduire').checked;
+  if(isNaN(m)||m<0){alert('Montant invalide.');return;}
+  C.redevance={montant:m,deduire:d};
+  lSave();audit('REDEVANCE',m+'$ '+(d?'deduite':'non deduite'));
+  renderSet();showToastGrn('Redevance enregistrée');
+}
+// De combien le reglage change la part du patron, sur les 90 derniers jours
+function redevanceImpact(){
+  var lim=new Date();lim.setDate(lim.getDate()-90);
+  var arr=getArr().filter(function(s){return s.date&&parseLocalDate(s.date)>=lim;});
+  var crs=arr.reduce(function(a,s){return a+pi(s.courses);},0);
+  var r=redevanceParams();
+  var pct=(typeof C!=='undefined'&&C&&C.ownerShare)?pf(C.ownerShare):60;
+  return {quarts:arr.length,courses:crs,montant:r.montant,deduire:r.deduire,
+    retire:r.deduire?crs*r.montant:0,
+    partPatron:(r.deduire?crs*r.montant:0)*pct/100,
+    parCent:crs*0.05*pct/100};   // ce que vaut 5 cents d'ecart sur le montant
 }
 function calcSalary(s){
   // Salaire = argent PAYÉ à un chauffeur employé.
@@ -2903,7 +2942,7 @@ function renderNotifBadge(){
 }
 // Une ligne par quart : taximètre, salaire, profit patron, écart
 function _notifLigne(sh){
-  var net=pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses);
+  var net=taxNetQuart(sh);
   var sal=calcSalary(sh), pro=calcOwnerProfit(sh), ec=calcEcart(sh);
   // Ma part du quart = le partage 60/40, sans l'essence : le carburant
   // mis par un chauffeur sert au suivant, c'est une charge de la
@@ -2976,7 +3015,7 @@ function ouvrirNotifs(){
     ? '🔔 '+nouveaux.length+' quart'+(nouveaux.length>1?'s':'')+' rentré'+(nouveaux.length>1?'s':'')
     : '🔔 Rien de nouveau';
   var totPro=liste.reduce(function(a,sh){return a+calcOwnerProfit(sh);},0);
-  var totNet=liste.reduce(function(a,sh){return a+(pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses));},0);
+  var totNet=liste.reduce(function(a,sh){return a+(taxNetQuart(sh));},0);
   var totEss=liste.reduce(function(a,sh){return a+pf(sh.essence);},0);
   var totPart=totPro+totEss;   // la part 60/40 avant carburant
   var MAX=25, trop=Math.max(0,liste.length-MAX);
@@ -3641,7 +3680,7 @@ function annualDrvSummaryHTML(drvName){
   var jours={};
   arr.forEach(function(s){
     totSal+=calcSalary(s);
-    totTax+=(pf(s.taxf)-pf(s.taxd)-pi(s.courses));
+    totTax+=(taxNetQuart(s));
     totPour+=pf(s.pourboire);
     totCrs+=pi(s.courses);
     totRec+=(s.recette||0);
@@ -3695,7 +3734,7 @@ function exportDrvYearCSV(drvName){
     ['Date','Type','Véhicule','Taximètre net','Courses','Pourboire','Salaire']];
   var tS=0,tP=0,tT=0;
   arr.forEach(function(s){
-    var sal=calcSalary(s),tax=(pf(s.taxf)-pf(s.taxd)-pi(s.courses));
+    var sal=calcSalary(s),tax=(taxNetQuart(s));
     tS+=sal;tP+=pf(s.pourboire);tT+=tax;
     rows.push([s.date,(shiftPeriode(s)==='jour'?'Jour':'Soir'),cl(s.vehicle),tax.toFixed(2),pi(s.courses),pf(s.pourboire).toFixed(2),sal.toFixed(2)]);
   });
@@ -4888,7 +4927,7 @@ function analyseKmHT(arr){
   var avecKm=arr.filter(function(s){return pf(s.kmd)>0&&pf(s.kmf)>0&&pf(s.kmf)>pf(s.kmd);});
   var km=avecKm.reduce(function(a,s){return a+(pf(s.kmf)-pf(s.kmd));},0);
   // Recette du compteur, même définition que la paie : fin − début − nb de courses
-  var ttc=avecKm.reduce(function(a,s){return a+(pf(s.taxf)-pf(s.taxd)-pi(s.courses));},0);
+  var ttc=avecKm.reduce(function(a,s){return a+(taxNetQuart(s));},0);
   var ht=p.taux>0?ttc/(1+p.taux/100):ttc;
   var taxes=ttc-ht;
   var courses=avecKm.reduce(function(a,s){return a+pi(s.courses);},0);
@@ -4931,7 +4970,7 @@ function prevEssenceMois(ym){
   var ref=analyseKmHT(getArr());                 // historique complet = base du ratio
   var kmParDollar=ref.ttc>0?ref.km/ref.ttc:0;    // km roulés par dollar au compteur
   var mois=getArr().filter(function(s){return String(s.date||'').slice(0,7)===ym;});
-  function net(s){return pf(s.taxf)-pf(s.taxd)-pi(s.courses);}
+  function net(s){return taxNetQuart(s);}
   function aKm(s){return pf(s.kmd)>0&&pf(s.kmf)>0&&pf(s.kmf)>pf(s.kmd);}
   var ttc=mois.reduce(function(a,s){return a+net(s);},0);
   var kmSaisis=mois.filter(aKm).reduce(function(a,s){return a+(pf(s.kmf)-pf(s.kmd));},0);
@@ -5294,7 +5333,7 @@ function driverCompareHTML(){
     var n=s.driver||'?';
     if(!byD[n])byD[n]={taxNet:0,rec:0,profit:0,sal:0,shifts:0,courses:0,isOwner:isOwnerShift(s)};
     var o=byD[n];
-    o.taxNet+=(pf(s.taxf)-pf(s.taxd)-pi(s.courses));
+    o.taxNet+=(taxNetQuart(s));
     o.rec+=(s.recette||0);
     o.profit+=calcOwnerProfit(s);
     o.sal+=calcSalary(s);
@@ -5419,7 +5458,7 @@ function vehAnalysisHTML(){
     var o=byVeh[v];
     var km=(pi(s.kmd)>0&&pi(s.kmf)>pi(s.kmd))?(pi(s.kmf)-pi(s.kmd)):0;
     if(km>0)o.km+=km; else o.kmMiss++;
-    o.taxNet+=(pf(s.taxf)-pf(s.taxd)-pi(s.courses));
+    o.taxNet+=(taxNetQuart(s));
     o.rec+=(s.recette||0);
     o.profit+=calcOwnerProfit(s);
     o.essence+=pf(s.essence);
@@ -6389,7 +6428,7 @@ function renderAuditFilter(driver){
 function renderAuditRows(shifts){
   return shifts.map(s=>{
     const dd=new Date(s.date).toLocaleDateString('fr-CA',{weekday:'short',month:'short',day:'numeric'});
-    const taxNet=pf(s.taxf)-pf(s.taxd)-pi(s.courses);
+    const taxNet=taxNetQuart(s);
     const suspect=s.ecartSuspect||Math.abs(s.ecart||0)>5;
     return '<div style="background:rgba(10,8,0,.8);border:2px solid '+(suspect?'rgba(255,58,58,.4)':'var(--brd)')+';border-radius:15px;padding:14px;margin-bottom:10px;">'
       // En-tête
@@ -6497,10 +6536,42 @@ function renderMsgPage(){
 
 
 // ═══ SETTINGS ═══
+function redevanceHTML(){
+  var r=redevanceParams(), im=redevanceImpact();
+  return '<div style="font-size:11px;color:var(--m3);line-height:1.65;margin-bottom:12px;">'
+    +'L\'application retire <b>'+fm(r.montant)+' par course</b> du taximètre avant de partager. '
+    +'Sur un quart à 14 courses, ça fait <b>'+fm(14*r.montant)+'</b> de moins à partager.'
+    +'</div>'
+    +'<div style="background:rgba(255,165,0,.08);border:1px solid rgba(255,165,0,.3);border-radius:11px;padding:11px;margin-bottom:12px;font-size:11px;color:var(--m3);line-height:1.65;">'
+    +'⚠️ <b>À vérifier auprès de la Commission des transports.</b> Ce montant ne doit être retiré '
+    +'que s\'il est <b>déjà compris</b> dans le total affiché au taximètre. S\'il est facturé au client '
+    +'en plus du compteur, il ne faut pas le déduire — et tes recettes sont sous-évaluées.'
+    +'</div>'
+    +'<div class="frow">'
+    +'<div class="fsm"><label>💵 Montant par course ($)</label>'
+    +'<input type="number" inputmode="decimal" step="0.01" id="rdv-montant" value="'+r.montant.toFixed(2)+'"></div>'
+    +'</div>'
+    +'<label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin:10px 0;">'
+    +'<input type="checkbox" id="rdv-deduire" '+(r.deduire?'checked':'')+' style="width:20px;height:20px;flex-shrink:0;">'
+    +'<span style="font-size:12px;font-weight:800;color:var(--m3);">La retirer du taximètre</span></label>'
+    +'<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:11px;padding:11px;margin-bottom:11px;font-size:11px;">'
+    +'<div style="font-size:10px;color:var(--m2);font-weight:800;margin-bottom:7px;">SUR LES 90 DERNIERS JOURS</div>'
+    +'<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:var(--m2);">'+im.quarts+' quarts · '+im.courses+' courses</span></div>'
+    +'<div style="display:flex;justify-content:space-between;padding:3px 0;"><span style="color:var(--m2);">Retiré du taximètre</span><span style="font-weight:900;color:var(--red);">−'+fm(im.retire)+'</span></div>'
+    +'<div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid var(--brd);margin-top:4px;padding-top:6px;"><span style="color:var(--m2);">Dont ta part</span><span style="font-weight:900;color:var(--gold);">−'+fm(im.partPatron)+'</span></div>'
+    +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">'
+    +'Chaque tranche de 5 cents d\'écart sur le montant vaut <b>'+fm(im.parCent)+'</b> de ta part sur cette période.'
+    +'</div></div>'
+    +'<button class="btn bsec" onclick="saveRedevance()">✓ Sauvegarder</button>';
+}
 function renderSet(){
   renderThemeGrid();
   document.getElementById('sShare').value=C.ownerShare;
-  document.getElementById('shareInfo').textContent='Chauffeur défaut: '+(100-C.ownerShare)+'% · Formule: (Fin−Début−Courses)×%';
+  var _rdv=redevanceParams();
+  document.getElementById('shareInfo').textContent='Chauffeur défaut: '+(100-C.ownerShare)+'% · Formule: '
+    +(_rdv.deduire?'(Fin−Début−Courses×'+fm(_rdv.montant)+')×%':'(Fin−Début)×%');
+  var _rdvEl=document.getElementById('rdvContent');
+  if(_rdvEl)_rdvEl.innerHTML=redevanceHTML();
   document.getElementById('spwU').innerHTML='<option value="">Choisir...</option>'+C.drivers.map(d=>'<option value="'+d.id+'">'+d.name+'</option>').join('');
   const b=localStorage.getItem(SK+'_bkd');
   document.getElementById('bkupInfo').textContent=b?'Dernière: '+new Date(b).toLocaleString('fr-CA'):'';
@@ -8351,7 +8422,7 @@ function renderSoldeBar(){
       +(pctD2>=100?'<div style="font-size:10px;color:var(--grn);font-weight:700;margin-top:3px;">Objectif atteint!</div>':'<div style="font-size:10px;color:var(--m2);margin-top:2px;">Obj: '+fm(objD2)+' | Restant: '+fm(Math.max(0,objD2-myTaxi))+'</div>')
       +'</div>';
     // ── Cartes cadeaux disponibles ──
-    const myTaxNet=myShifts.reduce(function(a,s){return a+(pf(s.taxf)-pf(s.taxd)-pi(s.courses));},0);
+    const myTaxNet=myShifts.reduce(function(a,s){return a+(taxNetQuart(s));},0);
     const myDrvObj=C.drivers.find(function(d){return d.name===U.name;});
     const curWkKey2=gwS(now).toISOString().slice(0,10);
     const cards=getDriverGiftCardsThisWeek(myDrvObj,curWkKey2);
@@ -9575,7 +9646,7 @@ function taxesPeriodes(){
   getArr().forEach(function(sh){
     if(!sh.date)return;
     var b=bloc(taxePeriodeKey(sh.date,p.periode));
-    b.ttc+=pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses);
+    b.ttc+=taxNetQuart(sh);
     b.achats+=pf(sh.essence);                   // le carburant donne droit au crédit
     b.quarts++;
   });
@@ -9931,7 +10002,7 @@ function hebdoVehicules(nbSemaines){
     var v=sh.vehicle||'—';
     if(!sem[k].veh[v])sem[k].veh[v]={nom:v,net:0,part:0,salaires:0,essence:0,quarts:0};
     var c=sem[k].veh[v];
-    var net=pf(sh.taxf)-pf(sh.taxd)-pi(sh.courses);
+    var net=taxNetQuart(sh);
     var ess=pf(sh.essence);
     c.net+=net;
     // Part du patron AVANT le carburant : on remet l'essence que
@@ -10990,7 +11061,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-07-v98-DETAIL-CALCUL-HISTORIQUE';
+var APP_VERSION = '2026-08-09-v99-REDEVANCE-REGLABLE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
