@@ -5622,8 +5622,129 @@ function payeToggle(wkKey,drvName){
   renderPaye();
 }
 
+// ═══════════════════════════════════════════════
+// ⛽ AUDIT DES REMBOURSEMENTS D'ESSENCE
+// Jusqu'a la v96, l'essence avancee par un chauffeur etait ajoutee a
+// son salaire. Si le patron la remboursait AUSSI a part, il a paye
+// deux fois. L'app ne peut pas savoir s'il y a eu un second paiement
+// — elle sort la liste exacte des montants qui etaient inclus dans
+// les paies VERSEES, a comparer avec les releves.
+// ═══════════════════════════════════════════════
+function auditEssenceAvancee(){
+  var byWk={};
+  getArr().forEach(function(s){
+    var ess=essenceAvancee(s);
+    if(ess<=0.005||isOwnerShift(s))return;
+    var ws=gwS(parseLocalDate(s.date));
+    var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
+    var k=wk+'|'+s.driver;
+    if(!byWk[k])byWk[k]={key:k,wk:wk,drv:s.driver,ess:0,quarts:[]};
+    byWk[k].ess+=ess;
+    byWk[k].quarts.push({date:s.date,veh:s.vehicle||'',ess:ess});
+  });
+  var lignes=Object.keys(byWk).map(function(k){
+    var e=byWk[k];
+    e.paye=!!(C.payes&&C.payes[k]&&C.payes[k].paid);
+    e.datePaye=(e.paye&&C.payes[k].ts)?new Date(C.payes[k].ts).toLocaleDateString('fr-CA',{day:'numeric',month:'short',year:'numeric'}):'';
+    e.quarts.sort(function(a,b){return a.date.localeCompare(b.date);});
+    return e;
+  }).sort(function(a,b){return b.wk.localeCompare(a.wk);});
+  // Par chauffeur : ce qui a ete verse, et ce qui ne l'est pas encore
+  var parDrv={};
+  lignes.forEach(function(e){
+    if(!parDrv[e.drv])parDrv[e.drv]={drv:e.drv,verse:0,aVenir:0,semaines:0};
+    if(e.paye){parDrv[e.drv].verse+=e.ess;parDrv[e.drv].semaines++;}
+    else parDrv[e.drv].aVenir+=e.ess;
+  });
+  var drvs=Object.keys(parDrv).map(function(n){return parDrv[n];})
+    .sort(function(a,b){return b.verse-a.verse;});
+  return {lignes:lignes,drvs:drvs,
+    totalVerse:drvs.reduce(function(a,d){return a+d.verse;},0),
+    totalAVenir:drvs.reduce(function(a,d){return a+d.aVenir;},0)};
+}
+function auditEssenceTexte(drvNom){
+  var a=auditEssenceAvancee();
+  var l=a.lignes.filter(function(e){return e.paye&&(!drvNom||e.drv===drvNom);});
+  if(!l.length)return '';
+  var t='Essence avancée incluse dans les paies versées\n';
+  var tot=0;
+  l.forEach(function(e){
+    t+='\nSemaine du '+e.wk+' — '+e.drv+' : '+fm(e.ess)+'\n';
+    e.quarts.forEach(function(q){t+='   '+q.date+' · '+q.veh+' · '+fm(q.ess)+'\n';});
+    tot+=e.ess;
+  });
+  return t+'\nTOTAL : '+fm(tot);
+}
+function copierAuditEssence(drvNom){
+  var t=auditEssenceTexte(drvNom||'');
+  if(!t){alert('Rien à copier.');return;}
+  function secours(){
+    var e=document.createElement('textarea');
+    e.value=t;e.style.position='fixed';e.style.opacity='0';
+    document.body.appendChild(e);e.select();
+    try{document.execCommand('copy');showToastGrn('Liste copiée');}catch(x){alert('Copie impossible.');}
+    document.body.removeChild(e);
+  }
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t).then(function(){showToastGrn('Liste copiée');},secours);
+  }else secours();
+}
+function auditEssenceHTML(){
+  var a=auditEssenceAvancee();
+  if(!a.lignes.length)return '';
+  var ouvert=!!window._audEssOpen;
+  var h='<div class="card" style="border-color:rgba(255,107,53,.35);margin-bottom:13px;">'
+    +'<div class="ctit" onclick="window._audEssOpen=!window._audEssOpen;renderPaye();" style="cursor:pointer;">'
+    +'<span><span class="ci">⛽</span>Essence avancée — vérifier les remboursements</span>'
+    +'<span style="font-size:11px;font-weight:900;color:'+(a.totalVerse>0.005?'var(--red)':'var(--m2)')+';">'+fm(a.totalVerse)+' '+(ouvert?'▾':'▸')+'</span></div>';
+  if(!ouvert)return h+'</div>';
+  h+='<div style="font-size:11px;color:var(--m3);line-height:1.65;margin-bottom:12px;">'
+    +'Jusqu\'à la version 96, l\'essence qu\'un chauffeur avançait était <b>ajoutée à son salaire</b>. '
+    +'Voici les montants qui étaient donc <b>déjà inclus dans les paies que tu as versées</b>. '
+    +'<span style="color:var(--org);">Si tu les as aussi remboursés à part, tu as payé deux fois.</span> '
+    +'L\'application ne peut pas le savoir : compare cette liste à tes relevés et à ton comptant.</div>';
+
+  h+='<div style="background:rgba(255,58,58,.08);border:1px solid rgba(255,58,58,.3);border-radius:12px;padding:11px;margin-bottom:12px;">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;">'
+    +'<span style="font-size:11px;color:var(--m2);font-weight:700;">Inclus dans des paies déjà versées</span>'
+    +'<span style="font-size:18px;font-weight:900;color:var(--red);">'+fm(a.totalVerse)+'</span></div>'
+    +(a.totalAVenir>0.005?'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid var(--brd);">'
+      +'<span style="font-size:10px;color:var(--m2);">Pas encore versé — aucun risque</span>'
+      +'<span style="font-size:12px;font-weight:800;color:var(--grn);">'+fm(a.totalAVenir)+'</span></div>':'')
+    +'</div>';
+
+  a.drvs.forEach(function(d){
+    if(d.verse<=0.005&&d.aVenir<=0.005)return;
+    h+='<div style="border:1px solid var(--brd);border-radius:12px;padding:11px;margin-bottom:9px;background:rgba(0,0,0,.2);">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">'
+      +'<div><div style="font-size:13px;font-weight:900;color:var(--m3);">🚗 '+_cmpEsc(d.drv)+'</div>'
+      +'<div style="font-size:9px;color:var(--m2);">'+d.semaines+' semaine'+(d.semaines>1?'s':'')+' déjà payée'+(d.semaines>1?'s':'')+'</div></div>'
+      +'<div style="text-align:right;"><div style="font-size:9px;color:var(--m2);font-weight:700;">À vérifier</div>'
+      +'<div style="font-size:17px;font-weight:900;color:'+(d.verse>0.005?'var(--red)':'var(--m2)')+';">'+fm(d.verse)+'</div></div></div>';
+    a.lignes.filter(function(e){return e.drv===d.drv;}).forEach(function(e){
+      h+='<div style="border-top:1px solid var(--brd);padding:7px 0;font-size:10px;">'
+        +'<div style="display:flex;justify-content:space-between;gap:8px;">'
+        +'<span style="color:'+(e.paye?'var(--m3)':'var(--m2)')+';font-weight:700;">Semaine du '+e.wk
+        +(e.paye?' <span style="color:var(--red);">· payée'+(e.datePaye?' le '+e.datePaye:'')+'</span>':' <span style="color:var(--grn);">· pas encore payée</span>')+'</span>'
+        +'<span style="font-weight:900;color:'+(e.paye?'var(--red)':'var(--grn)')+';flex-shrink:0;">'+fm(e.ess)+'</span></div>'
+        +'<div style="color:var(--m2);margin-top:3px;line-height:1.6;">'
+        +e.quarts.map(function(q){return q.date+' · '+_cmpEsc(q.veh)+' · '+fm(q.ess);}).join('<br>')
+        +'</div></div>';
+    });
+    if(d.verse>0.005){
+      h+='<button onclick="copierAuditEssence(\''+_cmpEsc(d.drv).replace(/'/g,"\\'")+'\')" style="width:100%;background:rgba(96,165,250,.16);border:1px solid rgba(96,165,250,.4);color:var(--blu);border-radius:9px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;margin-top:9px;">📋 Copier la liste de '+_cmpEsc(d.drv)+'</button>';
+    }
+    h+='</div>';
+  });
+  h+='<button onclick="copierAuditEssence()" style="width:100%;background:rgba(255,255,255,.06);border:1px solid var(--brd2);color:var(--m3);border-radius:10px;padding:11px;font-size:11px;font-weight:800;cursor:pointer;">📋 Copier toute la liste</button>'
+    +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:10px;">'
+    +'ℹ️ Depuis la v96, l\'essence avancée n\'entre plus dans le salaire : elle apparaît sur une ligne séparée. Le problème ne peut plus se reproduire.</div>';
+  return h+'</div>';
+}
+
 function renderPaye(){
   const c=document.getElementById('payeContent');
+  var _audEss=auditEssenceHTML();
   if(!C.payes)C.payes={};
   const allArr=getArr();
   if(!allArr.length){c.innerHTML='<div class="empty"><div class="ei">💵</div>Aucun quart enregistré.</div>';return;}
@@ -5760,7 +5881,7 @@ function renderPaye(){
     html+=annualDrvSummaryHTML(window._payeAnnualDrv);
     html+='</div>';
   }
-  c.innerHTML=html||'<div class="empty"><div class="ei">💵</div>Aucune paye à afficher.</div>';
+  c.innerHTML=_audEss+(html||'<div class="empty"><div class="ei">💵</div>Aucune paye à afficher.</div>');
 }
 
 // ═══ EXPENSES ═══
@@ -10856,7 +10977,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-07-v96-BASE-6040-ET-ESSENCE-AVANCEE';
+var APP_VERSION = '2026-08-07-v97-AUDIT-ESSENCE-AVANCEE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
