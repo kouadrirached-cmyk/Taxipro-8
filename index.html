@@ -1985,11 +1985,44 @@ function redevanceImpact(){
   var arr=getArr().filter(function(s){return s.date&&parseLocalDate(s.date)>=lim;});
   var crs=arr.reduce(function(a,s){return a+pi(s.courses);},0);
   var r=redevanceParams();
-  var pct=(typeof C!=='undefined'&&C&&C.ownerShare)?pf(C.ownerShare):60;
-  return {quarts:arr.length,courses:crs,montant:r.montant,deduire:r.deduire,
+  var defPct=(typeof C!=='undefined'&&C&&C.ownerShare)?pf(C.ownerShare):60;
+  // Part du patron dans la redevance, quart par quart. Pour un chauffeur
+  // exempte, le patron l'absorbe en entier : la base de paie du chauffeur
+  // ne bouge pas quand le montant change.
+  var poids=arr.reduce(function(a,s){
+    var c=pi(s.courses);
+    if(isOwnerShift(s))return a+c;
+    if(sansRedevance(s))return a+c;
+    var d=getDrv(s.driver);
+    return a+c*(d?(100-pf(d.pct)):defPct)/100;
+  },0);
+  var exo=arr.filter(function(s){return !isOwnerShift(s)&&sansRedevance(s);}).length;
+  return {quarts:arr.length,courses:crs,montant:r.montant,deduire:r.deduire,exoneres:exo,
     retire:r.deduire?crs*r.montant:0,
-    partPatron:(r.deduire?crs*r.montant:0)*pct/100,
-    parCent:crs*0.05*pct/100};   // ce que vaut 5 cents d'ecart sur le montant
+    partPatron:(r.deduire?poids*r.montant:0),
+    parCent:poids*0.05};   // ce que vaut 5 cents d'ecart sur le montant
+}
+// Augmentation par chauffeur : certains chauffeurs prennent leur % sur le
+// compteur ENTIER, sans qu'on retire la redevance par course. La compagnie
+// paie quand même la redevance : elle sort donc de la part du patron, pas
+// de celle du chauffeur. Réglé chauffeur par chauffeur dans l'équipe.
+function sansRedevance(s){
+  var d=getDrv(s&&s.driver);
+  return !!(d&&d.sansRedevance);
+}
+// La base sur laquelle se calcule la part DU CHAUFFEUR
+function basePaieQuart(s){
+  return sansRedevance(s)?(pf(s.taxf)-pf(s.taxd)):taxNetQuart(s);
+}
+// Ce qui reste au patron, avant l'essence. Toujours le reste du taximètre
+// net une fois la part du chauffeur sortie : les deux parts s'additionnent
+// exactement, quelle que soit la base de paie du chauffeur.
+function partPatronQuart(s){
+  var net=taxNetQuart(s);
+  if(isOwnerShift(s))return net;
+  var d=getDrv(s&&s.driver);
+  if(!d)return 0;
+  return parseFloat((net-basePaieQuart(s)*(pf(d.pct)/100)).toFixed(2));
 }
 function calcSalary(s){
   // Salaire = argent PAYÉ à un chauffeur employé.
@@ -1997,12 +2030,12 @@ function calcSalary(s){
   if(isOwnerShift(s))return 0;
   const drv=getDrv(s.driver);
   if(!drv)return 0;
-  const net=taxNetQuart(s);
+  const base=basePaieQuart(s);
   // L'essence avancée par le chauffeur N'EST PAS un salaire : c'est une
   // avance qu'on lui rembourse à part. La mêler à la paie faussait le
   // salaire affiché ET la faisait déduire deux fois du profit mensuel,
   // une fois dans les salaires et une fois dans le poste carburant.
-  return parseFloat((net*(drv.pct/100)+pf(s.pourboire)).toFixed(2));
+  return parseFloat((base*(drv.pct/100)+pf(s.pourboire)).toFixed(2));
 }
 // Essence sortie de la poche du chauffeur, à lui rembourser
 function essenceAvancee(s){
@@ -2015,7 +2048,7 @@ function calcOwnerProfit(s){
   if(isOwnerShift(s))return parseFloat((net-pf(s.essence)).toFixed(2));
   const drv=getDrv(s.driver);
   if(!drv)return 0;
-  return parseFloat((net*(1-drv.pct/100)-pf(s.essence)).toFixed(2));
+  return parseFloat((partPatronQuart(s)-pf(s.essence)).toFixed(2));
 }
 function calcEcart(s){
   const remis=parseFloat((pf(s.comp)+(pf(s.card)-pf(s.pourboire))+pf(s.sts)+pf(s.coup)+pf(s.ext)).toFixed(2));
@@ -2947,8 +2980,7 @@ function _notifLigne(sh){
   // Ma part du quart = le partage 60/40, sans l'essence : le carburant
   // mis par un chauffeur sert au suivant, c'est une charge de la
   // compagnie qu'on sort une fois par semaine, pas un cout du quart.
-  var _d=getDrv(sh.driver), _p=_d?pf(_d.pct):pf(sh.drvPct);
-  var part=isOwnerShift(sh)?net:net*(1-_p/100);
+  var part=partPatronQuart(sh);
   var qd=new Date(sh.ts);
   var quand=isNaN(qd)?'':qd.toLocaleString('fr-CA',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
   var h='<div style="background:rgba(0,0,0,.25);border:1px solid var(--brd);border-radius:12px;padding:12px;margin-bottom:9px;">'
@@ -2974,16 +3006,19 @@ function _notifLigne(sh){
   }
   // Le calcul en toutes lettres : sans ça, impossible de recoller les
   // chiffres soi-même, et le patron se demande où est passé son 60 %.
-  var pct=_p;
+  var _d=getDrv(sh.driver);
+  var pct=_d?pf(_d.pct):pf(sh.drvPct);
+  var base=basePaieQuart(sh), exo=sansRedevance(sh);
   var ess=pf(sh.essence), pour=pf(sh.pourboire);
   var det='<b>'+fm(net)+'</b>'
     +(isOwnerShift(sh)?' <span style="color:var(--m2);">(tu conduis : 100 %)</span>'
-                      :' × <b>'+(100-pct)+' %</b>');
+                      :(exo?' − <b>'+fm(base*pct/100)+'</b> (sa part)':' × <b>'+(100-pct)+' %</b>'));
   det+=' = <b style="color:var(--gold);">'+fm(part)+'</b>';
   h+='<div style="margin-top:8px;padding-top:7px;border-top:1px solid var(--brd);font-size:10px;color:var(--m2);line-height:1.7;">'
+    +(exo&&!isOwnerShift(sh)?'🎁 Augmenté : sa part se calcule sur le compteur entier '+fm(base)+'.<br>':'')
     +'✅ '+det;
   if(!isOwnerShift(sh)){
-    var detS=fm(net)+' × <b>'+pct+' %</b> = <b>'+fm(net*pct/100)+'</b>';
+    var detS=fm(base)+' × <b>'+pct+' %</b> = <b>'+fm(base*pct/100)+'</b>';
     if(pour>0.005)detS+=' + 💵 pourboire <b>'+fm(pour)+'</b>';
 
     detS+=' = <b style="color:var(--neon);">'+fm(sal)+'</b>';
@@ -3531,7 +3566,7 @@ function renderDash(){
             var nm=e[0],d=e[1];
             // Calcul taximètre net réel depuis les shifts
             var taxNet=d.shifts.reduce(function(a,s){return a+taxNetQuart(s);},0);
-            var own60=taxNet*(ownerPct/100);
+            var own60=d.shifts.reduce(function(a,s){return a+partPatronQuart(s);},0);
             var recette=d.rec;
             // Vérification : la recette doit couvrir le 60%
             var ok=recette>=own60-0.5;
@@ -3758,7 +3793,7 @@ function _shiftCard(s, isOwner){
   var taxNet=taxNetQuart(s);
   var ownShift=isOwnerShift(s);
   var ownProfit=calcOwnerProfit(s);
-  var own60=taxNet*(C.ownerShare/100);
+  var own60=partPatronQuart(s);
   var dlbl=parseLocalDate(s.date).toLocaleDateString('fr-CA',{weekday:'short',month:'short',day:'numeric'});
   var ptags='';
   if(s.comp>0)ptags+='<span style="font-size:9px;background:rgba(57,211,83,.15);color:var(--grn);border-radius:5px;padding:1px 5px;font-weight:700;">💵 '+fm(s.comp)+'</span> ';
@@ -3786,25 +3821,32 @@ function _shiftCard(s, isOwner){
     h+='<div style="background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.15);border-radius:8px;padding:7px;text-align:center;">';
     h+='<div style="font-size:8px;color:var(--m2);font-weight:700;text-transform:uppercase;margin-bottom:2px;">🔢 Taxim. net</div>';
     h+='<div style="font-size:13px;font-weight:900;color:var(--txt);">'+fm(taxNet)+'</div></div>';
+    var pctD=(getDrv(s.driver)||{}).pct;
+    pctD=(pctD===undefined||pctD===null)?pf(s.drvPct):pf(pctD);
+    var baseD=basePaieQuart(s), exo=sansRedevance(s);
+    // Le chauffeur ne voit JAMAIS la part du patron : à sa place, la base
+    // sur laquelle son pourcentage est calculé.
     h+='<div style="background:rgba(245,200,0,.1);border:1px solid rgba(245,200,0,.3);border-radius:8px;padding:7px;text-align:center;">';
-    h+='<div style="font-size:8px;color:var(--gold);font-weight:700;text-transform:uppercase;margin-bottom:2px;">👑 '+(isOwner?'Votre '+(C.ownerShare||60)+'%':fm(own60))+'</div>';
-    h+='<div style="font-size:13px;font-weight:900;color:var(--gold);">'+(isOwner?fm(own60):fm(sal))+'</div></div>';
+    h+='<div style="font-size:8px;color:var(--gold);font-weight:700;text-transform:uppercase;margin-bottom:2px;">'
+      +(isOwner?'👑 '+(exo?'Votre part':'Votre '+(C.ownerShare||60)+'%'):'📐 Ma base')+'</div>';
+    h+='<div style="font-size:13px;font-weight:900;color:var(--gold);">'+fm(isOwner?own60:baseD)+'</div></div>';
     h+='<div style="background:rgba(57,211,83,.06);border:1px solid rgba(57,211,83,.2);border-radius:8px;padding:7px;text-align:center;">';
-    h+='<div style="font-size:8px;color:var(--grn);font-weight:700;text-transform:uppercase;margin-bottom:2px;">💼 Sal. chauf.</div>';
+    h+='<div style="font-size:8px;color:var(--grn);font-weight:700;text-transform:uppercase;margin-bottom:2px;">💼 '+(isOwner?'Sal. chauf.':'Mon salaire')+'</div>';
     h+='<div style="font-size:13px;font-weight:900;color:var(--grn);">'+fm(sal)+'</div></div>';
     h+='</div>';
     // Le calcul en toutes lettres : sans lui, impossible de retrouver
     // son chiffre soi-même, et un salaire « trop élevé » ressemble à
     // une erreur alors que c'est le pourboire qui s'ajoute.
-    var pctD=(getDrv(s.driver)||{}).pct;
-    pctD=(pctD===undefined||pctD===null)?pf(s.drvPct):pf(pctD);
     h+='<div style="font-size:9px;color:var(--m2);line-height:1.8;margin-bottom:6px;padding-top:6px;border-top:1px solid var(--brd);">'
-      +'👑 '+fm(taxNet)+' × '+(100-pctD)+' % = <b style="color:var(--gold);">'+fm(taxNet*(100-pctD)/100)+'</b>'
-      +'<br>💼 '+fm(taxNet)+' × '+pctD+' %'
+      +(exo?'🎁 '+(isOwner?'Augmentation : sa part se calcule':'Augmentation : ta part se calcule')
+            +' sur le compteur entier '+fm(baseD)+', sans retirer la redevance.<br>':'')
+      +(isOwner?'👑 '+fm(taxNet)+(exo?' − '+fm(baseD*pctD/100)+' (sa part)':' × '+(100-pctD)+' %')
+        +' = <b style="color:var(--gold);">'+fm(own60)+'</b><br>':'')
+      +'💼 '+fm(baseD)+' × '+pctD+' %'
       +(pf(s.pourboire)>0.005?' + 🪙 '+fm(s.pourboire)+' de pourboire':'')
       +' = <b style="color:var(--grn);">'+fm(sal)+'</b>'
       +(pf(s.essence)>0.005?'<br>⛽ '+fm(s.essence)+' d\'essence — charge de la compagnie'
-        +(essenceAvancee(s)>0.005?', avancée par le chauffeur et à lui rembourser':''):'')
+        +(essenceAvancee(s)>0.005?(isOwner?', avancée par le chauffeur et à lui rembourser':', que tu as avancée et qu\'on te rembourse'):''):'')
       +'</div>';
   }
   if(ptags)h+='<div style="margin-bottom:6px;">'+ptags+'</div>';
@@ -3850,7 +3892,7 @@ function _groupByWeek(shifts){
     var w=byWk[wk];
     w.rec+=s.recette; w.sal+=calcSalary(s); w.profit+=calcOwnerProfit(s);
     var tn=taxNetQuart(s);
-    w.taxNet+=tn; w.own60+=tn*(C.ownerShare/100);
+    w.taxNet+=tn; w.own60+=partPatronQuart(s);
     w.crs+=(s.courses||0); w.n++;
     if(Math.abs(calcEcart(s))>0.5)w.ecarts++;
     w.shifts.push(s);
@@ -6078,17 +6120,35 @@ function delExp(id){
 // ═══ TEAM ═══
 function renderTeam(){
   document.getElementById('teamList').innerHTML=C.drivers.map(d=>
-    '<div class="dc"><div class="dc-av">'+(d.role==='owner'?'👑':'🚗')+'</div><div style="flex:1;"><div class="dc-name">'+d.name+'<span class="badge '+(d.active!==false?'bg':'br')+'">'+(d.active!==false?'Actif':'Inactif')+'</span><span class="badge ba">'+d.pct+'%</span></div><div class="dc-info">'+(d.phone||'Pas de tél.')+'</div></div><div style="display:flex;gap:6px;"><button class="bblu bsm btn" style="width:36px;height:36px;padding:0;" onclick="openEditDrv(\''+d.id+'\')">✏️</button>'+(d.role!=='owner'?'<button class="bsuc bsm btn" style="width:36px;height:36px;padding:0;" title="Attestation d\'emploi" onclick="attestationEmploi(\''+d.id+'\')">📄</button><button class="bdng bsm btn" style="width:36px;height:36px;padding:0;" onclick="togDrv(\''+d.id+'\')">'+(d.active!==false?'🔒':'🔓')+'</button>':'')+'</div></div>'
+    '<div class="dc"><div class="dc-av">'+(d.role==='owner'?'👑':'🚗')+'</div><div style="flex:1;"><div class="dc-name">'+d.name+'<span class="badge '+(d.active!==false?'bg':'br')+'">'+(d.active!==false?'Actif':'Inactif')+'</span><span class="badge ba">'+d.pct+'%</span>'+(d.sansRedevance&&d.role!=='owner'?'<span class="badge bg" title="Sa part est calculée sur le compteur entier">🎁 Sans redevance</span>':'')+'</div><div class="dc-info">'+(d.phone||'Pas de tél.')+'</div></div><div style="display:flex;gap:6px;"><button class="bblu bsm btn" style="width:36px;height:36px;padding:0;" onclick="openEditDrv(\''+d.id+'\')">✏️</button>'+(d.role!=='owner'?'<button class="bsuc bsm btn" style="width:36px;height:36px;padding:0;" title="Attestation d\'emploi" onclick="attestationEmploi(\''+d.id+'\')">📄</button><button class="bdng bsm btn" style="width:36px;height:36px;padding:0;" onclick="togDrv(\''+d.id+'\')">'+(d.active!==false?'🔒':'🔓')+'</button>':'')+'</div></div>'
   ).join('');
 }
 function openAddDrv(){editDrvId=null;document.getElementById('drvMTit').innerHTML='➕ Nouveau chauffeur <button class="mclose" onclick="closeM(\'drvMov\')">✕</button>';document.getElementById('drvForm').innerHTML=drvFormHTML({pct:40,active:true});document.getElementById('drvMov').classList.add('on');}
 function openEditDrv(id){editDrvId=id;const d=C.drivers.find(x=>x.id===id);if(!d)return;document.getElementById('drvMTit').innerHTML='✏️ Modifier <button class="mclose" onclick="closeM(\'drvMov\')">✕</button>';document.getElementById('drvForm').innerHTML=drvFormHTML(d);document.getElementById('drvMov').classList.add('on');}
-function drvFormHTML(d){return '<div class="fsm"><label>Nom</label><input type="text" id="dm-n" value="'+(d.name||'')+'" placeholder="Nom du chauffeur"></div><div class="fsm"><label>Téléphone</label><input type="tel" id="dm-ph" value="'+(d.phone||'')+'" placeholder="+1 514 000-0000"></div><div class="fsm"><label>Email (pour paye)</label><input type="email" id="dm-em" value="'+(d.email||'')+'" placeholder="chauffeur@email.com"></div><div class="fsm"><label>Pourcentage (%)</label><input type="number" id="dm-p" value="'+(d.pct||40)+'" min="0" max="100"></div><div class="fsm"><label>Mot de passe</label><input type="text" id="dm-pw" value="" placeholder="'+(d.id?'Laisser vide = inchangé':'Mot de passe')+'"></div><div class="fsm"><label>Statut</label><div class="sw"><select id="dm-a"><option value="true" '+(d.active!==false?'selected':'')+'>✅ Actif</option><option value="false" '+(d.active===false?'selected':'')+'>❌ Inactif</option></select></div></div><div style="border-top:1px solid var(--brd);margin:10px 0 8px;padding-top:8px;font-size:10px;color:var(--m2);font-weight:800;text-transform:uppercase;">📄 Pour documents officiels (attestation d\'emploi)</div><div class="fsm"><label>Nom complet officiel</label><input type="text" id="dm-full" value="'+(d.fullName||'')+'" placeholder="ex: Mazouz Mohamed Mehdi"></div><div class="fsm"><label>Date de naissance</label><input type="date" id="dm-dob" value="'+(d.dob||'')+'"></div><div class="fsm"><label>Adresse complète</label><input type="text" id="dm-addr" value="'+(d.address||'')+'" placeholder="ex: 1090, rue d\'Angoulême, app. 142"></div><div class="fsm"><label>Employé depuis</label><input type="date" id="dm-hired" value="'+(d.hiredDate||'')+'"></div>';}
+// Le bloc « augmentation » du formulaire chauffeur. N'apparaît que si la
+// redevance est réellement retirée : sinon il n'y a rien à exempter.
+function redevanceDrvHTML(d){
+  var r=redevanceParams();
+  if(!r.deduire||r.montant<=0)return '';
+  return '<label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;background:rgba(57,211,83,.06);border:1px solid rgba(57,211,83,.22);border-radius:11px;padding:11px;margin-bottom:9px;">'
+    +'<input type="checkbox" id="dm-srdv" '+(d&&d.sansRedevance?'checked':'')+' style="width:20px;height:20px;flex-shrink:0;margin-top:1px;">'
+    +'<span><span style="font-size:12px;font-weight:800;color:var(--grn);">🎁 Augmentation : ne pas retirer la redevance de sa base</span>'
+    +'<span style="display:block;font-size:10px;color:var(--m2);line-height:1.6;margin-top:4px;">'
+    +'Sa part se calcule sur le <b>compteur entier</b>, sans enlever les '+fm(r.montant)+' par course. '
+    +'La compagnie paie quand même la redevance : elle sort de <b>ta part</b>, pas de la sienne. '
+    +'Sur un quart à 14 courses et '+fm(r.montant)+', ça lui donne environ '
+    +fm(14*r.montant*((d&&d.pct)||40)/100)+' de plus et te coûte autant.'
+    +'</span></span></label>';
+}
+function drvFormHTML(d){return'<div class="fsm"><label>Nom</label><input type="text" id="dm-n" value="'+(d.name||'')+'" placeholder="Nom du chauffeur"></div><div class="fsm"><label>Téléphone</label><input type="tel" id="dm-ph" value="'+(d.phone||'')+'" placeholder="+1 514 000-0000"></div><div class="fsm"><label>Email (pour paye)</label><input type="email" id="dm-em" value="'+(d.email||'')+'" placeholder="chauffeur@email.com"></div><div class="fsm"><label>Pourcentage (%)</label><input type="number" id="dm-p" value="'+(d.pct||40)+'" min="0" max="100"></div>'+redevanceDrvHTML(d)+'<div class="fsm"><label>Mot de passe</label><input type="text" id="dm-pw" value="" placeholder="'+(d.id?'Laisser vide = inchangé':'Mot de passe')+'"></div><div class="fsm"><label>Statut</label><div class="sw"><select id="dm-a"><option value="true" '+(d.active!==false?'selected':'')+'>✅ Actif</option><option value="false" '+(d.active===false?'selected':'')+'>❌ Inactif</option></select></div></div><div style="border-top:1px solid var(--brd);margin:10px 0 8px;padding-top:8px;font-size:10px;color:var(--m2);font-weight:800;text-transform:uppercase;">📄 Pour documents officiels (attestation d\'emploi)</div><div class="fsm"><label>Nom complet officiel</label><input type="text" id="dm-full" value="'+(d.fullName||'')+'" placeholder="ex: Mazouz Mohamed Mehdi"></div><div class="fsm"><label>Date de naissance</label><input type="date" id="dm-dob" value="'+(d.dob||'')+'"></div><div class="fsm"><label>Adresse complète</label><input type="text" id="dm-addr" value="'+(d.address||'')+'" placeholder="ex: 1090, rue d\'Angoulême, app. 142"></div><div class="fsm"><label>Employé depuis</label><input type="date" id="dm-hired" value="'+(d.hiredDate||'')+'"></div>';}
 async function saveDrv(){
   const name=gv('dm-n').trim(),phone=gv('dm-ph').trim(),email=gv('dm-em').trim();
   const pct=parseInt(gv('dm-p'))||40,pw=gv('dm-pw').trim();
   const active=gv('dm-a')==='true';
   const fullName=gv('dm-full').trim(),dob=gv('dm-dob'),address=gv('dm-addr').trim(),hiredDate=gv('dm-hired');
+  // Case absente (redevance non retirée) = on garde le réglage existant
+  const srdvEl=document.getElementById('dm-srdv');
+  const srdv=srdvEl?srdvEl.checked:undefined;
   if(!name){alert('Nom requis');return;}
   if(!editDrvId&&!pw){alert('Mot de passe requis pour un nouveau chauffeur');return;}
   let pwPatch=null;
@@ -6100,13 +6160,14 @@ async function saveDrv(){
     C.drivers=C.drivers.map(d=>{
       if(d.id!==editDrvId)return d;
       const nd=Object.assign({},d,{name,phone,email,pct,active,fullName,dob,address,hiredDate});
+      if(srdv!==undefined)nd.sansRedevance=srdv;
       if(pwPatch){Object.assign(nd,pwPatch);if(pwPatch.pwh)delete nd.pw;else delete nd.pwh;}
       return nd;
     });
   }
   else{
     if(C.drivers.find(d=>d.name.toLowerCase()===name.toLowerCase())){alert('Chauffeur existe déjà');return;}
-    const nd={id:uid(),name,phone,email,pct,role:'driver',active,fullName,dob,address,hiredDate};
+    const nd={id:uid(),name,phone,email,pct,role:'driver',active,fullName,dob,address,hiredDate,sansRedevance:srdv===true};
     Object.assign(nd,pwPatch||{});
     C.drivers.push(nd);
   }
@@ -6561,7 +6622,11 @@ function redevanceHTML(){
     +'<div style="display:flex;justify-content:space-between;padding:3px 0;border-top:1px solid var(--brd);margin-top:4px;padding-top:6px;"><span style="color:var(--m2);">Dont ta part</span><span style="font-weight:900;color:var(--gold);">−'+fm(im.partPatron)+'</span></div>'
     +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">'
     +'Chaque tranche de 5 cents d\'écart sur le montant vaut <b>'+fm(im.parCent)+'</b> de ta part sur cette période.'
+    +(im.exoneres>0?'<br>🎁 '+im.exoneres+' quart'+(im.exoneres>1?'s':'')+' de chauffeur exempté : tu absorbes la redevance en entier sur ceux-là.':'')
     +'</div></div>'
+    +(r.deduire&&r.montant>0?'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin:10px 0 4px;">'
+      +'🎁 <b>Pour augmenter un chauffeur en particulier</b>, va dans 👥 Équipe → ✏️ sur son nom : '
+      +'tu peux lui laisser le compteur entier comme base, sans toucher aux autres.</div>':'')
     +'<button class="btn bsec" onclick="saveRedevance()">✓ Sauvegarder</button>';
 }
 function renderSet(){
@@ -11061,7 +11126,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-09-v99-REDEVANCE-REGLABLE';
+var APP_VERSION = '2026-08-10-v100-AUGMENTATION-PAR-CHAUFFEUR';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
