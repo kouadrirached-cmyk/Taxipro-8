@@ -9040,6 +9040,10 @@ function renderTreso(){
   var moLabel=selMo.toLocaleDateString('fr-CA',{month:'long',year:'numeric'});
   var html='';
 
+  // ── En-tête : le solde et sa variation, avant tout le reste ──
+  html+=varMoisHTML();
+  html+=tresoIndexHTML();
+
   // ── Navigateur de mois ──
   html+='<div style="display:flex;align-items:center;justify-content:space-between;background:rgba(245,200,0,.07);border:1.5px solid rgba(245,200,0,.2);border-radius:12px;padding:10px 14px;margin-bottom:14px;">'
     +'<button onclick="tresoNav(-1)" style="background:rgba(255,255,255,.08);border:none;color:var(--txt);border-radius:8px;padding:6px 14px;font-size:16px;font-weight:900;cursor:pointer;">‹</button>'
@@ -9059,12 +9063,12 @@ function renderTreso(){
   var moCoup=moArr.reduce(function(a,s){return a+pf(s.coup);},0);
   var moTip=moArr.reduce(function(a,s){return a+pf(s.pourboire);},0);
 
-  // ── 📋 BILAN en premier : c'est le résumé, il doit être visible sans défiler ──
-  html+=bilanHTML();
+  // ── Les grands blocs, chacun repérable depuis l'index du haut ──
+  html+='<div id="treso-bilan" style="scroll-margin-top:12px;">'+bilanHTML()+'</div>';
+  html+='<div id="treso-taxes" style="scroll-margin-top:12px;">'+taxesHTML()+'</div>';
+  html+='<div id="treso-evolution" style="scroll-margin-top:12px;">'+evolutionHTML()+'</div>';
   html+=investirHTML();
   html+=placementHTML();
-  html+=taxesHTML();
-  html+=evolutionHTML();
 
   // ── Caisse séparée : bandeau + suivi par chauffeur ──
   var sep=tresoCashSepare();
@@ -9194,6 +9198,7 @@ function renderTreso(){
   }
 
   // ── Cartes de comptes (solde du mois sélectionné) ──
+  html+='<div id="treso-soussous" style="scroll-margin-top:12px;font-size:11px;font-weight:800;color:var(--m2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">💰 Où est mon argent</div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">';
   t.accounts.forEach(function(acc){
     // La caisse chauffeurs ne s'affiche qu'en mode séparé
@@ -9231,7 +9236,7 @@ function renderTreso(){
   html+='</div>';
 
   // ── Résumé mensuel ──
-  html+='<div style="margin-bottom:14px;">';
+  html+='<div id="treso-mois" style="scroll-margin-top:12px;margin-bottom:14px;">';
   html+='<div style="font-size:11px;font-weight:800;color:var(--m2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📆 Résumé mensuel — Encaissements</div>';
 
   for(var rmi=0;rmi>=-5;rmi--){
@@ -9379,7 +9384,7 @@ function renderTreso(){
 
   // ── Dernières transactions ──
   var txSorted=t.transactions.slice().sort(function(a,b){return b.date.localeCompare(a.date)||b.id.localeCompare(a.id);}).slice(0,20);
-  html+='<div style="font-size:11px;font-weight:800;color:var(--m2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Dernières transactions</div>';
+  html+='<div id="treso-tx" style="scroll-margin-top:12px;font-size:11px;font-weight:800;color:var(--m2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">🧮 Dernières transactions</div>';
   if(!txSorted.length){
     html+='<div class="empty"><div class="ei">💳</div>Aucune transaction. Commencez par ajouter une entrée !</div>';
   } else {
@@ -9406,9 +9411,9 @@ function renderTreso(){
   if(!C.treso.creances)C.treso.creances=[];
   var creances=C.treso.creances;
   var totalCreances=creances.reduce(function(a,c){return a+Math.max(0,pf(c.montant)-pf(c.paye));},0);
-  html+='<div style="margin-top:14px;">';
+  html+='<div id="treso-creances" style="scroll-margin-top:12px;margin-top:14px;">';
   html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
-  html+='<div style="font-size:11px;font-weight:800;color:var(--m2);text-transform:uppercase;letter-spacing:.5px;">📋 Créances — Ce qu\'on te doit</div>';
+  html+='<div style="font-size:11px;font-weight:800;color:var(--m2);text-transform:uppercase;letter-spacing:.5px;">📥 Créances — Ce qu\'on te doit</div>';
   html+='<button onclick="openAddCreance()" style="background:rgba(245,200,0,.15);border:1px solid rgba(245,200,0,.4);color:var(--gold);border-radius:8px;padding:5px 10px;font-size:10px;font-weight:800;cursor:pointer;">+ Ajouter</button>';
   html+='</div>';
   if(totalCreances>0){
@@ -10140,6 +10145,116 @@ function hebdoHTML(){
   return h+'</div>';
 }
 
+// Résultat sur une période libre. Les coûts fixes sont mensuels : on n'en
+// compte que la part écoulée, sinon un mois entamé paraît catastrophique.
+function _ymdLoc(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function resultatPeriode(du,au){
+  var a=_ymdLoc(du), b=_ymdLoc(au);
+  var sh=getArr().filter(function(s){return s.date&&s.date>=a&&s.date<=b;});
+  var dep=getExpArr().filter(function(e){var d=String(e.date||'').slice(0,10);return d>=a&&d<=b;})
+    .reduce(function(x,e){return x+pf(e.amount);},0);
+  var recette=sh.reduce(function(x,s){return x+pf(s.recette);},0);
+  var salaires=sh.reduce(function(x,s){return x+calcSalary(s);},0);
+  var essence=sh.reduce(function(x,s){return x+pf(s.essence);},0);
+  var jours=Math.round((new Date(b)-new Date(a))/86400000)+1;
+  var joursMois=new Date(du.getFullYear(),du.getMonth()+1,0).getDate();
+  var fixes=fixedCostsMo().total*Math.min(1,jours/joursMois);
+  return {du:a,au:b,jours:jours,joursMois:joursMois,recette:recette,salaires:salaires,
+    essence:essence,depenses:dep,fixes:fixes,nbQuarts:sh.length,
+    net:recette-salaires-essence-dep-fixes};
+}
+// La question de tous les mois : « je suis où, comparé au mois passé ? »
+// On compare à jour égal — 10 jours d'août contre 10 jours de juillet —
+// sinon on compare un mois entamé à un mois complet et ça ne veut rien dire.
+function variationMois(){
+  var now=new Date();
+  var jour=now.getDate();
+  var debMo=new Date(now.getFullYear(),now.getMonth(),1);
+  var joursMois=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+  var cur=resultatPeriode(debMo,now);
+  var debPrec=new Date(now.getFullYear(),now.getMonth()-1,1);
+  var finPrec=new Date(now.getFullYear(),now.getMonth(),0);
+  var jourClamp=Math.min(jour,finPrec.getDate());
+  var precPart=resultatPeriode(debPrec,new Date(debPrec.getFullYear(),debPrec.getMonth(),jourClamp));
+  var precTot=resultatPeriode(debPrec,finPrec);
+  var nette=calcBilan().valeurNette;
+  var ecart=cur.net-precPart.net;
+  return {nette:nette, debutMois:nette-cur.net,
+    mois:cur, memePeriode:precPart, moisPasse:precTot,
+    ecart:ecart,
+    pct:Math.abs(precPart.net)>0.005?(ecart/Math.abs(precPart.net)*100):null,
+    jour:jour, joursMois:joursMois, complet:jour>=joursMois,
+    lbl:debMo.toLocaleDateString('fr-CA',{month:'long'}),
+    lblPrec:debPrec.toLocaleDateString('fr-CA',{month:'long'}),
+    jourPrec:jourClamp};
+}
+// Le bandeau d'entrée de la Trésorerie : le solde, et de combien il bouge.
+function varMoisHTML(){
+  var v=variationMois();
+  var monte=v.mois.net>=0, mieux=v.ecart>=0;
+  var h='<div style="background:linear-gradient(160deg,rgba(17,14,0,.97),rgba(26,21,0,.95));border:1.5px solid rgba(245,200,0,.35);border-radius:16px;padding:15px;margin-bottom:12px;">'
+    +'<div style="font-size:10px;font-weight:900;color:var(--m2);text-transform:uppercase;letter-spacing:.6px;">💎 Ma valeur nette</div>'
+    +'<div style="font-size:30px;font-weight:900;color:'+(v.nette>=0?'var(--gold)':'var(--red)')+';line-height:1.15;margin:3px 0 1px;">'+fm(v.nette)+'</div>'
+    +'<div style="font-size:13px;font-weight:900;color:'+(monte?'var(--grn)':'var(--red)')+';">'
+    +(monte?'▲ +':'▼ −')+fm(Math.abs(v.mois.net))+' <span style="font-size:11px;font-weight:700;color:var(--m2);">depuis le 1<sup>er</sup> '+_cmpEsc(v.lbl)+'</span></div>'
+    +'<div style="font-size:9px;color:var(--m2);margin-top:2px;">Elle était à '+fm(v.debutMois)+' au début du mois'
+    +(v.complet?'':' · '+v.jour+' jour'+(v.jour>1?'s':'')+' sur '+v.joursMois)+'</div>';
+  // La comparaison à jour égal, celle qui répond vraiment à la question
+  h+='<div style="background:rgba(0,0,0,.32);border:1px solid var(--brd2);border-radius:12px;padding:11px;margin-top:11px;">'
+    +'<div style="font-size:9px;color:var(--m2);font-weight:800;text-transform:uppercase;margin-bottom:7px;">Comparé au mois passé</div>'
+    +'<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">'
+    +'<span style="color:var(--m2);text-transform:capitalize;">'+_cmpEsc(v.lbl)+', '+v.jour+' jour'+(v.jour>1?'s':'')+'</span>'
+    +'<span style="font-weight:900;color:'+(v.mois.net>=0?'var(--grn)':'var(--red)')+';">'+fm(v.mois.net)+'</span></div>'
+    +'<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:11px;">'
+    +'<span style="color:var(--m2);text-transform:capitalize;">'+_cmpEsc(v.lblPrec)+', mêmes '+v.jourPrec+' jour'+(v.jourPrec>1?'s':'')+'</span>'
+    +'<span style="font-weight:900;color:var(--m3);">'+fm(v.memePeriode.net)+'</span></div>'
+    +'<div style="display:flex;justify-content:space-between;padding:7px 0 0;margin-top:4px;border-top:1px solid var(--brd);font-size:12px;">'
+    +'<span style="font-weight:800;color:var(--m3);">'+(mieux?'✅ De mieux':'⚠️ De moins')+'</span>'
+    +'<span style="font-weight:900;color:'+(mieux?'var(--grn)':'var(--red)')+';">'+(mieux?'+':'−')+fm(Math.abs(v.ecart))
+    +(v.pct!==null?' <span style="font-size:10px;">('+(mieux?'+':'−')+Math.abs(v.pct).toFixed(0)+' %)</span>':'')+'</span></div>'
+    +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">'
+    +_cmpEsc(v.lblPrec.charAt(0).toUpperCase()+v.lblPrec.slice(1))+' au complet : <b style="color:var(--m3);">'+fm(v.moisPasse.net)+'</b>'
+    +(v.complet?'':' · à ce rythme, '+_cmpEsc(v.lbl)+' finirait vers <b style="color:var(--m3);">'
+      +fm(v.jour>0?v.mois.net/v.jour*v.joursMois:0)+'</b>')
+    +'</div></div>';
+  // Six derniers mois en barres : la tendance se lit d'un coup d'œil
+  var mois=resultatMensuel().slice(-6);
+  if(mois.length>1){
+    var maxi=Math.max.apply(null,mois.map(function(m){return Math.abs(m.net);}))||1;
+    h+='<div style="margin-top:12px;">'
+      +'<div style="font-size:9px;color:var(--m2);font-weight:800;text-transform:uppercase;margin-bottom:7px;">6 derniers mois</div>'
+      +'<div style="display:flex;align-items:flex-end;gap:5px;height:62px;">';
+    mois.forEach(function(m){
+      var hh=Math.max(4,Math.round(Math.abs(m.net)/maxi*52));
+      var pos=m.net>=0;
+      h+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">'
+        +'<div style="font-size:8px;font-weight:900;color:'+(pos?'var(--grn)':'var(--red)')+';margin-bottom:2px;white-space:nowrap;">'+(pos?'':'−')+Math.round(Math.abs(m.net))+'</div>'
+        +'<div title="'+_cmpEsc(m.lbl)+'" style="width:100%;height:'+hh+'px;border-radius:5px 5px 2px 2px;background:'+(pos?'linear-gradient(180deg,var(--gold),rgba(245,200,0,.35))':'linear-gradient(180deg,var(--red),rgba(255,58,58,.3))')+';"></div>'
+        +'</div>';
+    });
+    h+='</div><div style="display:flex;gap:5px;margin-top:4px;">';
+    mois.forEach(function(m){
+      h+='<div style="flex:1;text-align:center;font-size:8px;color:var(--m2);text-transform:capitalize;overflow:hidden;">'+_cmpEsc(String(m.lbl).split(' ')[0].slice(0,4))+'</div>';
+    });
+    h+='</div></div>';
+  }
+  return h+'</div>';
+}
+// Index cliquable : la page est longue, il faut pouvoir viser
+function tresoIndexHTML(){
+  var secs=[['bilan','📋','Bilan'],['soussous','💰','Argent'],['mois','📆','Mois'],
+    ['taxes','🧾','Taxes'],['evolution','📈','Évolution'],['creances','📥','Créances'],
+    ['tx','🧮','Transactions']];
+  var h='<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:3px;margin-bottom:12px;-webkit-overflow-scrolling:touch;">';
+  secs.forEach(function(s){
+    h+='<button onclick="tresoAller(\''+s[0]+'\')" style="flex-shrink:0;background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.22);color:var(--m3);border-radius:20px;padding:7px 12px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;">'+s[1]+' '+s[2]+'</button>';
+  });
+  return h+'</div>';
+}
+function tresoAller(id){
+  var el=document.getElementById('treso-'+id);
+  if(el&&el.scrollIntoView)el.scrollIntoView({behavior:'smooth',block:'start'});
+}
 function resultatMensuel(){
   var fx=fixedCostsMo().total;
   var mois={};
@@ -11126,7 +11241,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-10-v100-AUGMENTATION-PAR-CHAUFFEUR';
+var APP_VERSION = '2026-08-11-v101-TRESO-VARIATION-MOIS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
