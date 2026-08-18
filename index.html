@@ -5652,6 +5652,20 @@ function payeDeductToggle(wkKey,drvName){
   lSave();
   renderPaye();
 }
+// Le chauffeur a mis l'essence avec le comptant de la compagnie qu'il
+// avait en main : elle est déjà remboursée, il n'y a rien à sortir en
+// plus — c'est le cash de la semaine qui est plus mince d'autant.
+function payeEssCashToggle(wkKey,drvName){
+  if(!C.payes)C.payes={};
+  const k=wkKey+'|'+drvName+'_essCash';
+  C.payes[k]=C.payes[k]!==true;
+  lSave();
+  renderPaye();
+}
+// L'essence de la semaine est-elle prise dans le cash ?
+function essPriseDansCash(wkKey,drvName){
+  return !!(C.payes&&C.payes[wkKey+'|'+drvName+'_essCash']===true);
+}
 
 // Recalcule salaire/cash d'un chauffeur pour une semaine donnée (même logique que renderPaye)
 function payeWeekCalc(wkKey,drvName){
@@ -5683,18 +5697,26 @@ function payeToggle(wkKey,drvName){
     // ── PAIEMENT : sortie automatique de la Trésorerie ──
     const dd=payeWeekCalc(wkKey,drvName);
     const deductCash=C.payes[k+'_deductCash']===true;
+    const essCash=C.payes[k+'_essCash']===true;
     // Sa paie, et RIEN d'autre. L'essence avancée est remboursée en même
-    // temps mais reste une charge de la compagnie, comptée à part.
+    // temps mais reste une charge de la compagnie, comptée à part — sauf
+    // si le patron a décidé qu'elle sortait du cash de la semaine : elle
+    // est alors déjà remboursée, il n'y a rien de plus à verser.
     const du=dd.sal;
-    const net=deductCash?Math.max(0,du-dd.cash):du;
-    const rembEss=pf(dd.ess);
+    const cashNet=essCash?Math.max(0,pf(dd.cash)-pf(dd.ess)):pf(dd.cash);
+    const net=deductCash?Math.max(0,du-cashNet):du;
+    const rembEss=essCash?0:pf(dd.ess);
     const today=new Date();
     const dk=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
     const wkLbl=wkKey.slice(5); // MM-DD
     var msg='💵 Payer '+drvName+' — semaine du '+wkKey+'\n\n';
     msg+='💼 SA PAIE (part '+((getDrv(drvName)||{}).pct||40)+' % + pourboires) : '+fm(dd.sal)+'\n';
-    if(deductCash&&dd.cash>0){
-      msg+='💵 Cash gardé par le chauffeur : −'+fm(dd.cash)+'\n➡️ Tu verses la DIFFÉRENCE : '+fm(net)+'\n';
+    if(essCash&&dd.ess>0.005){
+      msg+='⛽ Essence prise dans le cash de la semaine : '+fm(dd.ess)+'\n';
+      msg+='💵 Cash de la semaine : '+fm(dd.cash)+' − '+fm(dd.ess)+' = '+fm(cashNet)+'\n';
+    }
+    if(deductCash&&cashNet>0){
+      msg+='💵 Cash gardé par le chauffeur : −'+fm(cashNet)+'\n➡️ Tu verses la DIFFÉRENCE : '+fm(net)+'\n';
     }else{
       msg+='➡️ Tu verses : '+fm(net)+'\n';
     }
@@ -5705,7 +5727,8 @@ function payeToggle(wkKey,drvName){
     }
     msg+='\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net)+' (paie)';
     if(rembEss>0.005)msg+='\n• Compte Commercial : −'+fm(rembEss)+' (essence remboursée)';
-    if(deductCash&&dd.cash>0)msg+='\n• '+(tresoCashSepare()?'Chez les chauffeurs':'Compte Cash')+' : −'+fm(dd.cash)+' (gardé par le chauffeur)';
+    if(essCash&&dd.ess>0.005)msg+='\n• '+(tresoCashSepare()?'Chez les chauffeurs':'Compte Cash')+' : −'+fm(dd.ess)+' (essence payée avec le comptant)';
+    if(deductCash&&cashNet>0)msg+='\n• '+(tresoCashSepare()?'Chez les chauffeurs':'Compte Cash')+' : −'+fm(cashNet)+' (gardé par le chauffeur)';
     if(!confirm(msg+'\n\nConfirmer ?'))return;
     // Transactions automatiques
     if(net>0){
@@ -5716,14 +5739,18 @@ function payeToggle(wkKey,drvName){
     if(rembEss>0.005){
       t.transactions.push({id:uid(),date:dk,accountId:'comm',type:'out',amount:parseFloat(rembEss.toFixed(2)),cat:'Essence',desc:'⛽ Essence avancée remboursée à '+drvName+' (sem. '+wkLbl+')',payeKey:k,auto:true});
     }
-    if(deductCash&&dd.cash>0){
-      // En mode caisse séparée, ce cash n'a jamais transité par MA caisse :
-      // il sort directement de ce que le chauffeur avait en main.
-      var srcCash=tresoCashSepare()?'cashdrv':'cash';
-      t.transactions.push({id:uid(),date:dk,accountId:srcCash,type:'out',amount:parseFloat(dd.cash.toFixed(2)),desc:'💵 Cash gardé par '+drvName+' (salaire sem. '+wkLbl+')',payeKey:k,auto:true,drvName:drvName});
+    // En mode caisse séparée, ce cash n'a jamais transité par MA caisse :
+    // il sort directement de ce que le chauffeur avait en main.
+    var srcCash=tresoCashSepare()?'cashdrv':'cash';
+    if(essCash&&pf(dd.ess)>0.005){
+      t.transactions.push({id:uid(),date:dk,accountId:srcCash,type:'out',amount:parseFloat(pf(dd.ess).toFixed(2)),cat:'Essence',desc:'⛽ Essence payée par '+drvName+' avec le comptant (sem. '+wkLbl+')',payeKey:k,auto:true,drvName:drvName});
+    }
+    if(deductCash&&cashNet>0){
+      t.transactions.push({id:uid(),date:dk,accountId:srcCash,type:'out',amount:parseFloat(cashNet.toFixed(2)),cat:'Salaire',desc:'💵 Cash gardé par '+drvName+' (salaire sem. '+wkLbl+')',payeKey:k,auto:true,drvName:drvName});
     }
     C.payes[k]={paid:true,ts:new Date().toISOString(),by:U.name,net:parseFloat(net.toFixed(2)),
-      essRemb:parseFloat(rembEss.toFixed(2)),cashKept:(deductCash?parseFloat(dd.cash.toFixed(2)):0)};
+      essRemb:parseFloat(rembEss.toFixed(2)),essDansCash:(essCash?parseFloat(pf(dd.ess).toFixed(2)):0),
+      cashKept:(deductCash?parseFloat(cashNet.toFixed(2)):0)};
     audit('PAYE_OK',drvName+'/'+wkKey+'/'+fm(net));
   }
   lSave();
@@ -5897,8 +5924,10 @@ function renderPaye(){
     Object.entries(wd.drivers).forEach(([drvName,dd])=>{
       const k=wkey+'|'+drvName;
       const deductCash=C.payes[k+'_deductCash']===true;
-      const net=deductCash?Math.max(0,dd.sal-dd.cash):dd.sal;
-      if(!C.payes[k]||!C.payes[k].paid){totalUnpaid+=net;countUnpaid++;essUnpaid+=dd.ess;}
+      const essCash=C.payes[k+'_essCash']===true;
+      const cashNet=essCash?Math.max(0,dd.cash-dd.ess):dd.cash;
+      const net=deductCash?Math.max(0,dd.sal-cashNet):dd.sal;
+      if(!C.payes[k]||!C.payes[k].paid){totalUnpaid+=net;countUnpaid++;if(!essCash)essUnpaid+=dd.ess;}
     });
   });
 
@@ -5949,33 +5978,56 @@ function renderPaye(){
       const isPaid=!isCurWk&&C.payes[k]&&C.payes[k].paid;
       const paidTs=isPaid?new Date(C.payes[k].ts).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
       const deductCash=C.payes[k+'_deductCash']===true;
+      const essCash=C.payes[k+'_essCash']===true;
       // LA PAIE SEULE. L'essence avancée est une charge de la compagnie
       // qu'on rembourse : elle se voit à part, jamais dans le salaire.
       const du=dd.sal;
-      const net=deductCash?Math.max(0,du-dd.cash):du;
       const hasCash=dd.cash>0;
       const hasEss=dd.ess>0;
+      // Le cash retenu : celui de la semaine, moins l'essence si le
+      // patron décide qu'elle a été prise dedans.
+      const cashNet=essCash?Math.max(0,dd.cash-dd.ess):dd.cash;
+      const net=deductCash?Math.max(0,du-cashNet):du;
 
       html+='<div class="paye-row '+(isPaid?'paid':isCurWk?'':'unpaid')+'">'
         +'<div style="flex:1;">'
         +'<div class="paye-drv">🚗 '+drvName+'</div>'
         // Salaire brut
         +'<div style="display:flex;align-items:baseline;gap:8px;margin-top:3px;">'
-        +'<div class="paye-amt">'+(deductCash&&hasCash?'<span style="text-decoration:line-through;font-size:14px;color:var(--m2);">'+fm(du)+'</span> <span style="color:var(--gold);">'+fm(net)+'</span>':fm(du))+'</div>'
-        +(hasCash?'<div style="font-size:10px;color:var(--pur);font-weight:700;">💵 cash: '+fm(dd.cash)+'</div>':'')
+        +'<div class="paye-amt">'+(deductCash&&cashNet>0?'<span style="text-decoration:line-through;font-size:14px;color:var(--m2);">'+fm(du)+'</span> <span style="color:var(--gold);">'+fm(net)+'</span>':fm(du))+'</div>'
         +'</div>'
-        +(hasEss?'<div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.25);border-radius:9px;padding:7px 9px;margin-top:6px;font-size:10px;line-height:1.55;color:var(--m2);">'
-          +'⛽ <b style="color:var(--neon);">'+fm(dd.ess)+' d\'essence</b> qu\'il a avancée — <b>charge de la compagnie</b>, pas un salaire.'
-          +'<br>Sort de la caisse en plus de sa paie : <b style="color:var(--neon);">'+fm(net+dd.ess)+'</b> de cash au total.'
+        // Les trois chiffres de la semaine, côte à côte
+        +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:7px;">'
+        +'<div style="background:rgba(57,211,83,.07);border:1px solid rgba(57,211,83,.2);border-radius:8px;padding:6px;text-align:center;">'
+        +'<div style="font-size:8px;color:var(--m2);font-weight:800;text-transform:uppercase;margin-bottom:1px;">💼 Paye</div>'
+        +'<div style="font-size:12px;font-weight:900;color:var(--grn);">'+fm(dd.sal)+'</div></div>'
+        +'<div style="background:rgba(255,107,0,'+(hasEss?'.09':'.03')+');border:1px solid rgba(255,107,0,'+(hasEss?'.28':'.12')+');border-radius:8px;padding:6px;text-align:center;">'
+        +'<div style="font-size:8px;color:var(--m2);font-weight:800;text-transform:uppercase;margin-bottom:1px;">⛽ Essence</div>'
+        +'<div style="font-size:12px;font-weight:900;color:'+(hasEss?'var(--neon)':'var(--m2)')+';">'+fm(dd.ess)+'</div></div>'
+        +'<div style="background:rgba(192,132,252,'+(hasCash?'.09':'.03')+');border:1px solid rgba(192,132,252,'+(hasCash?'.28':'.12')+');border-radius:8px;padding:6px;text-align:center;">'
+        +'<div style="font-size:8px;color:var(--m2);font-weight:800;text-transform:uppercase;margin-bottom:1px;">💵 Cash sem.</div>'
+        +'<div style="font-size:12px;font-weight:900;color:'+(hasCash?'var(--pur)':'var(--m2)')+';">'
+        +(essCash&&hasEss?'<span style="font-size:9px;text-decoration:line-through;color:var(--m2);">'+fm(dd.cash)+'</span> '+fm(cashNet):fm(dd.cash))
+        +'</div></div>'
+        +'</div>'
+        +(hasEss?'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:5px;">'
+          +(essCash?'⛽ Essence prise dans le cash de la semaine : rien de plus à sortir, tu verses <b style="color:var(--gold);">'+fm(net)+'</b>.'
+                   :'⛽ Essence remboursée en plus de la paie : <b style="color:var(--neon);">'+fm(net+dd.ess)+'</b> de cash au total.')
           +'</div>':'')
-        // Toggle enlever cash
-        +(hasCash&&!isPaid&&!isCurWk
-          ?'<div style="margin-top:6px;">'
-            +'<button onclick="payeDeductToggle(\''+wkey+'\',\''+drvName+'\')" style="background:'+(deductCash?'rgba(192,132,252,.2)':'rgba(255,107,0,.12)')+';border:1px solid '+(deductCash?'rgba(192,132,252,.4)':'rgba(255,107,0,.3)')+';color:'+(deductCash?'var(--pur)':'var(--neon)')+';border-radius:8px;padding:4px 10px;font-size:10px;font-weight:800;cursor:pointer;">'
-            +(deductCash?'✅ Cash déduit — '+fm(dd.cash)+' enlevé':'➖ Enlever cash ('+fm(dd.cash)+')')
-            +'</button>'
+        // Les deux décisions du patron, au moment de verser
+        +((hasCash||hasEss)&&!isPaid&&!isCurWk
+          ?'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;">'
+            +(hasCash?'<button onclick="payeDeductToggle(\''+wkey+'\',\''+drvName+'\')" style="background:'+(deductCash?'rgba(192,132,252,.2)':'rgba(255,107,0,.12)')+';border:1px solid '+(deductCash?'rgba(192,132,252,.4)':'rgba(255,107,0,.3)')+';color:'+(deductCash?'var(--pur)':'var(--neon)')+';border-radius:8px;padding:4px 10px;font-size:10px;font-weight:800;cursor:pointer;">'
+              +(deductCash?'✅ Cash déduit — '+fm(cashNet)+' enlevé':'➖ Enlever cash ('+fm(cashNet)+')')
+              +'</button>':'')
+            +(hasEss&&hasCash?'<button onclick="payeEssCashToggle(\''+wkey+'\',\''+drvName+'\')" style="background:'+(essCash?'rgba(255,107,0,.22)':'rgba(255,255,255,.06)')+';border:1px solid '+(essCash?'rgba(255,107,0,.5)':'var(--brd2)')+';color:'+(essCash?'var(--neon)':'var(--m2)')+';border-radius:8px;padding:4px 10px;font-size:10px;font-weight:800;cursor:pointer;">'
+              +(essCash?'✅ Essence prise dans le cash':'⛽ Enlever l\'essence du cash ('+fm(dd.ess)+')')
+              +'</button>':'')
             +'</div>'
-          :(hasCash&&isPaid&&deductCash?'<div style="font-size:10px;color:var(--pur);margin-top:3px;">💵 '+fm(dd.cash)+' cash déduit</div>':''))
+          :(isPaid&&(deductCash||essCash)?'<div style="font-size:10px;color:var(--pur);margin-top:3px;">'
+            +(deductCash?'💵 '+fm(cashNet)+' cash déduit':'')
+            +(deductCash&&essCash?' · ':'')
+            +(essCash?'⛽ '+fm(dd.ess)+' d\'essence pris dans le cash':'')+'</div>':''))
         +'<div class="paye-status" style="color:'+(isCurWk?'var(--gold)':isPaid?'var(--grn)':'var(--red)')+';">'
         +(isCurWk?'🟡 '+dd.n+' quart'+(dd.n>1?'s':'')+' cette semaine'
           :isPaid?'✅ Payé le '+paidTs:'🔴 En attente de paiement')
@@ -9594,10 +9646,12 @@ function salairesDus(){
     if(C.payes&&C.payes[k]&&C.payes[k].paid)return; // semaine déjà payée
     var e=byWk[k];
     var deduit=!!(C.payes&&C.payes[k+'_deductCash']===true);
+    var essCash=!!(C.payes&&C.payes[k+'_essCash']===true);
     // LA PAIE, C'EST LA PAIE. L'essence qu'un chauffeur a avancée est une
     // charge de la compagnie qu'on lui rembourse : elle sort du même
     // portefeuille mais ne fait jamais partie de son salaire.
-    var net=deduit?Math.max(0,e.sal-e.cash):e.sal;
+    var cashNet=essCash?Math.max(0,e.cash-e.ess):e.cash;
+    var net=deduit?Math.max(0,e.sal-cashNet):e.sal;
     if(net>0.005)detail.push({wk:e.wk,drv:e.drv,net:net,sal:e.sal,ess:e.ess,cash:e.cash});
     total+=net;
   });
@@ -9621,6 +9675,7 @@ function essenceDue(){
   var total=0,detail=[];
   Object.keys(byWk).forEach(function(k){
     if(C.payes&&C.payes[k]&&C.payes[k].paid)return;   // remboursée avec la paie
+    if(C.payes&&C.payes[k+'_essCash']===true)return;  // déjà prise dans le cash
     var e=byWk[k];
     if(e.ess<=0.005)return;
     total+=e.ess;
@@ -11308,7 +11363,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-12-v102-PAIE-SANS-ESSENCE';
+var APP_VERSION = '2026-08-13-v103-PAYE-ESSENCE-CASH';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
