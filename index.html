@@ -5683,25 +5683,38 @@ function payeToggle(wkKey,drvName){
     // ── PAIEMENT : sortie automatique de la Trésorerie ──
     const dd=payeWeekCalc(wkKey,drvName);
     const deductCash=C.payes[k+'_deductCash']===true;
-    // Ce qu'on lui doit : sa paie PLUS l'essence qu'il a avancée
-    const du=dd.sal+dd.ess;
+    // Sa paie, et RIEN d'autre. L'essence avancée est remboursée en même
+    // temps mais reste une charge de la compagnie, comptée à part.
+    const du=dd.sal;
     const net=deductCash?Math.max(0,du-dd.cash):du;
+    const rembEss=pf(dd.ess);
     const today=new Date();
     const dk=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');
     const wkLbl=wkKey.slice(5); // MM-DD
     var msg='💵 Payer '+drvName+' — semaine du '+wkKey+'\n\n';
-    msg+='Salaire (part '+((getDrv(drvName)||{}).pct||40)+' % + pourboires) : '+fm(dd.sal)+'\n';
-    if(dd.ess>0.005)msg+='⛽ Essence qu\'il a avancée : +'+fm(dd.ess)+'\n';
-    msg+='Total dû : '+fm(du)+'\n\n';
+    msg+='💼 SA PAIE (part '+((getDrv(drvName)||{}).pct||40)+' % + pourboires) : '+fm(dd.sal)+'\n';
     if(deductCash&&dd.cash>0){
-      msg+='💵 Cash gardé par le chauffeur : −'+fm(dd.cash)+'\n➡️ Tu verses la DIFFÉRENCE : '+fm(net)+'\n\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net)+'\n• '+(tresoCashSepare()?'Chez les chauffeurs':'Compte Cash')+' : −'+fm(dd.cash)+' (gardé par le chauffeur)';
+      msg+='💵 Cash gardé par le chauffeur : −'+fm(dd.cash)+'\n➡️ Tu verses la DIFFÉRENCE : '+fm(net)+'\n';
     }else{
-      msg+='➡️ Tu verses : '+fm(net)+'\n\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net);
+      msg+='➡️ Tu verses : '+fm(net)+'\n';
     }
+    if(rembEss>0.005){
+      msg+='\n⛽ CHARGE DE LA COMPAGNIE (pas un salaire)\n';
+      msg+='Essence qu\'il a avancée, à lui rembourser : '+fm(rembEss)+'\n';
+      msg+='\n💸 CASH QUI SORT EN TOUT : '+fm(net+rembEss)+'\n';
+    }
+    msg+='\nTrésorerie mise à jour automatiquement :\n• Compte Commercial : −'+fm(net)+' (paie)';
+    if(rembEss>0.005)msg+='\n• Compte Commercial : −'+fm(rembEss)+' (essence remboursée)';
+    if(deductCash&&dd.cash>0)msg+='\n• '+(tresoCashSepare()?'Chez les chauffeurs':'Compte Cash')+' : −'+fm(dd.cash)+' (gardé par le chauffeur)';
     if(!confirm(msg+'\n\nConfirmer ?'))return;
     // Transactions automatiques
     if(net>0){
-      t.transactions.push({id:uid(),date:dk,accountId:'comm',type:'out',amount:parseFloat(net.toFixed(2)),desc:'💼 Salaire '+drvName+' (sem. '+wkLbl+')'+(deductCash&&dd.cash>0?' — différence après cash':''),payeKey:k,auto:true});
+      t.transactions.push({id:uid(),date:dk,accountId:'comm',type:'out',amount:parseFloat(net.toFixed(2)),cat:'Salaire',desc:'💼 Salaire '+drvName+' (sem. '+wkLbl+')'+(deductCash&&dd.cash>0?' — différence après cash':''),payeKey:k,auto:true});
+    }
+    // Le remboursement du carburant sort séparément, sous sa vraie
+    // catégorie : c'est de l'essence, pas de la masse salariale.
+    if(rembEss>0.005){
+      t.transactions.push({id:uid(),date:dk,accountId:'comm',type:'out',amount:parseFloat(rembEss.toFixed(2)),cat:'Essence',desc:'⛽ Essence avancée remboursée à '+drvName+' (sem. '+wkLbl+')',payeKey:k,auto:true});
     }
     if(deductCash&&dd.cash>0){
       // En mode caisse séparée, ce cash n'a jamais transité par MA caisse :
@@ -5709,7 +5722,8 @@ function payeToggle(wkKey,drvName){
       var srcCash=tresoCashSepare()?'cashdrv':'cash';
       t.transactions.push({id:uid(),date:dk,accountId:srcCash,type:'out',amount:parseFloat(dd.cash.toFixed(2)),desc:'💵 Cash gardé par '+drvName+' (salaire sem. '+wkLbl+')',payeKey:k,auto:true,drvName:drvName});
     }
-    C.payes[k]={paid:true,ts:new Date().toISOString(),by:U.name,net:parseFloat(net.toFixed(2)),cashKept:(deductCash?parseFloat(dd.cash.toFixed(2)):0)};
+    C.payes[k]={paid:true,ts:new Date().toISOString(),by:U.name,net:parseFloat(net.toFixed(2)),
+      essRemb:parseFloat(rembEss.toFixed(2)),cashKept:(deductCash?parseFloat(dd.cash.toFixed(2)):0)};
     audit('PAYE_OK',drvName+'/'+wkKey+'/'+fm(net));
   }
   lSave();
@@ -5877,23 +5891,35 @@ function renderPaye(){
   let html='';
 
   // Summary banner: total unpaid net (semaines terminées seulement)
-  let totalUnpaid=0;let countUnpaid=0;
+  let totalUnpaid=0;let countUnpaid=0;let essUnpaid=0;
   wksSorted.forEach(([wkey,wd])=>{
     if(wkey===curWkKey)return;
     Object.entries(wd.drivers).forEach(([drvName,dd])=>{
       const k=wkey+'|'+drvName;
       const deductCash=C.payes[k+'_deductCash']===true;
       const net=deductCash?Math.max(0,dd.sal-dd.cash):dd.sal;
-      if(!C.payes[k]||!C.payes[k].paid){totalUnpaid+=net;countUnpaid++;}
+      if(!C.payes[k]||!C.payes[k].paid){totalUnpaid+=net;countUnpaid++;essUnpaid+=dd.ess;}
     });
   });
 
   if(countUnpaid>0){
-    html+='<div style="background:rgba(255,58,58,.08);border:1.5px solid rgba(255,58,58,.3);border-radius:14px;padding:13px 15px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;">'
+    html+='<div style="background:rgba(255,58,58,.08);border:1.5px solid rgba(255,58,58,.3);border-radius:14px;padding:13px 15px;margin-bottom:14px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;">'
       +'<div><div style="font-size:10px;color:var(--red);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">🔴 Payes en attente</div>'
       +'<div style="font-size:11px;color:var(--m2);">'+countUnpaid+' versement'+(countUnpaid>1?'s':'')+' à faire</div></div>'
       +'<div style="font-size:26px;font-weight:900;color:var(--red);letter-spacing:-1px;">'+fm(totalUnpaid)+'</div>'
       +'</div>';
+    // Ce qui sort de la caisse en plus des payes : le carburant avancé
+    if(essUnpaid>0.005){
+      html+='<div style="border-top:1px solid rgba(255,58,58,.2);margin-top:10px;padding-top:9px;font-size:11px;line-height:1.6;">'
+        +'<div style="display:flex;justify-content:space-between;"><span style="color:var(--m2);">⛽ Essence avancée à rembourser</span>'
+        +'<span style="font-weight:900;color:var(--neon);">'+fm(essUnpaid)+'</span></div>'
+        +'<div style="display:flex;justify-content:space-between;margin-top:4px;"><span style="color:var(--m3);font-weight:800;">💸 Cash qui va sortir en tout</span>'
+        +'<span style="font-weight:900;color:var(--m3);">'+fm(totalUnpaid+essUnpaid)+'</span></div>'
+        +'<div style="font-size:9px;color:var(--m2);margin-top:5px;line-height:1.6;">L\'essence n\'est pas un salaire : c\'est une charge de la compagnie que tu rembourses. Elle sort de la caisse, jamais de la paie.</div>'
+        +'</div>';
+    }
+    html+='</div>';
   } else if(wksSorted.length>0){
     html+='<div style="background:rgba(57,211,83,.08);border:1.5px solid rgba(57,211,83,.25);border-radius:14px;padding:13px 15px;margin-bottom:14px;text-align:center;">'
       +'<div style="font-size:20px;margin-bottom:3px;">✅</div>'
@@ -5923,7 +5949,9 @@ function renderPaye(){
       const isPaid=!isCurWk&&C.payes[k]&&C.payes[k].paid;
       const paidTs=isPaid?new Date(C.payes[k].ts).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
       const deductCash=C.payes[k+'_deductCash']===true;
-      const du=dd.sal+dd.ess;
+      // LA PAIE SEULE. L'essence avancée est une charge de la compagnie
+      // qu'on rembourse : elle se voit à part, jamais dans le salaire.
+      const du=dd.sal;
       const net=deductCash?Math.max(0,du-dd.cash):du;
       const hasCash=dd.cash>0;
       const hasEss=dd.ess>0;
@@ -5936,7 +5964,10 @@ function renderPaye(){
         +'<div class="paye-amt">'+(deductCash&&hasCash?'<span style="text-decoration:line-through;font-size:14px;color:var(--m2);">'+fm(du)+'</span> <span style="color:var(--gold);">'+fm(net)+'</span>':fm(du))+'</div>'
         +(hasCash?'<div style="font-size:10px;color:var(--pur);font-weight:700;">💵 cash: '+fm(dd.cash)+'</div>':'')
         +'</div>'
-        +(hasEss?'<div style="font-size:10px;color:var(--m2);margin-top:3px;">💼 paie '+fm(dd.sal)+' + ⛽ essence avancée '+fm(dd.ess)+'</div>':'')
+        +(hasEss?'<div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.25);border-radius:9px;padding:7px 9px;margin-top:6px;font-size:10px;line-height:1.55;color:var(--m2);">'
+          +'⛽ <b style="color:var(--neon);">'+fm(dd.ess)+' d\'essence</b> qu\'il a avancée — <b>charge de la compagnie</b>, pas un salaire.'
+          +'<br>Sort de la caisse en plus de sa paie : <b style="color:var(--neon);">'+fm(net+dd.ess)+'</b> de cash au total.'
+          +'</div>':'')
         // Toggle enlever cash
         +(hasCash&&!isPaid&&!isCurWk
           ?'<div style="margin-top:6px;">'
@@ -9563,9 +9594,37 @@ function salairesDus(){
     if(C.payes&&C.payes[k]&&C.payes[k].paid)return; // semaine déjà payée
     var e=byWk[k];
     var deduit=!!(C.payes&&C.payes[k+'_deductCash']===true);
-    var du=e.sal+e.ess;                       // paie + essence avancée
-    var net=deduit?Math.max(0,du-e.cash):du;
-    if(net>0.005){total+=net;detail.push({wk:e.wk,drv:e.drv,net:net,sal:e.sal,ess:e.ess});}
+    // LA PAIE, C'EST LA PAIE. L'essence qu'un chauffeur a avancée est une
+    // charge de la compagnie qu'on lui rembourse : elle sort du même
+    // portefeuille mais ne fait jamais partie de son salaire.
+    var net=deduit?Math.max(0,e.sal-e.cash):e.sal;
+    if(net>0.005)detail.push({wk:e.wk,drv:e.drv,net:net,sal:e.sal,ess:e.ess,cash:e.cash});
+    total+=net;
+  });
+  detail.sort(function(a,b){return b.wk.localeCompare(a.wk);});
+  return {total:total,detail:detail};
+}
+// L'essence avancée par les chauffeurs et pas encore remboursée. Dette
+// réelle envers eux, mais comptée à part : c'est du carburant, pas du
+// salaire.
+function essenceDue(){
+  var byWk={};
+  getArr().forEach(function(s){
+    var ess=essenceAvancee(s);
+    if(ess<=0.005||isOwnerShift(s))return;
+    var ws=gwS(parseLocalDate(s.date));
+    var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
+    var k=wk+'|'+s.driver;
+    if(!byWk[k])byWk[k]={wk:wk,drv:s.driver,ess:0};
+    byWk[k].ess+=ess;
+  });
+  var total=0,detail=[];
+  Object.keys(byWk).forEach(function(k){
+    if(C.payes&&C.payes[k]&&C.payes[k].paid)return;   // remboursée avec la paie
+    var e=byWk[k];
+    if(e.ess<=0.005)return;
+    total+=e.ess;
+    detail.push({wk:e.wk,drv:e.drv,lbl:e.drv+' — semaine du '+e.wk,amt:e.ess,ess:e.ess});
   });
   detail.sort(function(a,b){return b.wk.localeCompare(a.wk);});
   return {total:total,detail:detail};
@@ -9643,6 +9702,10 @@ function calcBilan(){
   }
   var sal=salairesDus();
   if(sal.total>0.005)dettes.push({icon:'💼',name:'Salaires à payer',v:sal.total,detail:sal.detail});
+  // Le carburant avancé reste une dette envers le chauffeur, mais ce
+  // n'est pas du salaire : ligne à part pour ne jamais les confondre.
+  var essD=essenceDue();
+  if(essD.total>0.005)dettes.push({icon:'⛽',name:'Essence avancée à rembourser',v:essD.total,detail:essD.detail});
   var imp=depensesImpayees();
   if(imp.total>0.005)dettes.push({icon:'💸',name:'Factures non payées',v:imp.total,detail:imp.detail});
   // Les taxes encaissées pour Revenu Québec ne m'appartiennent pas
@@ -9851,18 +9914,21 @@ function capaciteInvestir(){
   });
   // Ce qui est déjà promis à quelqu'un d'autre
   var sal=salairesDus().total;
+  // L'essence avancée par les chauffeurs sort aussi de la caisse cette
+  // semaine, même si ce n'est pas du salaire : c'est un engagement.
+  var essR=(typeof essenceDue==='function')?essenceDue().total:0;
   var fact=depensesImpayees().total;
   var tax=(typeof taxesDues==='function')?taxesDues().total:0;
   var fc=fixedCostsMo();
   var loyer=fc.carRental;                             // location du mois prochain, déjà due
-  var engagements=sal+fact+tax+loyer;
+  var engagements=sal+essR+fact+tax+loyer;
   // Coussin : de quoi tenir sans rentrée d'argent
   var coussin=fc.total*p.coussinMois;
   var libre=liquide-engagements-coussin;
   var investi=tresoSolde('wealth');
   var patrimoine=liquide+investi;
   return {liquide:liquide,detailLiquide:detailLiquide,
-    salaires:sal,factures:fact,taxes:tax,loyer:loyer,engagements:engagements,
+    salaires:sal,essence:essR,factures:fact,taxes:tax,loyer:loyer,engagements:engagements,
     coussin:coussin,coussinMois:p.coussinMois,coutFixeMois:fc.total,
     libre:libre,investi:investi,patrimoine:patrimoine,
     partInvestie:patrimoine>0?investi/patrimoine*100:0,
@@ -9992,6 +10058,7 @@ function investirHTML(){
     +lg('💵 Liquide en banque et en caisse',fm(c.liquide),'var(--grn)',
         c.detailLiquide.filter(function(d){return Math.abs(d.v)>0.005;}).map(function(d){return d.icon+' '+_cmpEsc(d.name)+' '+fm(d.v);}).join(' · '))
     +(c.salaires>0.005?lg('💼 − Salaires à payer','−'+fm(c.salaires),'var(--red)'):'')
+    +(c.essence>0.005?lg('⛽ − Essence avancée à rembourser','−'+fm(c.essence),'var(--red)'):'')
     +(c.factures>0.005?lg('💸 − Factures non payées','−'+fm(c.factures),'var(--red)'):'')
     +(c.taxes>0.005?lg('🧾 − TPS et TVQ à remettre','−'+fm(c.taxes),'var(--red)','cet argent est à Revenu Québec'):'')
     +lg('🚗 − Location des voitures','−'+fm(c.loyer),'var(--red)','retenue au prochain dépôt')
@@ -11241,7 +11308,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-11-v101-TRESO-VARIATION-MOIS';
+var APP_VERSION = '2026-08-12-v102-PAIE-SANS-ESSENCE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
