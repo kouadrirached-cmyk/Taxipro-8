@@ -1451,6 +1451,10 @@ body{
         <button class="btn bsec bsm" id="fleetLockBtn" style="width:100%;padding:10px;margin-top:8px;" onclick="toggleFleetLock()">🔒 Verrouiller la flotte (bloquer les nouveaux appareils)</button>
         <button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:8px;" onclick="archiveOldShifts()">🗄️ Archiver les vieux quarts (+12 mois)</button>
       </div>
+      <div class="card" id="cardAnnuaire" style="border-color:rgba(245,200,0,.35);display:none;">
+        <div class="ctit"><span><span class="ci">📇</span>Qui utilise l'application</span></div>
+        <div id="annuContent"></div>
+      </div>
       <div class="card" style="border-color:rgba(255,120,120,.25);">
         <div class="ctit"><span><span class="ci">🗑️</span>Corbeille — Récupération</span></div>
         <div style="font-size:11px;color:var(--m2);margin-bottom:10px;line-height:1.6;">Les <b style="color:var(--gold)">30 derniers</b> quarts/dépenses supprimés restent récupérables ici en 1 clic (sur cet appareil).</div>
@@ -2513,6 +2517,12 @@ async function doLogin(){
   document.getElementById('tb-fleet').style.display='flex';
   document.getElementById('tb-clean').style.display='flex';
   audit('LOGIN');
+  // Fiche de la flotte déposée dans l'annuaire : c'est ce qui permet de
+  // savoir qui utilise l'app. Sans blocage si le réseau ou les règles
+  // refusent — l'app fonctionne exactement pareil.
+  if(U.role==='owner'&&typeof annuaireBattement==='function'){
+    setTimeout(function(){ annuaireBattement(); },4000);
+  }
   initShiftForm();
   initCoupSel();
   renderCoupList();
@@ -6756,6 +6766,7 @@ function renderSet(){
   renderGiftCardDrvSel();
   // Multi-flotte
   renderFleetInfo();
+  renderAnnuaire();
   // Corbeille
   renderTrash();
   // Verrouillage auto
@@ -6770,6 +6781,256 @@ function viewPhoto(src){
   ov.innerHTML='<img src="'+src+'" style="max-width:100%;max-height:90vh;border-radius:12px;">';
   ov.onclick=function(){ov.remove();};
   document.body.appendChild(ov);
+}
+
+// ═══════════════════════════════════════════════
+// 📇 ANNUAIRE DES FLOTTES — qui utilise l'application
+// Chaque flotte vit dans sa propre collection Firestore, sans rien qui
+// les relie : impossible de savoir combien de propriétaires utilisent
+// l'app, ni d'en retirer un qui ne paie pas. L'annuaire est un simple
+// registre, une fiche par flotte, que chaque flotte met à jour elle-même
+// en s'ouvrant. Il ne contient AUCUNE donnée d'exploitation : pas de
+// quarts, pas de chauffeurs, pas de chiffres — juste de quoi savoir que
+// la flotte existe, depuis quand, et si elle est encore active.
+// ═══════════════════════════════════════════════
+var ANNUAIRE='annuaire';
+function _annuColl(){ return firebase.firestore().collection(ANNUAIRE); }
+// Fiche envoyée par la flotte elle-même à chaque ouverture
+async function annuaireBattement(){
+  if(!window._fbReady)return false;
+  try{
+    if(window._fbEnsure)await window._fbEnsure();
+    var t=window.TXP_TENANT||'taxipro';
+    var fiche={
+      tenant:t,
+      compagnie:String((C&&C.companyName)||'').slice(0,80),
+      email:String((C&&C.ownerEmail)||'').slice(0,120),
+      creeLe:(C&&C.createdAt)||null,
+      essaiJusquA:(C&&C.trialEndsAt)||null,
+      vuLe:new Date().toISOString(),
+      quarts:Object.keys(S||{}).length,
+      chauffeurs:((C&&C.drivers)||[]).filter(function(d){return d.role!=='owner';}).length,
+      vehicules:((C&&C.vehicles)||[]).filter(function(v){return v.active!==false;}).length,
+      version:window.APP_VERSION||''
+    };
+    await _annuColl().doc(t).set(fiche,{merge:true});
+    return true;
+  }catch(e){ console.warn('Annuaire: battement refusé',e&&e.code); return false; }
+}
+// Lecture complète — réservée aux administrateurs par les règles
+async function annuaireLire(){
+  if(!window._fbReady)throw new Error('cloud-indisponible');
+  if(window._fbEnsure)await window._fbEnsure();
+  var snap=await _annuColl().get();
+  var arr=[];
+  snap.forEach(function(d){
+    if(d.id==='_admins')return;
+    var x=d.data()||{};x.tenant=x.tenant||d.id;arr.push(x);
+  });
+  arr.sort(function(a,b){return String(b.vuLe||'').localeCompare(String(a.vuLe||''));});
+  return arr;
+}
+// L'appareil qui tient l'annuaire. Le premier à revendiquer le poste le
+// garde : à faire tout de suite après la mise à jour.
+async function annuaireAdmins(){
+  try{
+    var d=await _annuColl().doc('_admins').get();
+    return (d.exists&&d.data()&&d.data().uids)||{};
+  }catch(e){ return {}; }
+}
+async function annuaireSuisAdmin(){
+  if(!window._fbUid)return false;
+  var u=await annuaireAdmins();
+  return u[window._fbUid]===true;
+}
+async function annuaireRevendiquer(){
+  if(window._fbEnsure)await window._fbEnsure();
+  if(!window._fbUid)throw new Error('pas-d-identite');
+  var u=await annuaireAdmins();
+  var n=Object.keys(u).length;
+  if(u[window._fbUid]===true)return 'deja';
+  var patch={uids:{}};patch.uids[window._fbUid]=true;
+  await _annuColl().doc('_admins').set(patch,{merge:true});
+  return n===0?'cree':'ajoute';
+}
+// Suspendre : la flotte reste intacte mais les règles lui refusent
+// lecture et écriture. Réversible, contrairement à la suppression.
+async function flotteSuspendre(tenant,suspendu){
+  if(window._fbEnsure)await window._fbEnsure();
+  await _annuColl().doc(tenant).set({suspendu:!!suspendu,
+    suspenduLe:suspendu?new Date().toISOString():null},{merge:true});
+}
+// Supprimer : efface les documents de la flotte ET sa fiche. Irréversible.
+async function flotteSupprimer(tenant){
+  if(tenant===(window.TXP_TENANT||'taxipro'))throw new Error('flotte-active');
+  if(tenant==='taxipro')throw new Error('flotte-principale');
+  if(window._fbEnsure)await window._fbEnsure();
+  var db=firebase.firestore(),col=db.collection(tenant);
+  var b=db.batch();
+  ['config','shifts','expenses','audit','deleted','members'].forEach(function(d){b.delete(col.doc(d));});
+  b.delete(_annuColl().doc(tenant));
+  await b.commit();
+}
+// Statut lisible d'une fiche : essai, expiré, suspendu, inactif
+function flotteStatut(f){
+  var now=Date.now();
+  if(f.suspendu===true)return {cle:'suspendu',lbl:'⏸️ Suspendue',col:'var(--red)'};
+  var fin=f.essaiJusquA?new Date(f.essaiJusquA).getTime():0;
+  var jours=fin?Math.ceil((fin-now)/86400000):null;
+  if(fin&&jours<0)return {cle:'expire',lbl:'⌛ Essai fini depuis '+Math.abs(jours)+' j',col:'var(--red)',jours:jours};
+  var vu=f.vuLe?new Date(f.vuLe).getTime():0;
+  var silence=vu?Math.floor((now-vu)/86400000):null;
+  if(silence!==null&&silence>=30)return {cle:'inactif',lbl:'💤 Rien depuis '+silence+' j',col:'var(--m2)',silence:silence};
+  if(fin)return {cle:'essai',lbl:'🎁 Essai — '+jours+' j restants',col:'var(--gold)',jours:jours};
+  return {cle:'actif',lbl:'✅ Active',col:'var(--grn)'};
+}
+
+// ── La console de l'annuaire, dans Réglages, flotte principale seulement ──
+var _annuCache=null;
+function renderAnnuaire(){
+  var card=document.getElementById('cardAnnuaire');
+  var el=document.getElementById('annuContent');
+  if(!card||!el)return;
+  var estPrincipale=(window.TXP_TENANT||'taxipro')==='taxipro';
+  if(!estPrincipale||!U||U.role!=='owner'){card.style.display='none';return;}
+  card.style.display='';
+  if(!window._fbReady){
+    el.innerHTML='<div style="font-size:11px;color:var(--m2);line-height:1.6;">☁️ Cloud non connecté : l\'annuaire des flottes n\'est lisible qu\'en ligne.</div>';
+    return;
+  }
+  if(_annuCache===null){
+    el.innerHTML='<div style="font-size:11px;color:var(--m2);line-height:1.6;margin-bottom:10px;">'
+      +'Chaque flotte a ses données à part, sans rien qui les relie. L\'annuaire est le seul endroit qui sait '
+      +'lesquelles existent : chaque flotte y dépose sa fiche en s\'ouvrant.</div>'
+      +'<button class="btn bsec bsm" style="width:100%;padding:11px;" onclick="chargerAnnuaire()">📇 Voir les flottes</button>';
+    return;
+  }
+  el.innerHTML=_annuaireHTML();
+}
+async function chargerAnnuaire(){
+  var el=document.getElementById('annuContent');
+  if(el)el.innerHTML='<div style="font-size:11px;color:var(--m2);">Lecture de l\'annuaire...</div>';
+  try{
+    await annuaireBattement();                 // ma propre fiche d'abord
+    _annuCache={flottes:await annuaireLire(),admin:await annuaireSuisAdmin(),
+      nbAdmins:Object.keys(await annuaireAdmins()).length};
+  }catch(e){
+    _annuCache={erreur:(e&&e.code)||(e&&e.message)||'erreur'};
+  }
+  renderAnnuaire();
+}
+function _annuaireHTML(){
+  var a=_annuCache;
+  if(a.erreur){
+    var refus=/permission/i.test(a.erreur);
+    return '<div style="background:rgba(255,58,58,.08);border:1px solid rgba(255,58,58,.3);border-radius:11px;padding:11px;font-size:11px;color:var(--m3);line-height:1.65;">'
+      +(refus?'🔒 Lecture refusée par les règles. Il faut d\'abord que cet appareil devienne le gardien de l\'annuaire.'
+             :'⚠️ Lecture impossible : '+_cmpEsc(String(a.erreur)))
+      +'</div>'
+      +(refus?'<button class="btn bsec bsm" style="width:100%;padding:11px;margin-top:9px;" onclick="revendiquerAnnuaire()">🔑 Devenir le gardien de l\'annuaire</button>':'')
+      +'<button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:8px;" onclick="chargerAnnuaire()">🔄 Réessayer</button>';
+  }
+  var fl=a.flottes||[];
+  var moi=window.TXP_TENANT||'taxipro';
+  var autres=fl.filter(function(f){return f.tenant!==moi;});
+  var actives=autres.filter(function(f){return flotteStatut(f).cle==='actif'||flotteStatut(f).cle==='essai';}).length;
+  var h='';
+  if(!a.admin){
+    h+='<div style="background:rgba(255,165,0,.08);border:1px solid rgba(255,165,0,.35);border-radius:11px;padding:11px;margin-bottom:11px;font-size:11px;color:var(--m3);line-height:1.65;">'
+      +'⚠️ <b>Cet appareil n\'est pas encore le gardien de l\'annuaire.</b> Tant que personne ne l\'est, '
+      +'n\'importe quel appareil peut prendre la place. Fais-le maintenant.'
+      +'</div>'
+      +'<button class="btn bsec bsm" style="width:100%;padding:11px;margin-bottom:11px;" onclick="revendiquerAnnuaire()">🔑 Devenir le gardien'+(a.nbAdmins>0?' (déjà '+a.nbAdmins+' appareil'+(a.nbAdmins>1?'s':'')+')':'')+'</button>';
+  }
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">'
+    +'<div style="background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.25);border-radius:11px;padding:10px;text-align:center;">'
+    +'<div style="font-size:9px;color:var(--m2);font-weight:800;text-transform:uppercase;">Propriétaires</div>'
+    +'<div style="font-size:22px;font-weight:900;color:var(--gold);">'+autres.length+'</div></div>'
+    +'<div style="background:rgba(57,211,83,.08);border:1px solid rgba(57,211,83,.25);border-radius:11px;padding:10px;text-align:center;">'
+    +'<div style="font-size:9px;color:var(--m2);font-weight:800;text-transform:uppercase;">Encore actives</div>'
+    +'<div style="font-size:22px;font-weight:900;color:var(--grn);">'+actives+'</div></div>'
+    +'</div>';
+  if(!autres.length){
+    h+='<div style="font-size:11px;color:var(--m2);line-height:1.65;">Aucune autre flotte inscrite pour l\'instant. '
+      +'Une flotte n\'apparaît ici qu\'après avoir ouvert l\'app une fois depuis cette mise à jour.</div>';
+  }
+  autres.forEach(function(f){
+    var st=flotteStatut(f);
+    var vu=f.vuLe?new Date(f.vuLe).toLocaleDateString('fr-CA',{day:'numeric',month:'short',year:'numeric'}):'—';
+    var cree=f.creeLe?new Date(f.creeLe).toLocaleDateString('fr-CA',{day:'numeric',month:'short',year:'numeric'}):'—';
+    h+='<div style="background:rgba(10,8,0,.55);border:1px solid '+(f.suspendu?'rgba(255,58,58,.35)':'var(--brd)')+';border-radius:12px;padding:11px;margin-bottom:8px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">'
+      +'<div style="min-width:0;flex:1;">'
+      +'<div style="font-size:13px;font-weight:900;color:var(--m3);overflow:hidden;text-overflow:ellipsis;">🏢 '+_cmpEsc(f.compagnie||f.tenant)+'</div>'
+      +(f.email?'<div style="font-size:10px;color:var(--m2);overflow:hidden;text-overflow:ellipsis;">'+_cmpEsc(f.email)+'</div>':'')
+      +'<div style="font-size:9px;color:var(--m2);font-family:monospace;">'+_cmpEsc(f.tenant)+'</div>'
+      +'</div>'
+      +'<div style="font-size:10px;font-weight:900;color:'+st.col+';flex-shrink:0;text-align:right;">'+st.lbl+'</div>'
+      +'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;font-size:9px;">'
+      +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Inscrite le <b style="color:var(--m3);">'+cree+'</b></span>'
+      +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);">Vue le <b style="color:var(--m3);">'+vu+'</b></span>'
+      +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);"><b style="color:var(--m3);">'+(f.quarts||0)+'</b> quarts</span>'
+      +'<span style="background:rgba(0,0,0,.3);border-radius:6px;padding:3px 7px;color:var(--m2);"><b style="color:var(--m3);">'+(f.chauffeurs||0)+'</b> chauffeurs</span>'
+      +'</div>';
+    if(a.admin){
+      h+='<div style="display:flex;gap:6px;margin-top:9px;">'
+        +'<button onclick="basculerSuspension(\''+_cmpEsc(f.tenant)+'\','+(f.suspendu?'false':'true')+')" style="flex:1;background:'+(f.suspendu?'rgba(57,211,83,.15)':'rgba(255,165,0,.13)')+';border:1px solid '+(f.suspendu?'rgba(57,211,83,.4)':'rgba(255,165,0,.35)')+';color:'+(f.suspendu?'var(--grn)':'var(--gold)')+';border-radius:9px;padding:8px;font-size:10px;font-weight:800;cursor:pointer;">'
+        +(f.suspendu?'▶️ Réactiver':'⏸️ Suspendre')+'</button>'
+        +'<button onclick="supprimerFlotteAdmin(\''+_cmpEsc(f.tenant)+'\')" style="flex:1;background:rgba(255,58,58,.13);border:1px solid rgba(255,58,58,.4);color:var(--red);border-radius:9px;padding:8px;font-size:10px;font-weight:800;cursor:pointer;">🗑️ Supprimer</button>'
+        +'</div>';
+    }
+    h+='</div>';
+  });
+  h+='<div style="font-size:9px;color:var(--m2);line-height:1.65;margin-top:10px;">'
+    +'⏸️ <b>Suspendre</b> coupe le cloud sans rien effacer — réversible, à privilégier pour un impayé. '
+    +'🗑️ <b>Supprimer</b> efface définitivement les quarts, chauffeurs et dépenses de la flotte : préviens avant.'
+    +'<br>À savoir : les deux agissent sur le cloud. L\'écriture est bloquée tout de suite, la lecture à sa prochaine ouverture de l\'app. '
+    +'Ce qui est <b>déjà téléchargé sur son téléphone</b> y reste : il ne peut plus rien synchroniser ni ajouter d\'appareil, '
+    +'mais son ancienne copie ne s\'efface pas à distance.'
+    +'</div>'
+    +'<button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:9px;" onclick="chargerAnnuaire()">🔄 Rafraîchir</button>';
+  return h;
+}
+async function revendiquerAnnuaire(){
+  try{
+    var r=await annuaireRevendiquer();
+    showToastGrn(r==='deja'?'Cet appareil est déjà gardien':'✓ Cet appareil garde l\'annuaire');
+  }catch(e){
+    alert('Impossible de devenir gardien : '+((e&&e.code)||(e&&e.message)||e)
+      +'\n\nSi le message parle de permissions, colle la dernière version de firestore.rules dans la console Firebase.');
+  }
+  await chargerAnnuaire();
+}
+async function basculerSuspension(tenant,suspendre){
+  var f=((_annuCache&&_annuCache.flottes)||[]).find(function(x){return x.tenant===tenant;})||{};
+  var nom=f.compagnie||tenant;
+  if(suspendre&&!confirm('⏸️ Suspendre « '+nom+' » ?\n\nLa flotte ne pourra plus lire ni écrire ses données tant que tu ne la réactives pas. Rien n\'est effacé.'))return;
+  try{
+    await flotteSuspendre(tenant,suspendre);
+    showToastGrn(suspendre?'Flotte suspendue':'Flotte réactivée');
+    audit(suspendre?'FLOTTE_SUSPENDUE':'FLOTTE_REACTIVEE',tenant);
+  }catch(e){ alert('Échec : '+((e&&e.code)||e)); }
+  await chargerAnnuaire();
+}
+async function supprimerFlotteAdmin(tenant){
+  var f=((_annuCache&&_annuCache.flottes)||[]).find(function(x){return x.tenant===tenant;})||{};
+  var nom=f.compagnie||tenant;
+  if(!confirm('🗑️ SUPPRIMER « '+nom+' » ?\n\n'
+    +'Tous ses quarts, chauffeurs et dépenses seront effacés définitivement. '
+    +'C\'est IRRÉVERSIBLE.\n\nSi c\'est un impayé, « ⏸️ Suspendre » suffit et se défait.'))return;
+  var saisi=prompt('Pour confirmer, écris le code exact de la flotte :\n\n'+tenant);
+  if(saisi===null)return;
+  if(String(saisi).trim()!==tenant){alert('Code différent — rien n\'a été supprimé.');return;}
+  try{
+    await flotteSupprimer(tenant);
+    audit('FLOTTE_SUPPRIMEE',tenant+' / '+nom);
+    alert('Flotte « '+nom+' » supprimée.');
+  }catch(e){
+    var c=(e&&e.code)||(e&&e.message)||e;
+    alert('Échec : '+c+(String(c)==='flotte-active'?'\n\nTu es connecté sur cette flotte : reviens à ta flotte principale d\'abord.':''));
+  }
+  await chargerAnnuaire();
 }
 
 // ═══ MULTI-FLOTTE (multi-propriétaire) ═══
@@ -11363,7 +11624,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-13-v103-PAYE-ESSENCE-CASH';
+var APP_VERSION = '2026-08-14-v104-ANNUAIRE-FLOTTES';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
