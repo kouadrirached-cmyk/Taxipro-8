@@ -6784,6 +6784,227 @@ function viewPhoto(src){
 }
 
 // ═══════════════════════════════════════════════
+// 📋 LES RÈGLES FIRESTORE, COPIABLES DEPUIS LE TÉLÉPHONE
+// Le propriétaire travaille sans ordinateur : le texte des règles vit
+// donc dans l'app, prêt à coller dans la console Firebase. Un test
+// vérifie qu'il est identique au fichier firestore.rules du dépôt.
+// ═══════════════════════════════════════════════
+var REGLES_FIRESTORE = `rules_version = '2';
+// ═══════════════════════════════════════════════════════════════
+// TAXIPRO — Règles de sécurité Firestore (v104)
+// Isolation stricte des données par flotte + annuaire des flottes.
+//
+// Modèle :
+//  - Chaque flotte = une collection racine (ex: taxipro, fl_taxiabc_x1y2z3)
+//    avec 5 documents de données : config, shifts, expenses, audit, deleted.
+//  - Chaque flotte a un 6e document « members » :
+//      { joinKey: "<code de la flotte>", locked: bool, uids: { <uid>: true } }
+//  - Chaque appareil s'authentifie anonymement (Firebase Auth) et son uid
+//    doit figurer dans members.uids pour lire/écrire les données.
+//  - Un nouvel appareil peut s'ajouter lui-même à members UNIQUEMENT s'il
+//    fournit le bon joinKey ET que la flotte n'est pas verrouillée (locked).
+//  - Le premier appareil d'une flotte crée le document members (inscription
+//    autonome ou prise de possession d'une flotte existante).
+//
+// Annuaire (v104) :
+//  - Collection « annuaire », une fiche par flotte (id = code de la flotte),
+//    contenant seulement de quoi savoir que la flotte existe : nom, courriel,
+//    dates, compteurs. AUCUNE donnée d'exploitation.
+//  - Une flotte n'écrit QUE sa propre fiche, et ne peut pas se déssuspendre.
+//  - Le document « annuaire/_admins » désigne les appareils gardiens. Eux
+//    seuls lisent l'annuaire complet, suspendent, et suppriment une flotte.
+//  - Une flotte suspendue perd l'accès à ses données (lecture ET écriture).
+// ═══════════════════════════════════════════════════════════════
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function adminsPath() {
+      return /databases/$(database)/documents/annuaire/_admins;
+    }
+    // Gardien de l'annuaire : uid inscrit dans annuaire/_admins
+    function isAdmin() {
+      return request.auth != null
+        && exists(adminsPath())
+        && get(adminsPath()).data.get('uids', {}).get(request.auth.uid, false) == true;
+    }
+
+    // ─────────────────────────────────────────────
+    // ANNUAIRE DES FLOTTES
+    // ─────────────────────────────────────────────
+    match /annuaire/{tenant} {
+
+      // ── Lister l'annuaire entier : gardiens seulement ──
+      // Sur un « list », le joker {tenant} n'est lié à aucun document : la
+      // règle ne doit donc jamais le lire, sinon elle échoue en erreur.
+      allow list: if isAdmin();
+
+      // ── Le document des gardiens ──
+      // Lecture ouverte à tout appareil identifié : chacun doit pouvoir
+      // vérifier s'il est gardien (et voir que la place est prise).
+      allow get: if request.auth != null && tenant == '_admins';
+      // Création : premier gardien. La place se prend UNE fois — après,
+      // seul un gardien existant peut en ajouter ou en retirer.
+      allow create: if tenant == '_admins'
+        && request.auth != null
+        && request.resource.data.uids is map
+        && request.resource.data.uids.keys().hasOnly([request.auth.uid])
+        && request.resource.data.uids[request.auth.uid] == true;
+      allow update, delete: if tenant == '_admins' && isAdmin();
+
+      // ── Les fiches de flottes ──
+      // Lecture complète : gardiens seulement. Une flotte peut relire la
+      // sienne (elle y voit si elle est suspendue).
+      allow get: if tenant != '_admins'
+        && request.auth != null
+        && (isAdmin() || isMemberOf(database, tenant));
+
+      // Dépôt de la fiche par la flotte elle-même. Elle ne touche jamais
+      // au champ « suspendu » : seul un gardien suspend et réactive.
+      allow create: if tenant != '_admins'
+        && isMemberOf(database, tenant)
+        && !request.resource.data.keys().hasAny(['suspendu', 'suspenduLe']);
+      allow update: if tenant != '_admins'
+        && isMemberOf(database, tenant)
+        && request.resource.data.get('suspendu', false) == resource.data.get('suspendu', false);
+
+      // Suspendre, réactiver, retirer une fiche : gardiens seulement.
+      allow write: if tenant != '_admins' && isAdmin();
+    }
+
+    // Membre d'une flotte donnée (utilisé depuis l'annuaire)
+    function isMemberOf(database, fleet) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/$(fleet)/members)
+        && get(/databases/$(database)/documents/$(fleet)/members)
+             .data.get('uids', {}).get(request.auth.uid, false) == true;
+    }
+
+    // ─────────────────────────────────────────────
+    // DONNÉES DES FLOTTES
+    // ─────────────────────────────────────────────
+    match /{fleet}/{doc} {
+
+      function membersPath() {
+        return /databases/$(database)/documents/$(fleet)/members;
+      }
+      function isMember() {
+        return request.auth != null
+          && exists(membersPath())
+          && get(membersPath()).data.get('uids', {}).get(request.auth.uid, false) == true;
+      }
+      function isDataDoc() {
+        return doc in ['config', 'shifts', 'expenses', 'audit', 'deleted'];
+      }
+      // Flotte suspendue par un gardien : accès coupé. Une flotte absente
+      // de l'annuaire n'est jamais suspendue (défaut = autorisée).
+      function estSuspendue() {
+        return exists(/databases/$(database)/documents/annuaire/$(fleet))
+          && get(/databases/$(database)/documents/annuaire/$(fleet))
+               .data.get('suspendu', false) == true;
+      }
+      // L'annuaire a ses propres règles plus haut : la collection ne doit
+      // jamais retomber dans le modèle « flotte ».
+      function estFlotte() {
+        return fleet != 'annuaire';
+      }
+
+      // ── Documents de données : membres de la flotte, non suspendue ──
+      allow read, write: if estFlotte() && isDataDoc() && isMember() && !estSuspendue();
+      // Un gardien peut lire et effacer n'importe quelle flotte (résiliation)
+      allow read, write: if estFlotte() && isDataDoc() && isAdmin();
+
+      // ── Document « members » ──
+      // Lecture : membres seulement (contient la liste des appareils)
+      allow read: if estFlotte() && doc == 'members' && isMember();
+
+      // Création : première prise de possession de la flotte
+      // (inscription autonome, ou migration d'une flotte existante).
+      // L'appareil créateur ne peut inscrire QUE lui-même.
+      allow create: if estFlotte() && doc == 'members'
+        && request.auth != null
+        && request.resource.data.joinKey is string
+        && request.resource.data.uids is map
+        && request.resource.data.uids.keys().hasOnly([request.auth.uid])
+        && request.resource.data.uids[request.auth.uid] == true;
+
+      // Mise à jour par un membre existant (gérer les appareils,
+      // verrouiller/déverrouiller la flotte, changer le joinKey).
+      allow update: if estFlotte() && doc == 'members' && isMember() && !estSuspendue();
+
+      // Auto-inscription d'un NOUVEL appareil : bon joinKey exigé,
+      // flotte non verrouillée, non suspendue, et il ne peut qu'ajouter
+      // SON propre uid (aucune autre modification permise).
+      allow update: if estFlotte() && doc == 'members'
+        && request.auth != null
+        && !estSuspendue()
+        && resource.data.get('locked', false) != true
+        && request.resource.data.joinKey == resource.data.joinKey
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uids'])
+        && request.resource.data.uids.diff(resource.data.uids).addedKeys().hasOnly([request.auth.uid])
+        && request.resource.data.uids.diff(resource.data.uids).removedKeys().size() == 0
+        && request.resource.data.uids.diff(resource.data.uids).changedKeys().size() == 0
+        && request.resource.data.uids[request.auth.uid] == true;
+
+      // Résiliation : un gardien de l'annuaire peut effacer le document
+      // members d'une flotte (c'est ce qui la ferme définitivement).
+      allow read, write: if estFlotte() && doc == 'members' && isAdmin();
+    }
+  }
+}
+`;
+var FIREBASE_PROJET='gestion-taxi-pro-32eaa';
+function lienReglesFirebase(){
+  return 'https://console.firebase.google.com/project/'+FIREBASE_PROJET+'/firestore/rules';
+}
+async function copierReglesFirestore(){
+  var t=REGLES_FIRESTORE;
+  try{
+    await navigator.clipboard.writeText(t);
+    showToastGrn('✓ Règles copiées — colle-les dans Firebase');
+    return true;
+  }catch(e){
+    // Repli pour les navigateurs sans presse-papiers moderne
+    try{
+      var ta=document.createElement('textarea');
+      ta.value=t;ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);ta.select();
+      var ok=document.execCommand('copy');
+      document.body.removeChild(ta);
+      if(ok){showToastGrn('✓ Règles copiées');return true;}
+    }catch(e2){}
+    voirReglesFirestore();
+    return false;
+  }
+}
+// Dernier recours : afficher le texte pour un copier-coller à la main
+function voirReglesFirestore(){
+  var ov=document.createElement('div');
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:99999;display:flex;flex-direction:column;padding:14px;';
+  ov.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;">'
+    +'<div style="font-size:13px;font-weight:900;color:var(--gold);">📋 Règles Firestore</div>'
+    +'<button id="rglClose" style="background:rgba(255,255,255,.1);border:none;color:var(--txt);border-radius:8px;padding:7px 13px;font-size:13px;font-weight:900;cursor:pointer;">✕</button></div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-bottom:8px;line-height:1.5;">Sélectionne tout le texte, copie-le, puis colle-le dans la console Firebase → Firestore → Règles → Publier.</div>'
+    +'<textarea id="rglTxt" readonly style="flex:1;width:100%;background:#000;color:#9f9;border:1px solid var(--brd2);border-radius:10px;padding:10px;font-family:monospace;font-size:10px;line-height:1.45;"></textarea>';
+  document.body.appendChild(ov);
+  document.getElementById('rglTxt').value=REGLES_FIRESTORE;
+  document.getElementById('rglClose').onclick=function(){ov.remove();};
+}
+function reglesFirestoreHTML(){
+  return '<div style="background:rgba(0,229,255,.05);border:1px solid rgba(0,229,255,.2);border-radius:12px;padding:11px;margin-top:9px;">'
+    +'<div style="font-size:11px;font-weight:900;color:var(--neon);margin-bottom:5px;">📋 Règles de sécurité Firestore</div>'
+    +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:9px;">'
+    +'À publier dans Firebase après chaque mise à jour qui les change. Sans ça, tu verras « permission-denied ».<br>'
+    +'<b>1.</b> Copie · <b>2.</b> Ouvre la console · <b>3.</b> Firestore → Règles → colle → <b>Publier</b>.'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'
+    +'<button onclick="copierReglesFirestore()" style="background:rgba(0,229,255,.15);border:1px solid rgba(0,229,255,.4);color:var(--neon);border-radius:9px;padding:10px;font-size:11px;font-weight:800;cursor:pointer;">📋 Copier les règles</button>'
+    +'<a href="'+lienReglesFirebase()+'" target="_blank" rel="noopener" style="display:block;text-align:center;background:rgba(245,200,0,.12);border:1px solid rgba(245,200,0,.35);color:var(--gold);border-radius:9px;padding:10px;font-size:11px;font-weight:800;text-decoration:none;">🔗 Ouvrir Firebase</button>'
+    +'</div>'
+    +'<button onclick="voirReglesFirestore()" style="width:100%;margin-top:7px;background:none;border:1px solid var(--brd2);color:var(--m2);border-radius:9px;padding:8px;font-size:10px;font-weight:700;cursor:pointer;">👁️ Voir le texte des règles</button>'
+    +'</div>';
+}
+
+// ═══════════════════════════════════════════════
 // 📇 ANNUAIRE DES FLOTTES — qui utilise l'application
 // Chaque flotte vit dans sa propre collection Firestore, sans rien qui
 // les relie : impossible de savoir combien de propriétaires utilisent
@@ -6927,7 +7148,8 @@ function _annuaireHTML(){
       +(refus?'🔒 Lecture refusée par les règles. Il faut d\'abord que cet appareil devienne le gardien de l\'annuaire.'
              :'⚠️ Lecture impossible : '+_cmpEsc(String(a.erreur)))
       +'</div>'
-      +(refus?'<button class="btn bsec bsm" style="width:100%;padding:11px;margin-top:9px;" onclick="revendiquerAnnuaire()">🔑 Devenir le gardien de l\'annuaire</button>':'')
+      +(refus?reglesFirestoreHTML()
+        +'<button class="btn bsec bsm" style="width:100%;padding:11px;margin-top:9px;" onclick="revendiquerAnnuaire()">🔑 Devenir le gardien de l\'annuaire</button>':'')
       +'<button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:8px;" onclick="chargerAnnuaire()">🔄 Réessayer</button>';
   }
   var fl=a.flottes||[];
@@ -6940,7 +7162,8 @@ function _annuaireHTML(){
       +'⚠️ <b>Cet appareil n\'est pas encore le gardien de l\'annuaire.</b> Tant que personne ne l\'est, '
       +'n\'importe quel appareil peut prendre la place. Fais-le maintenant.'
       +'</div>'
-      +'<button class="btn bsec bsm" style="width:100%;padding:11px;margin-bottom:11px;" onclick="revendiquerAnnuaire()">🔑 Devenir le gardien'+(a.nbAdmins>0?' (déjà '+a.nbAdmins+' appareil'+(a.nbAdmins>1?'s':'')+')':'')+'</button>';
+      +'<button class="btn bsec bsm" style="width:100%;padding:11px;margin-bottom:11px;" onclick="revendiquerAnnuaire()">🔑 Devenir le gardien'+(a.nbAdmins>0?' (déjà '+a.nbAdmins+' appareil'+(a.nbAdmins>1?'s':'')+')':'')+'</button>'
+      +reglesFirestoreHTML();
   }
   h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">'
     +'<div style="background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.25);border-radius:11px;padding:10px;text-align:center;">'
@@ -6997,8 +7220,19 @@ async function revendiquerAnnuaire(){
     var r=await annuaireRevendiquer();
     showToastGrn(r==='deja'?'Cet appareil est déjà gardien':'✓ Cet appareil garde l\'annuaire');
   }catch(e){
-    alert('Impossible de devenir gardien : '+((e&&e.code)||(e&&e.message)||e)
-      +'\n\nSi le message parle de permissions, colle la dernière version de firestore.rules dans la console Firebase.');
+    var code=(e&&e.code)||(e&&e.message)||e;
+    if(String(code).indexOf('permission')>=0){
+      if(confirm('🔒 Firebase refuse : les règles de sécurité publiées ne connaissent pas encore l\'annuaire.\n\n'
+        +'Il faut les mettre à jour — 3 étapes, depuis ce téléphone :\n'
+        +'1. Copier les règles (le bouton juste en dessous)\n'
+        +'2. Ouvrir la console Firebase\n'
+        +'3. Firestore → Règles → tout remplacer → Publier\n\n'
+        +'Copier les règles maintenant ?')){
+        await copierReglesFirestore();
+      }
+    }else{
+      alert('Impossible de devenir gardien : '+code);
+    }
   }
   await chargerAnnuaire();
 }
@@ -11624,7 +11858,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-14-v104-ANNUAIRE-FLOTTES';
+var APP_VERSION = '2026-08-15-v105-REGLES-DEPUIS-TELEPHONE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
