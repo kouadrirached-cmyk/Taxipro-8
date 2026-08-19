@@ -1451,6 +1451,10 @@ body{
         <button class="btn bsec bsm" id="fleetLockBtn" style="width:100%;padding:10px;margin-top:8px;" onclick="toggleFleetLock()">🔒 Verrouiller la flotte (bloquer les nouveaux appareils)</button>
         <button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:8px;" onclick="archiveOldShifts()">🗄️ Archiver les vieux quarts (+12 mois)</button>
       </div>
+      <div class="card" style="border-color:rgba(255,120,120,.3);">
+        <div class="ctit"><span><span class="ci">🔍</span>Vérifier les quarts</span></div>
+        <div id="verifQuartsContent"></div>
+      </div>
       <div class="card" id="cardAnnuaire" style="border-color:rgba(245,200,0,.35);display:none;">
         <div class="ctit"><span><span class="ci">📇</span>Qui utilise l'application</span></div>
         <div id="annuContent"></div>
@@ -6233,6 +6237,137 @@ function redevanceDrvHTML(d){
     +fm(14*r.montant*((d&&d.pct)||40)/100)+' de plus et te coûte autant.'
     +'</span></span></label>';
 }
+// Rattache les quarts et les paies d'un nom à un autre. En mode simulation
+// (compter=true) ne modifie rien et retourne seulement ce qui bougerait.
+function renommerChauffeur(ancien,nouveau,compter){
+  var nQ=0,nP=0;
+  Object.keys(S).forEach(function(k){
+    if(S[k]&&S[k].driver===ancien){
+      nQ++;
+      if(!compter){S[k].driver=nouveau;S[k]._m=Date.now();}
+    }
+  });
+  // Les paies sont classées « semaine|nom » (+ suffixes des choix du patron)
+  var suffixes=['','_deductCash','_essCash'];
+  Object.keys(C.payes||{}).forEach(function(k){
+    var i=k.indexOf('|');if(i<0)return;
+    var wk=k.slice(0,i),reste=k.slice(i+1);
+    for(var j=0;j<suffixes.length;j++){
+      if(reste===ancien+suffixes[j]){
+        if(suffixes[j]==='')nP++;
+        if(!compter){
+          var nk=wk+'|'+nouveau+suffixes[j];
+          if(C.payes[nk]===undefined)C.payes[nk]=C.payes[k];
+          delete C.payes[k];
+        }
+        return;
+      }
+    }
+  });
+  return {quarts:nQ,paies:nP};
+}
+// ── Vérification des quarts : ce qui pourrait avoir disparu, et pourquoi ──
+function diagnosticQuarts(){
+  var noms={},orphelins=[],sansDate=0,sansTs=0,fantomes=[];
+  var equipe={};(C.drivers||[]).forEach(function(d){equipe[d.name]=d;});
+  var tomb=(window.TOMB&&window.TOMB.s)||{};
+  Object.keys(S).forEach(function(k){
+    var s=S[k];if(!s)return;
+    var n=s.driver||'(sans nom)';
+    if(!noms[n])noms[n]={nom:n,n:0,connu:!!equipe[n],actif:!!(equipe[n]&&equipe[n].active!==false),dernier:''};
+    noms[n].n++;
+    if(s.date>noms[n].dernier)noms[n].dernier=s.date||'';
+    if(!equipe[n])orphelins.push(s);
+    if(!s.date)sansDate++;
+    if(!s.ts&&!s.editedAt&&!s._m)sansTs++;
+    // Un quart encore présent alors qu'une suppression plus récente existe :
+    // il repartira à la prochaine fusion. C'est ça, « il disparaît tout seul ».
+    if(tomb[k]&&tomb[k]>=window.txpMTime(s))fantomes.push(s);
+  });
+  // Noms qui se ressemblent : la trace typique d'un renommage à la main
+  var cles=Object.keys(noms),proches=[];
+  var norm=function(x){return String(x||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');};
+  for(var i=0;i<cles.length;i++)for(var j=i+1;j<cles.length;j++){
+    var a=norm(cles[i]),b=norm(cles[j]);
+    if(!a||!b)continue;
+    if(a===b||a.indexOf(b)===0||b.indexOf(a)===0)proches.push([cles[i],cles[j]]);
+  }
+  (C.drivers||[]).forEach(function(d){
+    if(!noms[d.name])noms[d.name]={nom:d.name,n:0,connu:true,actif:d.active!==false,dernier:''};
+  });
+  return {noms:Object.keys(noms).map(function(n){return noms[n];})
+            .sort(function(a,b){return b.n-a.n;}),
+    orphelins:orphelins,proches:proches,fantomes:fantomes,
+    sansDate:sansDate,sansTs:sansTs,total:Object.keys(S).length};
+}
+function diagnosticQuartsHTML(){
+  var d=diagnosticQuarts();
+  var pb=d.orphelins.length+d.proches.length+d.fantomes.length+d.sansDate;
+  var h='<div style="font-size:11px;color:var(--m2);line-height:1.6;margin-bottom:10px;">'
+    +'Si un chauffeur ne retrouve plus ses quarts, la cause est presque toujours ici : '
+    +'un quart rangé sous un nom qui n\'existe plus dans l\'équipe.</div>';
+  h+='<div style="background:'+(pb?'rgba(255,58,58,.08)':'rgba(57,211,83,.08)')+';border:1px solid '+(pb?'rgba(255,58,58,.3)':'rgba(57,211,83,.3)')+';border-radius:11px;padding:11px;margin-bottom:11px;">'
+    +'<div style="font-size:12px;font-weight:900;color:'+(pb?'var(--red)':'var(--grn)')+';">'
+    +(pb?'⚠️ '+pb+' anomalie'+(pb>1?'s':'')+' trouvée'+(pb>1?'s':''):'✅ Rien d\'anormal')+'</div>'
+    +'<div style="font-size:10px;color:var(--m2);margin-top:3px;">'+d.total+' quarts vérifiés</div></div>';
+  if(d.orphelins.length){
+    var parNom={};
+    d.orphelins.forEach(function(s){var n=s.driver||'(sans nom)';(parNom[n]=parNom[n]||[]).push(s);});
+    h+='<div style="font-size:11px;font-weight:900;color:var(--red);margin-bottom:6px;">👻 Quarts sans chauffeur dans l\'équipe</div>';
+    Object.keys(parNom).forEach(function(n){
+      var lst=parNom[n].sort(function(a,b){return String(b.date).localeCompare(String(a.date));});
+      h+='<div style="background:rgba(10,8,0,.55);border:1px solid rgba(255,58,58,.25);border-radius:11px;padding:11px;margin-bottom:8px;">'
+        +'<div style="font-size:12px;font-weight:900;color:var(--m3);">« '+_cmpEsc(n)+' » — '+lst.length+' quart'+(lst.length>1?'s':'')+'</div>'
+        +'<div style="font-size:9px;color:var(--m2);margin:4px 0 8px;">du '+_cmpEsc(lst[lst.length-1].date||'?')+' au '+_cmpEsc(lst[0].date||'?')+'</div>'
+        +'<div style="font-size:10px;color:var(--m2);margin-bottom:5px;">Rattacher à :</div>'
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap;">'
+        +(C.drivers||[]).filter(function(x){return x.active!==false;}).map(function(x){
+          return '<button onclick="rattacherQuarts(\''+_cmpEsc(n).replace(/'/g,"\\'")+'\',\''+_cmpEsc(x.name).replace(/'/g,"\\'")+'\')" style="background:rgba(57,211,83,.13);border:1px solid rgba(57,211,83,.35);color:var(--grn);border-radius:9px;padding:7px 11px;font-size:10px;font-weight:800;cursor:pointer;">→ '+_cmpEsc(x.name)+'</button>';
+        }).join('')
+        +'</div></div>';
+    });
+  }
+  if(d.proches.length){
+    h+='<div style="font-size:11px;font-weight:900;color:var(--gold);margin:10px 0 6px;">🔤 Noms qui se ressemblent</div>';
+    d.proches.forEach(function(p){
+      h+='<div style="font-size:10px;color:var(--m2);background:rgba(245,200,0,.06);border:1px solid rgba(245,200,0,.2);border-radius:9px;padding:8px;margin-bottom:6px;">'
+        +'« '+_cmpEsc(p[0])+' » et « '+_cmpEsc(p[1])+' » — probablement la même personne, écrite de deux façons.</div>';
+    });
+  }
+  if(d.fantomes.length){
+    h+='<div style="font-size:11px;font-weight:900;color:var(--red);margin:10px 0 6px;">🕳️ '+d.fantomes.length+' quart'+(d.fantomes.length>1?'s':'')+' marqué'+(d.fantomes.length>1?'s':'')+' supprimé'+(d.fantomes.length>1?'s':'')+'</div>'
+      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:6px;">Encore visibles ici, mais une suppression plus récente existe : ils repartiront à la prochaine synchro. Restaure-les depuis la corbeille si c\'est une erreur.</div>';
+    d.fantomes.slice(0,10).forEach(function(s){
+      h+='<div style="font-size:10px;color:var(--m2);">• '+_cmpEsc(s.date||'?')+' — '+_cmpEsc(s.driver||'?')+' — '+fm(s.recette||0)+'</div>';
+    });
+  }
+  h+='<div style="font-size:11px;font-weight:900;color:var(--m3);margin:12px 0 6px;">📊 Quarts par nom</div>';
+  d.noms.forEach(function(n){
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--brd);font-size:11px;">'
+      +'<span style="color:'+(n.connu?'var(--m3)':'var(--red)')+';">'+(n.connu?(n.actif?'🚗':'🔒'):'👻')+' '+_cmpEsc(n.nom)
+      +(n.dernier?'<span style="font-size:9px;color:var(--m2);"> · dernier '+_cmpEsc(n.dernier)+'</span>':'')+'</span>'
+      +'<span style="font-weight:900;color:'+(n.n?'var(--gold)':'var(--m2)')+';">'+n.n+'</span></div>';
+  });
+  if(d.sansDate)h+='<div style="font-size:10px;color:var(--red);margin-top:8px;">⚠️ '+d.sansDate+' quart(s) sans date — invisibles dans l\'historique.</div>';
+  h+='<button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:11px;" onclick="renderVerifQuarts()">🔄 Revérifier</button>';
+  return h;
+}
+function renderVerifQuarts(){
+  var el=document.getElementById('verifQuartsContent');
+  if(!el)return;
+  if(!U||U.role!=='owner'){el.innerHTML='';return;}
+  el.innerHTML=diagnosticQuartsHTML();
+}
+function rattacherQuarts(ancien,nouveau){
+  var n=renommerChauffeur(ancien,nouveau,true);
+  if(!confirm('Rattacher les '+n.quarts+' quart'+(n.quarts>1?'s':'')+' de « '+ancien+' » à « '+nouveau+' » ?\n\n'
+    +'Ils réapparaîtront dans son historique et dans sa paie.'))return;
+  renommerChauffeur(ancien,nouveau,false);
+  lSave();
+  audit('RATTACHE',ancien+' → '+nouveau+' ('+n.quarts+' quarts)');
+  showToastGrn('✓ '+n.quarts+' quart'+(n.quarts>1?'s':'')+' rattaché'+(n.quarts>1?'s':''));
+  renderVerifQuarts();
+}
 function drvFormHTML(d){return'<div class="fsm"><label>Nom</label><input type="text" id="dm-n" value="'+(d.name||'')+'" placeholder="Nom du chauffeur"></div><div class="fsm"><label>Téléphone</label><input type="tel" id="dm-ph" value="'+(d.phone||'')+'" placeholder="+1 514 000-0000"></div><div class="fsm"><label>Email (pour paye)</label><input type="email" id="dm-em" value="'+(d.email||'')+'" placeholder="chauffeur@email.com"></div><div class="fsm"><label>Pourcentage (%)</label><input type="number" id="dm-p" value="'+(d.pct||40)+'" min="0" max="100"></div>'+redevanceDrvHTML(d)+'<div class="fsm"><label>Mot de passe</label><input type="text" id="dm-pw" value="" placeholder="'+(d.id?'Laisser vide = inchangé':'Mot de passe')+'"></div><div class="fsm"><label>Statut</label><div class="sw"><select id="dm-a"><option value="true" '+(d.active!==false?'selected':'')+'>✅ Actif</option><option value="false" '+(d.active===false?'selected':'')+'>❌ Inactif</option></select></div></div><div style="border-top:1px solid var(--brd);margin:10px 0 8px;padding-top:8px;font-size:10px;color:var(--m2);font-weight:800;text-transform:uppercase;">📄 Pour documents officiels (attestation d\'emploi)</div><div class="fsm"><label>Nom complet officiel</label><input type="text" id="dm-full" value="'+(d.fullName||'')+'" placeholder="ex: Mazouz Mohamed Mehdi"></div><div class="fsm"><label>Date de naissance</label><input type="date" id="dm-dob" value="'+(d.dob||'')+'"></div><div class="fsm"><label>Adresse complète</label><input type="text" id="dm-addr" value="'+(d.address||'')+'" placeholder="ex: 1090, rue d\'Angoulême, app. 142"></div><div class="fsm"><label>Employé depuis</label><input type="date" id="dm-hired" value="'+(d.hiredDate||'')+'"></div>';}
 async function saveDrv(){
   const name=gv('dm-n').trim(),phone=gv('dm-ph').trim(),email=gv('dm-em').trim();
@@ -6248,6 +6383,23 @@ async function saveDrv(){
   if(pw){
     const h=await window.txpHash(pw);
     pwPatch=h?{pwh:h}:{pw:pw};
+  }
+  // ── RENOMMAGE : les quarts et les paies suivent le nouveau nom ──
+  // Tout dans l'app repère un chauffeur par son NOM (s.driver, clés de
+  // C.payes). Renommer sans migrer laissait ses quarts orphelins : il ne
+  // les voyait plus, sa paie repassait à zéro, et ouvrir un de ces quarts
+  // le réattribuait à un autre chauffeur.
+  if(editDrvId){
+    var _ancien=(C.drivers.find(d=>d.id===editDrvId)||{}).name;
+    if(_ancien&&_ancien!==name){
+      var _n=renommerChauffeur(_ancien,name,true);
+      if(_n.quarts+_n.paies>0){
+        if(!confirm('✏️ Renommer « '+_ancien+' » en « '+name+' » ?\n\n'
+          +_n.quarts+' quart'+(_n.quarts>1?'s':'')+' et '+_n.paies+' semaine'+(_n.paies>1?'s':'')+' de paie '
+          +'seront rattachés au nouveau nom.\n\nSans ça, ses anciens quarts disparaîtraient de son historique et de sa paie.'))return;
+      }
+      renommerChauffeur(_ancien,name,false);
+    }
   }
   if(editDrvId){
     C.drivers=C.drivers.map(d=>{
@@ -6766,6 +6918,7 @@ function renderSet(){
   renderGiftCardDrvSel();
   // Multi-flotte
   renderFleetInfo();
+  renderVerifQuarts();
   renderAnnuaire();
   // Corbeille
   renderTrash();
@@ -7869,7 +8022,15 @@ function openEdit(id){
   editId=id;
   document.getElementById('editForm').innerHTML=
     '<div class="frow"><div class="fsm"><label>Date</label><input type="date" id="ed" value="'+s.date+'"></div><div class="fsm"><label>Heure</label><div class="sw"><select id="et">'+['06h00','07h00','08h00','09h00','10h00','12h00','14h00','16h00','18h00','20h00','22h00','00h00'].map(t=>'<option '+(s.time===t?'selected':'')+'>'+t+'</option>').join('')+'</select></div></div></div>'
-    +'<div class="fsm"><label>Chauffeur</label><div class="sw"><select id="edr">'+C.drivers.filter(d=>d.active!==false).map(d=>'<option '+(s.driver===d.name?'selected':'')+' value="'+d.name+'">'+d.name+' ('+d.pct+'%)</option>').join('')+'</select></div></div>'
+    // Le chauffeur du quart est TOUJOURS dans la liste, même s'il a été
+    // renommé ou désactivé : sans ça le navigateur sélectionnait le
+    // premier de la liste et l'enregistrement réattribuait le quart à
+    // quelqu'un d'autre — le quart semblait « écrasé ».
+    +'<div class="fsm"><label>Chauffeur</label><div class="sw"><select id="edr">'
+      +(C.drivers.some(d=>d.name===s.driver&&d.active!==false)?''
+        :'<option selected value="'+_cmpEsc(s.driver||'')+'">⚠️ '+_cmpEsc(s.driver||'(sans nom)')+' — plus dans l\'équipe</option>')
+      +C.drivers.filter(d=>d.active!==false).map(d=>'<option '+(s.driver===d.name?'selected':'')+' value="'+_cmpEsc(d.name)+'">'+_cmpEsc(d.name)+' ('+d.pct+'%)</option>').join('')
+      +'</select></div></div>'
     +'<div class="fsm"><label>Véhicule</label><div class="sw"><select id="ecar">'+C.vehicles.map(v=>'<option '+(s.vehicle===v.model+' '+v.num?'selected':'')+'>'+v.model+' '+v.num+'</option>').join('')+'</select></div></div>'
     +'<div class="fsm"><label>🕐 Type de quart</label><div class="sw"><select id="eper"><option value="jour"'+((shiftPeriode(s)==='jour')?' selected':'')+'>🌅 Shift de jour</option><option value="soir"'+((shiftPeriode(s)==='soir')?' selected':'')+'>🌆 Shift de soir</option></select></div></div>'
     +'<div class="frow"><div class="fsm"><label>Début taxi</label><input type="number" id="etaxd" value="'+(s.taxd||0)+'"></div><div class="fsm"><label>Fin taxi</label><input type="number" id="etaxf" value="'+(s.taxf||0)+'"></div></div>'
@@ -11858,7 +12019,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-15-v105-REGLES-DEPUIS-TELEPHONE';
+var APP_VERSION = '2026-08-16-v106-QUARTS-ORPHELINS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
