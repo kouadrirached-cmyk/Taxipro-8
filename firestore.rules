@@ -1,7 +1,7 @@
 rules_version = '2';
 // ═══════════════════════════════════════════════════════════════
-// TAXIPRO — Règles de sécurité Firestore (v65)
-// Isolation stricte des données par flotte.
+// TAXIPRO — Règles de sécurité Firestore (v104)
+// Isolation stricte des données par flotte + annuaire des flottes.
 //
 // Modèle :
 //  - Chaque flotte = une collection racine (ex: taxipro, fl_taxiabc_x1y2z3)
@@ -14,9 +14,83 @@ rules_version = '2';
 //    fournit le bon joinKey ET que la flotte n'est pas verrouillée (locked).
 //  - Le premier appareil d'une flotte crée le document members (inscription
 //    autonome ou prise de possession d'une flotte existante).
+//
+// Annuaire (v104) :
+//  - Collection « annuaire », une fiche par flotte (id = code de la flotte),
+//    contenant seulement de quoi savoir que la flotte existe : nom, courriel,
+//    dates, compteurs. AUCUNE donnée d'exploitation.
+//  - Une flotte n'écrit QUE sa propre fiche, et ne peut pas se déssuspendre.
+//  - Le document « annuaire/_admins » désigne les appareils gardiens. Eux
+//    seuls lisent l'annuaire complet, suspendent, et suppriment une flotte.
+//  - Une flotte suspendue perd l'accès à ses données (lecture ET écriture).
 // ═══════════════════════════════════════════════════════════════
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function adminsPath() {
+      return /databases/$(database)/documents/annuaire/_admins;
+    }
+    // Gardien de l'annuaire : uid inscrit dans annuaire/_admins
+    function isAdmin() {
+      return request.auth != null
+        && exists(adminsPath())
+        && get(adminsPath()).data.get('uids', {}).get(request.auth.uid, false) == true;
+    }
+
+    // ─────────────────────────────────────────────
+    // ANNUAIRE DES FLOTTES
+    // ─────────────────────────────────────────────
+    match /annuaire/{tenant} {
+
+      // ── Lister l'annuaire entier : gardiens seulement ──
+      // Sur un « list », le joker {tenant} n'est lié à aucun document : la
+      // règle ne doit donc jamais le lire, sinon elle échoue en erreur.
+      allow list: if isAdmin();
+
+      // ── Le document des gardiens ──
+      // Lecture ouverte à tout appareil identifié : chacun doit pouvoir
+      // vérifier s'il est gardien (et voir que la place est prise).
+      allow get: if request.auth != null && tenant == '_admins';
+      // Création : premier gardien. La place se prend UNE fois — après,
+      // seul un gardien existant peut en ajouter ou en retirer.
+      allow create: if tenant == '_admins'
+        && request.auth != null
+        && request.resource.data.uids is map
+        && request.resource.data.uids.keys().hasOnly([request.auth.uid])
+        && request.resource.data.uids[request.auth.uid] == true;
+      allow update, delete: if tenant == '_admins' && isAdmin();
+
+      // ── Les fiches de flottes ──
+      // Lecture complète : gardiens seulement. Une flotte peut relire la
+      // sienne (elle y voit si elle est suspendue).
+      allow get: if tenant != '_admins'
+        && request.auth != null
+        && (isAdmin() || isMemberOf(database, tenant));
+
+      // Dépôt de la fiche par la flotte elle-même. Elle ne touche jamais
+      // au champ « suspendu » : seul un gardien suspend et réactive.
+      allow create: if tenant != '_admins'
+        && isMemberOf(database, tenant)
+        && !request.resource.data.keys().hasAny(['suspendu', 'suspenduLe']);
+      allow update: if tenant != '_admins'
+        && isMemberOf(database, tenant)
+        && request.resource.data.get('suspendu', false) == resource.data.get('suspendu', false);
+
+      // Suspendre, réactiver, retirer une fiche : gardiens seulement.
+      allow write: if tenant != '_admins' && isAdmin();
+    }
+
+    // Membre d'une flotte donnée (utilisé depuis l'annuaire)
+    function isMemberOf(database, fleet) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/$(fleet)/members)
+        && get(/databases/$(database)/documents/$(fleet)/members)
+             .data.get('uids', {}).get(request.auth.uid, false) == true;
+    }
+
+    // ─────────────────────────────────────────────
+    // DONNÉES DES FLOTTES
+    // ─────────────────────────────────────────────
     match /{fleet}/{doc} {
 
       function membersPath() {
@@ -30,18 +104,32 @@ service cloud.firestore {
       function isDataDoc() {
         return doc in ['config', 'shifts', 'expenses', 'audit', 'deleted'];
       }
+      // Flotte suspendue par un gardien : accès coupé. Une flotte absente
+      // de l'annuaire n'est jamais suspendue (défaut = autorisée).
+      function estSuspendue() {
+        return exists(/databases/$(database)/documents/annuaire/$(fleet))
+          && get(/databases/$(database)/documents/annuaire/$(fleet))
+               .data.get('suspendu', false) == true;
+      }
+      // L'annuaire a ses propres règles plus haut : la collection ne doit
+      // jamais retomber dans le modèle « flotte ».
+      function estFlotte() {
+        return fleet != 'annuaire';
+      }
 
-      // ── Documents de données : membres de la flotte seulement ──
-      allow read, write: if isDataDoc() && isMember();
+      // ── Documents de données : membres de la flotte, non suspendue ──
+      allow read, write: if estFlotte() && isDataDoc() && isMember() && !estSuspendue();
+      // Un gardien peut lire et effacer n'importe quelle flotte (résiliation)
+      allow read, write: if estFlotte() && isDataDoc() && isAdmin();
 
       // ── Document « members » ──
       // Lecture : membres seulement (contient la liste des appareils)
-      allow read: if doc == 'members' && isMember();
+      allow read: if estFlotte() && doc == 'members' && isMember();
 
       // Création : première prise de possession de la flotte
       // (inscription autonome, ou migration d'une flotte existante).
       // L'appareil créateur ne peut inscrire QUE lui-même.
-      allow create: if doc == 'members'
+      allow create: if estFlotte() && doc == 'members'
         && request.auth != null
         && request.resource.data.joinKey is string
         && request.resource.data.uids is map
@@ -50,13 +138,14 @@ service cloud.firestore {
 
       // Mise à jour par un membre existant (gérer les appareils,
       // verrouiller/déverrouiller la flotte, changer le joinKey).
-      allow update: if doc == 'members' && isMember();
+      allow update: if estFlotte() && doc == 'members' && isMember() && !estSuspendue();
 
       // Auto-inscription d'un NOUVEL appareil : bon joinKey exigé,
-      // flotte non verrouillée, et il ne peut qu'ajouter SON propre uid
-      // (aucune autre modification permise).
-      allow update: if doc == 'members'
+      // flotte non verrouillée, non suspendue, et il ne peut qu'ajouter
+      // SON propre uid (aucune autre modification permise).
+      allow update: if estFlotte() && doc == 'members'
         && request.auth != null
+        && !estSuspendue()
         && resource.data.get('locked', false) != true
         && request.resource.data.joinKey == resource.data.joinKey
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uids'])
@@ -65,8 +154,9 @@ service cloud.firestore {
         && request.resource.data.uids.diff(resource.data.uids).changedKeys().size() == 0
         && request.resource.data.uids[request.auth.uid] == true;
 
-      // NOTE : la suppression du document members n'est jamais autorisée
-      // (aucune règle allow delete ne le couvre — refus par défaut).
+      // Résiliation : un gardien de l'annuaire peut effacer le document
+      // members d'une flotte (c'est ce qui la ferme définitivement).
+      allow read, write: if estFlotte() && doc == 'members' && isAdmin();
     }
   }
 }
