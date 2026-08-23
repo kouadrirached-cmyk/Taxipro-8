@@ -1455,6 +1455,10 @@ body{
         <div class="ctit"><span><span class="ci">🔍</span>Vérifier les quarts</span></div>
         <div id="verifQuartsContent"></div>
       </div>
+      <div class="card" style="border-color:rgba(96,165,250,.3);">
+        <div class="ctit"><span><span class="ci">📈</span>Mesure d'usage (Google Analytics)</span></div>
+        <div id="mesureContent"></div>
+      </div>
       <div class="card" id="cardAnnuaire" style="border-color:rgba(245,200,0,.35);display:none;">
         <div class="ctit"><span><span class="ci">📇</span>Qui utilise l'application</span></div>
         <div id="annuContent"></div>
@@ -2521,6 +2525,8 @@ async function doLogin(){
   document.getElementById('tb-fleet').style.display='flex';
   document.getElementById('tb-clean').style.display='flex';
   audit('LOGIN');
+  gaCharger();
+  gaEvent('connexion',{role:U.role||''});
   // Fiche de la flotte déposée dans l'annuaire : c'est ce qui permet de
   // savoir qui utilise l'app. Sans blocage si le réseau ou les règles
   // refusent — l'app fonctionne exactement pareil.
@@ -2931,6 +2937,7 @@ function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn
   S[s.id]=s;
   if(justifTxt){if(!C.justifs)C.justifs={};C.justifs[s.id]=justifTxt;}
   lSave();
+  gaEvent('quart_ajoute',{role:(U&&U.role)||'',periode:s.periode||''});
   audit('ADD',driver+'/'+s.vehicle+'/'+s.date+'/'+fm(rec));
   const ok=document.getElementById('shiftOk');
   ok.style.display='block';setTimeout(function(){ok.style.display='none';},2000);
@@ -3445,6 +3452,7 @@ function goPage(name){
   document.getElementById('pg-'+name).classList.add('on');
   document.getElementById('tb-'+name).classList.add('on');
   document.getElementById('pagesEl').scrollTop=0;
+  gaEvent('ecran',{ecran:name,role:(U&&U.role)||''});
   if(name==='dash')renderDash();
   if(name==='hist')renderHist();
   if(name==='stats')renderStats();
@@ -6919,6 +6927,7 @@ function renderSet(){
   // Multi-flotte
   renderFleetInfo();
   renderVerifQuarts();
+  renderMesure();
   renderAnnuaire();
   // Corbeille
   renderTrash();
@@ -6934,6 +6943,118 @@ function viewPhoto(src){
   ov.innerHTML='<img src="'+src+'" style="max-width:100%;max-height:90vh;border-radius:12px;">';
   ov.onclick=function(){ov.remove();};
   document.body.appendChild(ov);
+}
+
+// ═══════════════════════════════════════════════
+// 📈 GOOGLE ANALYTICS — MESURE D'USAGE
+// Sert à une seule chose : savoir comment l'application est utilisée pour
+// l'améliorer et la vendre (écrans ouverts, inscriptions abandonnées,
+// fréquence d'usage). RIEN de ce qui compte n'y va JAMAIS : aucun nom de
+// chauffeur, aucun montant, aucun taximètre, aucun courriel. La liste des
+// événements envoyés est fixée ici et vérifiée par un test.
+// Réglable et coupable par flotte, comme l'exige la Loi 25.
+// ═══════════════════════════════════════════════
+var GA_MESURE_ID='';           // identifiant G-XXXXXXXXXX, vide = mesure éteinte
+var GA_CLE_LOCALE='txpro_ga_id';   // réglage d'essai, propre à cet appareil
+var _gaCharge=false;
+function gaId(){
+  try{ var l=localStorage.getItem(GA_CLE_LOCALE); if(l)return l; }catch(e){}
+  return GA_MESURE_ID||'';
+}
+// La flotte peut refuser la mesure : le refus est gardé sur l'appareil
+// (il doit valoir même sans connexion) ET dans la config de la flotte.
+function gaRefuse(){
+  try{ if(localStorage.getItem('txpro_ga_off')==='1')return true; }catch(e){}
+  return !!(typeof C!=='undefined'&&C&&C.mesureUsage===false);
+}
+function gaActif(){ return !!gaId()&&!gaRefuse(); }
+function gaBasculer(actif){
+  try{ localStorage.setItem('txpro_ga_off',actif?'0':'1'); }catch(e){}
+  if(typeof C!=='undefined'&&C){ C.mesureUsage=!!actif; lSave(); }
+  if(actif)gaCharger();
+  if(typeof renderMesure==='function')renderMesure();
+}
+function gaCharger(){
+  if(_gaCharge||!gaActif())return;
+  var id=gaId();
+  _gaCharge=true;
+  try{
+    window.dataLayer=window.dataLayer||[];
+    window.gtag=function(){window.dataLayer.push(arguments);};
+    var sc=document.createElement('script');
+    sc.async=true;
+    sc.src='https://www.googletagmanager.com/gtag/js?id='+encodeURIComponent(id);
+    sc.onerror=function(){ _gaCharge=false; };   // bloqué ou hors-ligne : tant pis
+    document.head.appendChild(sc);
+    window.gtag('js',new Date());
+    // send_page_view:false — c'est l'app qui déclare ses écrans elle-même.
+    // anonymize_ip — rien ne sert d'attacher une adresse à un chauffeur.
+    window.gtag('config',id,{send_page_view:false,anonymize_ip:true,
+      app_version:window.APP_VERSION||''});
+  }catch(e){ _gaCharge=false; }
+}
+// Les seuls événements que l'app a le droit d'envoyer. Tout le reste est
+// ignoré : impossible d'envoyer un montant ou un nom par inadvertance.
+var GA_EVENEMENTS=['ecran','connexion','quart_ajoute','flotte_creee',
+  'flotte_rejointe','inscription_debut','mise_a_jour_forcee'];
+var GA_PARAMS=['ecran','role','periode','etape'];
+function gaEvent(nom,params){
+  if(!gaActif())return false;
+  if(GA_EVENEMENTS.indexOf(nom)<0)return false;
+  gaCharger();
+  var p={};
+  if(params)Object.keys(params).forEach(function(k){
+    if(GA_PARAMS.indexOf(k)<0)return;               // paramètre non prévu → jeté
+    var v=params[k];
+    if(typeof v==='number')return;                  // aucun chiffre ne sort d'ici
+    v=String(v==null?'':v).slice(0,40);
+    if(v)p[k]=v;
+  });
+  try{ if(window.gtag)window.gtag('event',nom,p); }catch(e){}
+  return true;
+}
+function enregistrerGaId(){
+  var v=(document.getElementById('ga-id')||{}).value||'';
+  v=String(v).trim();
+  if(v&&!/^G-[A-Z0-9]{6,}$/i.test(v)){alert('Identifiant invalide.\n\nIl ressemble à G-XXXXXXXXXX, à copier depuis Google Analytics → Admin → Flux de données.');return;}
+  try{ if(v)localStorage.setItem(GA_CLE_LOCALE,v.toUpperCase()); else localStorage.removeItem(GA_CLE_LOCALE); }catch(e){}
+  _gaCharge=false;
+  if(v)gaCharger();
+  showToastGrn(v?'✓ Mesure activée sur cet appareil':'Mesure retirée de cet appareil');
+  renderMesure();
+}
+function renderMesure(){
+  var el=document.getElementById('mesureContent');
+  if(!el)return;
+  if(!U||U.role!=='owner'){el.innerHTML='';return;}
+  var id=gaId(),actif=gaActif();
+  el.innerHTML=
+    '<div style="font-size:11px;color:var(--m2);line-height:1.65;margin-bottom:11px;">'
+    +'Mesure d\'usage anonyme : quels écrans servent, où les nouveaux propriétaires abandonnent, '
+    +'à quelle fréquence l\'app est ouverte. <b>Aucun nom, aucun montant, aucun taximètre</b> n\'est envoyé — '
+    +'seulement le nom de l\'écran et le rôle (patron ou chauffeur).'
+    +'</div>'
+    +'<div style="background:'+(actif?'rgba(57,211,83,.08)':'rgba(255,255,255,.03)')+';border:1px solid '+(actif?'rgba(57,211,83,.3)':'var(--brd)')+';border-radius:11px;padding:11px;margin-bottom:11px;">'
+    +'<div style="font-size:12px;font-weight:900;color:'+(actif?'var(--grn)':'var(--m2)')+';">'
+    +(actif?'✅ Mesure active':(id?'⏸️ Mesure coupée sur cet appareil':'⚪ Aucun identifiant — mesure éteinte'))+'</div>'
+    +(id?'<div style="font-size:10px;color:var(--m2);font-family:monospace;margin-top:3px;">'+_cmpEsc(id)+'</div>':'')
+    +'</div>'
+    +'<div class="fsm"><label>Identifiant de mesure (G-…)</label>'
+    +'<input type="text" id="ga-id" value="'+_cmpEsc(id)+'" placeholder="G-XXXXXXXXXX"></div>'
+    +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:9px;">'
+    +'À créer sur <b>analytics.google.com</b> → Admin → Créer une propriété → Flux de données → Web, '
+    +'avec l\'adresse <b>kouadrirached-cmyk.github.io</b>. Google te donne l\'identifiant.'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;">'
+    +'<button class="btn bsec bsm" style="padding:10px;" onclick="enregistrerGaId()">✓ Enregistrer</button>'
+    +'<button class="btn bsec bsm" style="padding:10px;" onclick="gaBasculer('+(actif?'false':'true')+')">'
+    +(actif?'⏸️ Couper la mesure':'▶️ Activer la mesure')+'</button>'
+    +'</div>'
+    +'<div style="background:rgba(255,165,0,.07);border:1px solid rgba(255,165,0,.28);border-radius:11px;padding:10px;margin-top:11px;font-size:10px;color:var(--m2);line-height:1.65;">'
+    +'⚖️ <b>Loi 25 (Québec).</b> Dès que tu vends l\'app à d\'autres propriétaires, tu dois leur dire '
+    +'que l\'usage est mesuré et leur laisser refuser. Le bouton ci-dessus coupe la mesure pour la flotte '
+    +'active. Il te reste à l\'écrire dans ta politique de confidentialité.'
+    +'</div>';
 }
 
 // ═══════════════════════════════════════════════
@@ -7612,6 +7733,8 @@ async function _fleetCodeExists(code){
 async function signupCreateFleet(){
   var errEl=document.getElementById('sgErr');
   if(errEl)errEl.style.display='none';
+  // Entonnoir d'inscription : combien commencent, combien vont au bout
+  gaEvent('inscription_debut',{etape:'validation'});
   var company=gv('sg-company').trim();
   var ownerName=gv('sg-owner').trim();
   var email=gv('sg-email').trim().toLowerCase();
@@ -7700,6 +7823,7 @@ async function signupCreateFleet(){
     localStorage.setItem(nsk+'_a','[]');
     localStorage.setItem('txpro_lastShiftCount_'+code,'0');
     localStorage.setItem('txpro_tenant',code);
+    gaEvent('flotte_creee',{etape:cloudOk?'cloud':'local'});
     alert('✅ Flotte « '+company+' » créée !\n\n'
       +'🔑 Code de flotte : '+code+'\n'
       +'Garde ce code précieusement : il sert à connecter tes autres appareils et ceux de tes chauffeurs (bouton « 🔑 J\'ai un code de flotte »).\n\n'
@@ -12019,7 +12143,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-16-v106-QUARTS-ORPHELINS';
+var APP_VERSION = '2026-08-17-v107-MESURE-USAGE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){

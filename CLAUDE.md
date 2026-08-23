@@ -55,4 +55,9 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 3. ✅ Annuaire des flottes (v104) : collection `annuaire`, une fiche par flotte déposée par la flotte elle-même à chaque ouverture. Console « Qui utilise l'application » dans Réglages, flotte principale seulement : compte les propriétaires, suspend (réversible) ou supprime une flotte. Les gardiens sont listés dans `annuaire/_admins` — **la place se prend une seule fois, à revendiquer dès le déploiement**.
 4. Page d'accueil de vente avec essai gratuit 30 jours (champs `createdAt`/`trialEndsAt` déjà dans la config de flotte depuis v64).
 5. Paiement par abonnement via Stripe Checkout.
-6. Politique de confidentialité conforme à la Loi 25 (Québec).
+6. Politique de confidentialité conforme à la Loi 25 (Québec) — **rendue nécessaire par la mesure d'usage (v107)** : il faut y déclarer Google Analytics et le droit de refus.
+
+## Mesure d'usage (v107)
+- Google Analytics 4 via `gtag.js`, éteint tant que `GA_MESURE_ID` est vide (réglage d'essai par appareil dans `localStorage['txpro_ga_id']`).
+- **Liste blanche stricte** : `GA_EVENEMENTS` et `GA_PARAMS` dans `index.html`. Tout nom d'événement ou paramètre absent de ces listes est jeté, et **aucune valeur numérique ne sort jamais**. Ne jamais élargir ces listes à un nom, un courriel ou un montant.
+- Coupable par flotte : bouton dans Réglages → `C.mesureUsage=false` + `localStorage['txpro_ga_off']` (vaut aussi hors ligne).
