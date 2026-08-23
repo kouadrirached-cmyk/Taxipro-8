@@ -3256,8 +3256,8 @@ function shiftRow(s,cumulMap){
   const showEcart=hasEcart&&(ecart>0||isOwnerView);
   const ecartHTML=showEcart?'<div class="sr-ecart" style="color:'+(ecart>0?'var(--red)':'var(--pur)')+';">'+(ecart>0?'⚠️ −':'💰 +')+fm(Math.abs(ecart))+'</div>':'';
   const kmTotal=(s.kmd>0&&s.kmf>0&&s.kmf>s.kmd)?(s.kmf-s.kmd):0;
-  const taxBrutKm=pf(s.taxf)-pf(s.taxd);
-  const ratioKm=kmTotal>0?(taxBrutKm/kmTotal):0;
+  const taxNetKm=taxNetQuart(s);
+  const ratioKm=kmTotal>0?(taxNetKm/kmTotal):0;
   const kmHTML=kmTotal>0
     ?'<div style="font-size:10px;margin-top:2px;">'
       +'🛣️ '+kmTotal+' km'
@@ -3386,7 +3386,7 @@ function periodCompHTML(forDriver){
   if(forDriver){
     // Vue chauffeur : uniquement SES chiffres (jamais les données globales)
     rows+=_compRow('💼','Mon salaire',sum(prev,calcSalary),sum(cur,calcSalary),true,true);
-    rows+=_compRow('🔢','Taximètre net',sum(prev,s=>pf(s.taxf)-pf(s.taxd)),sum(cur,s=>pf(s.taxf)-pf(s.taxd)),true,true);
+    rows+=_compRow('🔢','Taximètre net',sum(prev,taxNetQuart),sum(cur,taxNetQuart),true,true);
     rows+=_compRow('🪙','Pourboires',sum(prev,s=>pf(s.pourboire)),sum(cur,s=>pf(s.pourboire)),true,true);
     rows+=_compRow('🚗','Quarts',prev.length,cur.length,true,false);
     rows+=_compRow('🚕','Courses',sum(prev,s=>pi(s.courses)),sum(cur,s=>pi(s.courses)),true,false);
@@ -3523,7 +3523,7 @@ function renderDash(){
       const detailRows=dSorted.map(s=>{
         const ec=calcEcart(s);const hasEc=Math.abs(ec)>0.5;const regle=isEcartRegle(s.id);
         const kmT=(s.kmd>0&&s.kmf>0&&s.kmf>s.kmd)?(s.kmf-s.kmd):0;
-        const taxBK=pf(s.taxf)-pf(s.taxd);
+        const taxBK=taxNetQuart(s);
         const ratK=kmT>0?(taxBK/kmT):0;
         const kmH=kmT>0?'<div style="font-size:10px;margin-top:2px;">🛣️ '+kmT+' km'+(U.role==='owner'?' · <span style="color:'+(ratK<1?'var(--red)':'var(--grn)')+';">'+ratK.toFixed(2)+'$/km</span>':'')+'</div>':'';
         return '<div class="sr"><div class="sr-left"><div class="sr-date">'+s.date+' · '+s.vehicle+'</div><div class="sr-meta">'+(s.time||'')+' · '+(s.courses||0)+' courses</div>'+kmH+'</div><div class="sr-right"><div class="sr-amt">'+fm(s.recette)+'</div><div class="sr-cumul">Cumul: '+fm(cmap[s.id])+'</div>'+(hasEc&&!regle?'<div class="sr-ecart" style="color:'+(ec>0?'var(--red)':'var(--pur)')+';">'+(ec>0?'⚠️ −':'💰 +')+fm(Math.abs(ec))+'<button onclick="event.stopPropagation();toggleEcartRegle(\''+s.id+'\')" style="margin-left:6px;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:5px;padding:2px 6px;font-size:9px;font-weight:800;cursor:pointer;">✅</button></div>':regle&&hasEc?'<div class="sr-ecart" style="color:var(--grn);">✅ Réglé</div>':'')+'</div></div>'
@@ -3628,7 +3628,7 @@ function renderDash(){
     const myGain=arr.reduce((a,s)=>a+calcSalary(s),0);
     const myCash=arr.reduce((a,s)=>a+(s.comp||0),0);
     const myEcarts=arr.filter(s=>calcEcart(s)>0.5&&!isEcartRegle(s.id));
-    const myTaxNet=arr.reduce((a,s)=>a+(pf(s.taxf)-pf(s.taxd)),0);
+    const myTaxNet=arr.reduce((a,s)=>a+taxNetQuart(s),0);
     const arrSorted=[...arr].sort((a,b)=>b.date.localeCompare(a.date)||(b.time||'').localeCompare(a.time||''));
     const wkArr=getArr().filter(s=>inWk(s.date,new Date())&&s.driver===U.name);
     const wkCumul=wkArr.reduce((a,s)=>a+calcSalary(s),0);
@@ -4007,7 +4007,7 @@ function renderHist(){
     var html='';
     // Résumé rapide tout en haut
     var totSal=arr.reduce(function(a,s){return a+calcSalary(s);},0);
-    var totTax=arr.reduce(function(a,s){return a+(pf(s.taxf)-pf(s.taxd));},0);
+    var totTax=arr.reduce(function(a,s){return a+taxNetQuart(s);},0);
     html+='<div style="background:rgba(57,211,83,.07);border:1.5px solid rgba(57,211,83,.25);border-radius:13px;padding:12px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">';
     html+='<div><div style="font-size:10px;color:var(--m2);font-weight:700;text-transform:uppercase;margin-bottom:2px;">Total — tout l\'historique</div>';
     html+='<div style="font-size:11px;color:var(--m2);">'+arr.length+' quarts · '+weeks.length+' semaine'+(weeks.length>1?'s':'')+'</div></div>';
@@ -4645,7 +4645,7 @@ function renderAnalyse(){
     const kmByD={};
     shiftsAvecKm.forEach(s=>{
       const km=s.kmf-s.kmd;
-      const taxBrut=pf(s.taxf)-pf(s.taxd);
+      const taxBrut=taxNetQuart(s);
       if(!kmByD[s.driver])kmByD[s.driver]={
         kmTotal:0,taxTotal:0,n:0,alertes:0,shifts:[],
         jour:{km:0,tax:0,n:0},sem:{km:0,tax:0,n:0},mois:{km:0,tax:0,n:0}
@@ -4850,10 +4850,10 @@ function _drvDuelStats(){
     var n=s.driver||'?';
     if(!by[n])by[n]={n:0,rec:0,taxNet:0,crs:0,pour:0,ess:0,profit:0,manq:0,manqAmt:0,km:0,taxKm:0};
     var o=by[n];
-    o.n++;o.rec+=(s.recette||0);o.taxNet+=(pf(s.taxf)-pf(s.taxd));o.crs+=pi(s.courses);
+    o.n++;o.rec+=(s.recette||0);o.taxNet+=taxNetQuart(s);o.crs+=pi(s.courses);
     o.pour+=pf(s.pourboire);o.ess+=pf(s.essence);o.profit+=calcOwnerProfit(s);
     var ec=calcEcart(s);if(ec>0.5){o.manq++;o.manqAmt+=ec;}
-    if(s.kmf>0&&s.kmd>0&&s.kmf>s.kmd){o.km+=(s.kmf-s.kmd);o.taxKm+=(pf(s.taxf)-pf(s.taxd));}
+    if(s.kmf>0&&s.kmd>0&&s.kmf>s.kmd){o.km+=(s.kmf-s.kmd);o.taxKm+=taxNetQuart(s);}
   });
   return by;
 }
@@ -4893,7 +4893,7 @@ function _vehDuelStats(){
     var o=by[v];
     o.n++;o.rec+=(s.recette||0);o.ess+=pf(s.essence);o.profit+=calcOwnerProfit(s);
     o.days[s.date]=1;
-    if(s.kmf>0&&s.kmd>0&&s.kmf>s.kmd){o.km+=(s.kmf-s.kmd);o.taxKm+=(pf(s.taxf)-pf(s.taxd));}
+    if(s.kmf>0&&s.kmd>0&&s.kmf>s.kmd){o.km+=(s.kmf-s.kmd);o.taxKm+=taxNetQuart(s);}
   });
   _cmpExp().forEach(function(e){
     if(e.vehicle&&by[e.vehicle])by[e.vehicle].dep+=pf(e.amount);
@@ -6081,7 +6081,7 @@ function renderPaye(){
     });
 
     html+='<div class="paye-tot" style="border-bottom:1px solid var(--brd);">'
-      +'<span style="color:var(--m2);">🔢 Taximètre de la semaine</span>'
+      +'<span style="color:var(--m2);">🔢 Taximètre des chauffeurs<span style="display:block;font-size:9px;">sans tes propres quarts</span></span>'
       +'<span style="color:var(--gold);font-size:14px;">'+fm(totTaxWk)+'</span>'
       +'</div>'
       +'<div class="paye-tot">'
@@ -9289,13 +9289,21 @@ function renderSoldeBar(){
   const wkArr=getArr().filter(s=>inWk(s.date,now)&&(U.role==='owner'?true:s.driver===U.name));
   if(U.role==='owner'){
     const totRec=wkArr.reduce((a,s)=>a+s.recette,0);
-    const totTaxi=wkArr.reduce((a,s)=>a+(pf(s.taxf)-pf(s.taxd)),0);
+    // Même base que partout ailleurs : le taximètre NET. Ce bandeau compte
+    // toute la flotte, tes propres quarts compris — la page Paie, elle, ne
+    // compte que les chauffeurs. C'est écrit, pour ne plus avoir à deviner
+    // pourquoi les deux chiffres diffèrent.
+    const totTaxi=wkArr.reduce((a,s)=>a+taxNetQuart(s),0);
+    const taxiMoi=wkArr.filter(isOwnerShift).reduce((a,s)=>a+taxNetQuart(s),0);
     const totProfit=wkArr.reduce((a,s)=>a+calcOwnerProfit(s),0);
     const alerts=wkArr.filter(s=>Math.abs(calcEcart(s))>0.5);
     el.innerHTML='<div style="background:linear-gradient(135deg,rgba(245,200,66,.12),rgba(0,229,255,.08));border:1.5px solid rgba(245,200,66,.3);border-radius:16px;padding:14px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;">'
       +'<div><div style="font-size:10px;color:var(--m2);font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">Cette semaine</div>'
       +'<div style="font-size:22px;font-weight:900;color:var(--gold);letter-spacing:-1px;">'+fm(totRec)+'</div>'
-      +'<div style="font-size:11px;color:var(--grn);margin-top:2px;">Taximetre: '+fm(totTaxi)+' | Net: '+fm(totProfit)+'</div></div>'
+      +'<div style="font-size:9px;color:var(--m2);margin-top:-2px;">encaissé (comptant, carte, STS, coupons)</div>'
+      +'<div style="font-size:11px;color:var(--grn);margin-top:2px;">Taximètre net : '+fm(totTaxi)+' | Net : '+fm(totProfit)+'</div>'
+      +'<div style="font-size:9px;color:var(--m2);margin-top:2px;">toute la flotte'
+      +(taxiMoi>0.005?', dont '+fm(taxiMoi)+' de tes propres quarts':'')+'</div></div>'
       +'<div style="text-align:right;">'
       +(alerts.length?'<div style="background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.3);color:var(--red);border-radius:8px;padding:4px 10px;font-size:11px;font-weight:700;margin-bottom:5px;">⚠️ '+alerts.length+' écart'+(alerts.length>1?'s':'')+'</div>':'')
       +'<div style="font-size:11px;color:var(--m2);">'+wkArr.length+' quart'+(wkArr.length!==1?'s':'')+'</div>'
@@ -9322,7 +9330,7 @@ function renderSoldeBar(){
   }else{
     const mySal=wkArr.reduce((a,s)=>a+calcSalary(s),0);
     const myShifts=wkArr.filter(s=>s.driver===U.name);
-    const myTaxi=myShifts.reduce((a,s)=>a+(pf(s.taxf)-pf(s.taxd)),0);
+    const myTaxi=myShifts.reduce((a,s)=>a+taxNetQuart(s),0);
     const myCash=myShifts.reduce((a,s)=>a+(s.comp||0),0);
     const myEcarts=myShifts.filter(s=>Math.abs(calcEcart(s))>0.5);
 
@@ -12169,7 +12177,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-18-v108-TAXIMETRE-SUR-PAIE';
+var APP_VERSION = '2026-08-19-v109-TAXIMETRE-COHERENT';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
