@@ -5691,17 +5691,19 @@ function essPriseDansCash(wkKey,drvName){
 
 // Recalcule salaire/cash d'un chauffeur pour une semaine donnée (même logique que renderPaye)
 function payeWeekCalc(wkKey,drvName){
-  var sal=0,cash=0,ess=0,n=0;
+  var sal=0,cash=0,ess=0,tax=0,pour=0,n=0;
   getArr().forEach(function(s){
     if(s.isOwner||s.driver!==drvName)return;
     var ws=gwS(parseLocalDate(s.date));
     if(ws.toISOString().slice(0,10)!==wkKey)return;
     sal+=calcSalary(s);
+    tax+=basePaieQuart(s);
+    pour+=pf(s.pourboire)||0;
     cash+=pf(s.comp)||0;
     if(s.essencePar==='chauf')ess+=pf(s.essence)||0;
     n++;
   });
-  return {sal:sal,cash:cash,ess:ess,n:n};
+  return {sal:sal,cash:cash,ess:ess,tax:tax,pour:pour,n:n};
 }
 
 function payeToggle(wkKey,drvName){
@@ -5922,7 +5924,11 @@ function renderPaye(){
         drivers:{}
       };
     }
-    if(!byWk[wkey].drivers[s.driver])byWk[wkey].drivers[s.driver]={sal:0,cash:0,ess:0,n:0,manques:[]};
+    if(!byWk[wkey].drivers[s.driver])byWk[wkey].drivers[s.driver]={sal:0,cash:0,ess:0,tax:0,pour:0,n:0,manques:[]};
+    // Le taximètre sur lequel sa paie est calculée : c'est ce qui permet
+    // au patron de refaire le calcul de tête au lieu de faire confiance.
+    byWk[wkey].drivers[s.driver].tax+=basePaieQuart(s);
+    byWk[wkey].drivers[s.driver].pour+=pf(s.pourboire)||0;
     byWk[wkey].drivers[s.driver].sal+=calcSalary(s);
     byWk[wkey].drivers[s.driver].cash+=pf(s.comp)||0;
     if(s.essencePar==='chauf')byWk[wkey].drivers[s.driver].ess+=pf(s.essence)||0;
@@ -5982,6 +5988,7 @@ function renderPaye(){
     const isCurWk=wkey===curWkKey;
     const drvEntries=Object.entries(wd.drivers).sort((a,b)=>a[0].localeCompare(b[0]));
     const totWk=drvEntries.reduce((a,[,d])=>a+d.sal,0);
+    const totTaxWk=drvEntries.reduce((a,[,d])=>a+d.tax,0);
     const allPaid=!isCurWk&&drvEntries.every(([dn])=>{const k=wkey+'|'+dn;return C.payes[k]&&C.payes[k].paid;});
 
     // Couleur bordure selon statut
@@ -6018,8 +6025,13 @@ function renderPaye(){
         +'<div style="display:flex;align-items:baseline;gap:8px;margin-top:3px;">'
         +'<div class="paye-amt">'+(deductCash&&cashNet>0?'<span style="text-decoration:line-through;font-size:14px;color:var(--m2);">'+fm(du)+'</span> <span style="color:var(--gold);">'+fm(net)+'</span>':fm(du))+'</div>'
         +'</div>'
-        // Les trois chiffres de la semaine, côte à côte
-        +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:7px;">'
+        // Les chiffres de la semaine, côte à côte. Le taximètre en premier :
+        // c'est lui qui produit tout le reste, et il permet de refaire le
+        // calcul de la paie sans faire confiance à l'app.
+        +'<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:5px;margin-top:7px;">'
+        +'<div style="background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.25);border-radius:8px;padding:6px;text-align:center;">'
+        +'<div style="font-size:8px;color:var(--m2);font-weight:800;text-transform:uppercase;margin-bottom:1px;">🔢 Taximètre</div>'
+        +'<div style="font-size:12px;font-weight:900;color:var(--gold);">'+fm(dd.tax)+'</div></div>'
         +'<div style="background:rgba(57,211,83,.07);border:1px solid rgba(57,211,83,.2);border-radius:8px;padding:6px;text-align:center;">'
         +'<div style="font-size:8px;color:var(--m2);font-weight:800;text-transform:uppercase;margin-bottom:1px;">💼 Paye</div>'
         +'<div style="font-size:12px;font-weight:900;color:var(--grn);">'+fm(dd.sal)+'</div></div>'
@@ -6032,6 +6044,13 @@ function renderPaye(){
         +(essCash&&hasEss?'<span style="font-size:9px;text-decoration:line-through;color:var(--m2);">'+fm(dd.cash)+'</span> '+fm(cashNet):fm(dd.cash))
         +'</div></div>'
         +'</div>'
+        // Le calcul en toutes lettres : taximètre × son % (+ pourboires)
+        +(dd.tax>0.005?'<div style="font-size:9px;color:var(--m2);line-height:1.7;margin-top:6px;">'
+          +'🔢 '+fm(dd.tax)+' × '+((getDrv(drvName)||{}).pct||40)+' %'
+          +(dd.pour>0.005?' + 🪙 '+fm(dd.pour)+' de pourboires':'')
+          +' = <b style="color:var(--grn);">'+fm(dd.sal)+'</b>'
+          +(sansRedevance({driver:drvName})?'<br>🎁 Augmenté : son % porte sur le compteur entier.':'')
+          +'</div>':'')
         +(hasEss?'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:5px;">'
           +(essCash?'⛽ Essence prise dans le cash de la semaine : rien de plus à sortir, tu verses <b style="color:var(--gold);">'+fm(net)+'</b>.'
                    :'⛽ Essence remboursée en plus de la paie : <b style="color:var(--neon);">'+fm(net+dd.ess)+'</b> de cash au total.')
@@ -6061,10 +6080,17 @@ function renderPaye(){
         +'</div>';
     });
 
-    html+='<div class="paye-tot">'
-      +'<span style="color:var(--m2);">'+(isCurWk?'Solde semaine en cours':'Total semaine')+'</span>'
-      +'<span style="color:var(--gold);font-size:14px;">'+fm(totWk)+'</span>'
+    html+='<div class="paye-tot" style="border-bottom:1px solid var(--brd);">'
+      +'<span style="color:var(--m2);">🔢 Taximètre de la semaine</span>'
+      +'<span style="color:var(--gold);font-size:14px;">'+fm(totTaxWk)+'</span>'
       +'</div>'
+      +'<div class="paye-tot">'
+      +'<span style="color:var(--m2);">'+(isCurWk?'Solde semaine en cours':'💼 Total des payes')+'</span>'
+      +'<span style="color:var(--grn);font-size:14px;">'+fm(totWk)+'</span>'
+      +'</div>'
+      +(totTaxWk>0.005?'<div style="font-size:9px;color:var(--m2);text-align:right;padding-bottom:6px;">'
+        +'soit '+((totWk/totTaxWk)*100).toFixed(0)+' % du taximètre en salaires · il te reste '
+        +'<b style="color:var(--gold);">'+fm(totTaxWk-totWk)+'</b> avant les charges</div>':'')
       +'</div>';
   });
 
@@ -12143,7 +12169,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-17-v107-MESURE-USAGE';
+var APP_VERSION = '2026-08-18-v108-TAXIMETRE-SUR-PAIE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
