@@ -1228,6 +1228,7 @@ body{
         <div class="ptit" style="margin:0">🔧 Entretien des véhicules</div>
       </div>
       <div id="cleanList"></div>
+      <div id="garantiesSection" style="margin-top:18px;"></div>
     </div>
     <!-- ══ MESSAGES ══ -->
     <div class="pg" id="pg-msg">
@@ -2359,7 +2360,7 @@ function _refreshAfterSync(){
     if(name==='dash')renderDash();
     if(name==='hist')renderHist();
     if(name==='fleet')renderFleet();
-    if(name==='clean')renderClean();
+    if(name==='clean'){renderClean();renderGaranties();}
     if(name==='exp')renderExp();
   }
   renderSoldeBar();
@@ -3463,7 +3464,7 @@ function goPage(name){
   if(name==='team')renderTeamWithMsgs();
   if(name==='fleet')renderFleet();
   if(name==='treso')renderTreso();
-  if(name==='clean')renderClean();
+  if(name==='clean'){renderClean();renderGaranties();}
   if(name==='msg')renderMsgPage();
   if(name==='audit2')renderAuditVisual();
   if(name==='sched')renderSched();
@@ -12134,6 +12135,141 @@ function saveHuile(v,km,intervalle){
   lSave();renderClean();
   showToastGrn('Huile Prius '+v+' mise a jour');
 }
+// ═══════════════════════════════════════════════
+// 🛡️ GARANTIES DES PIÈCES
+// Une pièce changée est souvent garantie 1 ou 2 ans. Quand le même
+// problème revient, la question est toujours la même : est-ce que c'est
+// encore couvert ? Sans trace, on rachète à neuf pour rien. Ici : la
+// pièce, la voiture, la date d'achat, la fin de garantie — et le statut
+// se recalcule tout seul chaque jour.
+// Le montant n'y est pas : les achats vivent dans 💸 Dépenses. Cette
+// page répond à une seule question, « est-ce encore couvert ? ».
+// ═══════════════════════════════════════════════
+var _garFiltre='all';
+function garanties(){
+  if(!C.garanties)C.garanties=[];
+  return C.garanties;
+}
+// Statut d'une garantie à la date d'aujourd'hui
+function garantieStatut(dateFin){
+  if(!dateFin)return {cle:'none',lbl:'Sans date',col:'var(--m2)',bg:'rgba(255,255,255,.05)',jours:null};
+  var auj=new Date();auj.setHours(0,0,0,0);
+  var fin=parseLocalDate(String(dateFin));
+  if(isNaN(fin))return {cle:'none',lbl:'Date invalide',col:'var(--m2)',bg:'rgba(255,255,255,.05)',jours:null};
+  fin.setHours(0,0,0,0);
+  var j=Math.round((fin-auj)/86400000);
+  if(j<0)return {cle:'expired',lbl:'⌛ Expirée depuis '+Math.abs(j)+' j',col:'var(--red)',bg:'rgba(255,58,58,.1)',jours:j};
+  if(j<=30)return {cle:'soon',lbl:'⚠️ Expire dans '+j+' j',col:'var(--gold)',bg:'rgba(245,200,0,.12)',jours:j};
+  return {cle:'ok',lbl:'✅ Sous garantie — '+j+' j',col:'var(--grn)',bg:'rgba(57,211,83,.1)',jours:j};
+}
+function garantiesStats(){
+  var g=garanties(),o={total:g.length,ok:0,soon:0,expired:0,none:0};
+  g.forEach(function(x){o[garantieStatut(x.dateFin).cle]++;});
+  return o;
+}
+function ajouterGarantie(){
+  var veh=(C.vehicles||[]).filter(function(v){return v.active!==false;});
+  garanties().unshift({id:uid(),nom:'',vehicule:veh.length?veh[0].num:'',
+    dateAchat:_ymdLoc(new Date()),dateFin:'',ts:new Date().toISOString()});
+  lSave();audit('GARANTIE_ADD','');
+  renderGaranties();
+}
+function majGarantie(id,champ,valeur){
+  var g=garanties().find(function(x){return x.id===id;});
+  if(!g)return;
+  g[champ]=valeur;
+  lSave();
+  renderGaranties();
+}
+function supprGarantie(id){
+  var g=garanties().find(function(x){return x.id===id;});
+  if(!g)return;
+  if(!confirm('Retirer « '+(g.nom||'cette pièce')+' » du suivi des garanties ?'))return;
+  C.garanties=garanties().filter(function(x){return x.id!==id;});
+  lSave();audit('GARANTIE_DEL',g.nom||'');
+  renderGaranties();
+}
+function garFiltrer(f){ _garFiltre=f; renderGaranties(); }
+function renderGaranties(){
+  var el=document.getElementById('garantiesSection');
+  if(!el)return;
+  // Réservé au patron : c'est un suivi d'achats de l'entreprise.
+  if(!U||U.role!=='owner'){el.innerHTML='';return;}
+  var g=garanties(), st=garantiesStats();
+  var veh=(C.vehicles||[]).filter(function(v){return v.active!==false;});
+  var h='<div class="card" style="border-color:rgba(57,211,83,.3);">'
+    +'<div class="ctit"><span><span class="ci">🛡️</span>Garanties des pièces</span></div>'
+    +'<div style="font-size:11px;color:var(--m2);line-height:1.6;margin-bottom:12px;">'
+    +'Note chaque pièce encore sous garantie. Quand le même problème revient, regarde ici '
+    +'<b>avant de racheter à neuf</b> — et garde la facture de ton côté.</div>';
+  // Les quatre compteurs
+  h+='<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-bottom:11px;">'
+    +_garTuile('Pièces suivies',st.total,'var(--m3)','rgba(255,255,255,.04)')
+    +_garTuile('Sous garantie',st.ok,'var(--grn)','rgba(57,211,83,.08)')
+    +_garTuile('Expire sous 30 j',st.soon,'var(--gold)','rgba(245,200,0,.08)')
+    +_garTuile('Expirées',st.expired,'var(--red)','rgba(255,58,58,.08)')
+    +'</div>';
+  if(st.soon>0){
+    h+='<div style="background:rgba(245,200,0,.1);border:1px solid rgba(245,200,0,.35);border-radius:11px;padding:10px;margin-bottom:11px;font-size:11px;color:var(--m3);line-height:1.6;">'
+      +'⚠️ <b>'+st.soon+' garantie'+(st.soon>1?'s':'')+' expire'+(st.soon>1?'nt':'')+' dans moins de 30 jours.</b> '
+      +'S\'il y a un doute sur une de ces pièces, fais-la vérifier maintenant, pendant que c\'est encore couvert.</div>';
+  }
+  // Filtres
+  var filtres=[['all','Toutes',st.total],['ok','Sous garantie',st.ok],['soon','Bientôt',st.soon],['expired','Expirées',st.expired]];
+  h+='<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:3px;margin-bottom:11px;">';
+  filtres.forEach(function(f){
+    var on=_garFiltre===f[0];
+    h+='<button onclick="garFiltrer(\''+f[0]+'\')" style="flex-shrink:0;background:'+(on?'var(--gold)':'rgba(255,255,255,.05)')+';border:1px solid '+(on?'var(--gold)':'var(--brd2)')+';color:'+(on?'#000':'var(--m2)')+';border-radius:20px;padding:7px 13px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;">'
+      +f[1]+' ('+f[2]+')</button>';
+  });
+  h+='</div>';
+  var vus=g.filter(function(x){return _garFiltre==='all'||garantieStatut(x.dateFin).cle===_garFiltre;});
+  if(!g.length){
+    h+='<div style="font-size:11px;color:var(--m2);line-height:1.6;text-align:center;padding:14px 8px;">'
+      +'Aucune pièce suivie. Ajoute-en une dès que tu fais changer quelque chose.</div>';
+  }else if(!vus.length){
+    h+='<div style="font-size:11px;color:var(--m2);text-align:center;padding:14px 8px;">Aucune pièce dans cette catégorie.</div>';
+  }
+  // Les plus proches de l'expiration d'abord, sans date à la fin
+  vus.sort(function(a,b){
+    if(!a.dateFin)return 1;
+    if(!b.dateFin)return -1;
+    return String(a.dateFin).localeCompare(String(b.dateFin));
+  });
+  vus.forEach(function(x){
+    var s=garantieStatut(x.dateFin);
+    h+='<div style="background:'+s.bg+';border:1px solid '+(s.cle==='none'?'var(--brd)':s.col)+';border-radius:12px;padding:11px;margin-bottom:8px;">'
+      +'<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:9px;">'
+      +'<input type="text" value="'+_cmpEsc(x.nom||'')+'" placeholder="Nom de la pièce" '
+      +'onchange="majGarantie(\''+x.id+'\',\'nom\',this.value)" '
+      +'style="flex:1;min-width:0;background:transparent;border:none;border-bottom:1px solid var(--brd2);color:var(--txt);font-size:14px;font-weight:800;padding:3px 0 5px;">'
+      +'<span style="flex-shrink:0;font-size:10px;font-weight:900;color:'+s.col+';white-space:nowrap;padding-top:4px;">'+s.lbl+'</span>'
+      +'</div>'
+      +'<div class="fsm" style="margin-bottom:8px;"><label>🚗 Voiture</label><div class="sw">'
+      +'<select onchange="majGarantie(\''+x.id+'\',\'vehicule\',this.value)">'
+      +'<option value="">— toute la flotte —</option>'
+      +veh.map(function(v){return '<option value="'+_cmpEsc(v.num)+'"'+(x.vehicule===v.num?' selected':'')+'>'+_cmpEsc(v.model||'')+' '+_cmpEsc(v.num)+'</option>';}).join('')
+      +(x.vehicule&&!veh.some(function(v){return v.num===x.vehicule;})?'<option value="'+_cmpEsc(x.vehicule)+'" selected>'+_cmpEsc(x.vehicule)+' (retirée)</option>':'')
+      +'</select></div></div>'
+      +'<div class="frow">'
+      +'<div class="fsm"><label>Date d\'achat</label><input type="date" value="'+_cmpEsc(x.dateAchat||'')+'" onchange="majGarantie(\''+x.id+'\',\'dateAchat\',this.value)"></div>'
+      +'<div class="fsm"><label>Fin de garantie</label><input type="date" value="'+_cmpEsc(x.dateFin||'')+'" onchange="majGarantie(\''+x.id+'\',\'dateFin\',this.value)"></div>'
+      +'</div>'
+      +'<div style="display:flex;justify-content:flex-end;margin-top:4px;">'
+      +'<button onclick="supprGarantie(\''+x.id+'\')" style="background:none;border:1px solid var(--brd2);color:var(--m2);border-radius:8px;padding:5px 11px;font-size:10px;font-weight:700;cursor:pointer;">🗑️ Retirer</button>'
+      +'</div></div>';
+  });
+  h+='<button class="btn bsuc bsm" style="width:100%;padding:12px;margin-top:4px;" onclick="ajouterGarantie()">➕ Ajouter une pièce</button>'
+    +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:9px;">'
+    +'Les statuts se recalculent chaque jour à partir de la date de fin. Le montant payé, lui, se note dans 💸 Dépenses.</div>'
+    +'</div>';
+  el.innerHTML=h;
+}
+function _garTuile(lbl,n,col,bg){
+  return '<div style="background:'+bg+';border:1px solid var(--brd);border-radius:11px;padding:10px;text-align:center;">'
+    +'<div style="font-size:20px;font-weight:900;color:'+col+';">'+n+'</div>'
+    +'<div style="font-size:9px;color:var(--m2);font-weight:700;margin-top:1px;">'+lbl+'</div></div>';
+}
 function renderClean(){
   var el=document.getElementById('cleanList');
   if(!el)return;
@@ -12205,7 +12341,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-08-20-v110-PART-60-ET-COMPTEUR';
+var APP_VERSION = '2026-09-09-v111-GARANTIES-PIECES';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
