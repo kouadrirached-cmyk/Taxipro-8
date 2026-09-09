@@ -57,6 +57,12 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 5. Paiement par abonnement via Stripe Checkout.
 6. Politique de confidentialité conforme à la Loi 25 (Québec) — **rendue nécessaire par la mesure d'usage (v107)** : il faut y déclarer Google Analytics et le droit de refus.
 
+## Photos et pièces jointes (v112)
+- **NE JAMAIS mettre d'image dans `C`, `S` ou `EX`.** Ces trois objets partent chacun en UN document Firestore, plafonné à 1 Mo : deux photos suffisent à bloquer la synchronisation de toute la flotte.
+- Les photos de factures vivent dans **IndexedDB** (base `txpro_factures`), compressées à 1400 px / JPEG 0,68 (~150 Ko). Seuls les renseignements légers (date, fournisseur, montant, lien vers la dépense) vont dans `C.factures`.
+- Conséquence assumée : une photo reste sur l'appareil qui l'a prise. L'export « Dossier pour le comptable » produit un seul fichier HTML contenant le tableau et toutes les images.
+- Une facture ne crée jamais d'argent toute seule : elle documente une dépense existante ou propose de la créer (`factureVersDepense`). Sinon un même achat serait compté deux fois.
+
 ## Mesure d'usage (v107)
 - Google Analytics 4 via `gtag.js`, éteint tant que `GA_MESURE_ID` est vide (réglage d'essai par appareil dans `localStorage['txpro_ga_id']`).
 - **Liste blanche stricte** : `GA_EVENEMENTS` et `GA_PARAMS` dans `index.html`. Tout nom d'événement ou paramètre absent de ces listes est jeté, et **aucune valeur numérique ne sort jamais**. Ne jamais élargir ces listes à un nom, un courriel ou un montant.

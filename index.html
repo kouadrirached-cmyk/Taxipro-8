@@ -1200,6 +1200,7 @@ body{
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;"><button class="btn bblu bsm" onclick="exportPDF()">PDF semaine</button><button class="btn btn-gold bsm" onclick="openRapportMensuel()" style="background:linear-gradient(135deg,#ffe066,#f5c800,#d4a800);color:#0a0800;font-weight:900;">📄 Rapport mensuel</button><button class="btn bsec bsm" onclick="exportPrint()">Imprimer</button><button class="btn bsec bsm" onclick="exportCSV()">CSV</button></div><div id="expSummary"></div>
       <div id="expList"></div>
+      <div id="facturesSection" style="margin-top:18px;"></div>
     </div>
 
     <!-- ══ ÉQUIPE ══ -->
@@ -2361,7 +2362,7 @@ function _refreshAfterSync(){
     if(name==='hist')renderHist();
     if(name==='fleet')renderFleet();
     if(name==='clean'){renderClean();renderGaranties();}
-    if(name==='exp')renderExp();
+    if(name==='exp'){renderExp();renderFactures();}
   }
   renderSoldeBar();
   if(typeof renderNotifBadge==='function')renderNotifBadge();
@@ -3460,7 +3461,7 @@ function goPage(name){
   if(name==='profit')renderProfit();
   if(name==='analyse')renderAnalyse();
   if(name==='paye')renderPaye();
-  if(name==='exp')renderExp();
+  if(name==='exp'){renderExp();renderFactures();}
   if(name==='team')renderTeamWithMsgs();
   if(name==='fleet')renderFleet();
   if(name==='treso')renderTreso();
@@ -6139,6 +6140,335 @@ function renderPaye(){
 }
 
 // ═══ EXPENSES ═══
+// ═══════════════════════════════════════════════
+// 🧾 FACTURES PHOTOGRAPHIÉES — comptabilité et taxes
+//
+// OÙ VIVENT LES PHOTOS, ET POURQUOI : dans IndexedDB, sur l'appareil.
+// PAS dans C, PAS dans S, PAS dans EX. Ces trois-là partent en un seul
+// document Firestore, plafonné à 1 Mo : deux photos dedans et la
+// synchronisation de TOUTE la flotte s'arrête. IndexedDB, lui, encaisse
+// des centaines de mégaoctets sans toucher à la synchro.
+// Contrepartie assumée : la photo reste sur le téléphone qui l'a prise.
+// D'où le bouton d'export, à faire avant de donner au comptable.
+// Ce qui est LÉGER (date, fournisseur, montant) vit dans C.factures et
+// se synchronise normalement : sur un autre appareil on voit la liste,
+// avec la mention que l'image est restée sur l'autre téléphone.
+// ═══════════════════════════════════════════════
+var FACT_DB='txpro_factures', FACT_STORE='photos';
+var _factFiltreMois='';
+function _factDB(){
+  return new Promise(function(res,rej){
+    try{
+      var r=indexedDB.open(FACT_DB,1);
+      r.onupgradeneeded=function(e){
+        var db=e.target.result;
+        if(!db.objectStoreNames.contains(FACT_STORE))db.createObjectStore(FACT_STORE);
+      };
+      r.onsuccess=function(e){res(e.target.result);};
+      r.onerror=function(){rej(r.error);};
+    }catch(e){rej(e);}
+  });
+}
+function factPhotoSave(id,dataUrl){
+  return _factDB().then(function(db){
+    return new Promise(function(res,rej){
+      var tx=db.transaction(FACT_STORE,'readwrite');
+      tx.objectStore(FACT_STORE).put(dataUrl,id);
+      tx.oncomplete=function(){res(true);};
+      tx.onerror=function(){rej(tx.error);};
+    });
+  });
+}
+function factPhotoGet(id){
+  return _factDB().then(function(db){
+    return new Promise(function(res){
+      var tx=db.transaction(FACT_STORE,'readonly');
+      var q=tx.objectStore(FACT_STORE).get(id);
+      q.onsuccess=function(){res(q.result||null);};
+      q.onerror=function(){res(null);};
+    });
+  }).catch(function(){return null;});
+}
+function factPhotoDel(id){
+  return _factDB().then(function(db){
+    return new Promise(function(res){
+      var tx=db.transaction(FACT_STORE,'readwrite');
+      tx.objectStore(FACT_STORE).delete(id);
+      tx.oncomplete=function(){res(true);};
+      tx.onerror=function(){res(false);};
+    });
+  }).catch(function(){return false;});
+}
+function factPhotoIds(){
+  return _factDB().then(function(db){
+    return new Promise(function(res){
+      var tx=db.transaction(FACT_STORE,'readonly');
+      var q=tx.objectStore(FACT_STORE).getAllKeys();
+      q.onsuccess=function(){res(q.result||[]);};
+      q.onerror=function(){res([]);};
+    });
+  }).catch(function(){return [];});
+}
+// Une facture photographiée au téléphone pèse 3 à 6 Mo. Réduite à
+// 1400 px de large en JPEG, elle reste parfaitement lisible autour de
+// 150 Ko — et l'appareil peut en garder des milliers.
+function factCompresser(file,maxLarge,qualite){
+  return new Promise(function(res,rej){
+    var fr=new FileReader();
+    fr.onerror=function(){rej(new Error('lecture'));};
+    fr.onload=function(){
+      var img=new Image();
+      img.onerror=function(){rej(new Error('image'));};
+      img.onload=function(){
+        try{
+          var w=img.width,h=img.height;
+          var mx=maxLarge||1400;
+          if(w>mx){h=Math.round(h*mx/w);w=mx;}
+          var cv=document.createElement('canvas');
+          cv.width=w;cv.height=h;
+          cv.getContext('2d').drawImage(img,0,0,w,h);
+          res(cv.toDataURL('image/jpeg',qualite||0.68));
+        }catch(e){rej(e);}
+      };
+      img.src=fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+function factures(){
+  if(!C.factures)C.factures=[];
+  return C.factures;
+}
+// La photo ne crée JAMAIS d'argent toute seule : elle documente une
+// dépense existante, ou propose de la créer en un bouton. Sans ça, un
+// même achat se retrouverait compté deux fois dans le profit.
+function factureDepense(f){
+  if(!f||!f.depId)return null;
+  return (EX&&EX[f.depId])||null;
+}
+function ajouterFacture(){
+  var inp=document.createElement('input');
+  inp.type='file';inp.accept='image/*';inp.setAttribute('capture','environment');
+  inp.onchange=function(e){
+    var file=e.target.files&&e.target.files[0];
+    if(!file)return;
+    var el=document.getElementById('facturesSection');
+    if(el)el.insertAdjacentHTML('afterbegin','<div id="factEnCours" style="font-size:11px;color:var(--gold);padding:8px;">📷 Traitement de la photo...</div>');
+    factCompresser(file,1400,0.68).then(function(dataUrl){
+      var id='f'+uid();
+      return factPhotoSave(id,dataUrl).then(function(){
+        factures().unshift({id:id,date:_ymdLoc(new Date()),fournisseur:'',
+          montant:0,categorie:'Autre',vehicule:'',note:'',depId:'',
+          poids:Math.round(dataUrl.length/1024),ts:new Date().toISOString(),par:(U&&U.name)||''});
+        lSave();audit('FACTURE_ADD','');
+        renderFactures();
+      });
+    }).catch(function(err){
+      var w=document.getElementById('factEnCours');if(w)w.remove();
+      alert('Photo impossible à enregistrer : '+((err&&err.message)||err)
+        +'\n\nSi le téléphone manque d\'espace, exporte puis retire les vieilles factures.');
+    });
+  };
+  inp.click();
+}
+function majFacture(id,champ,valeur){
+  var f=factures().find(function(x){return x.id===id;});
+  if(!f)return;
+  f[champ]=(champ==='montant')?pf(valeur):valeur;
+  lSave();
+  renderFactures();
+}
+function supprFacture(id){
+  var f=factures().find(function(x){return x.id===id;});
+  if(!f)return;
+  if(!confirm('Supprimer cette facture et sa photo ?\n\n'
+    +(f.fournisseur||'Sans fournisseur')+' — '+fm(f.montant)+'\n\n'
+    +'La dépense liée, elle, n\'est pas touchée.'))return;
+  factPhotoDel(id).then(function(){
+    C.factures=factures().filter(function(x){return x.id!==id;});
+    lSave();audit('FACTURE_DEL',f.fournisseur||'');
+    renderFactures();
+  });
+}
+// Créer la dépense correspondante, en un bouton, sans ressaisir
+function factureVersDepense(id){
+  var f=factures().find(function(x){return x.id===id;});
+  if(!f)return;
+  if(f.depId&&EX[f.depId]){alert('Cette facture est déjà liée à une dépense.');return;}
+  if(pf(f.montant)<=0){alert('Écris d\'abord le montant de la facture.');return;}
+  if(!confirm('Créer la dépense ?\n\n'+(f.fournisseur||'Sans fournisseur')+'\n'
+    +fm(f.montant)+' — '+f.categorie+'\n'+f.date))return;
+  var e={id:uid(),category:f.categorie||'Autre',amount:pf(f.montant),date:f.date,
+    vehicle:f.vehicule||'',desc:(f.fournisseur||'')+(f.note?' — '+f.note:'')+' (facture photo)',
+    payAcc:'',createdBy:(U&&U.name)||'',ts:new Date().toISOString()};
+  EX[e.id]=e;
+  f.depId=e.id;
+  lSave();audit('FACTURE_DEP',f.fournisseur+' / '+fm(f.montant));
+  showToastGrn('✓ Dépense créée');
+  renderFactures();
+  if(typeof renderExp==='function')renderExp();
+}
+function factMois(){
+  var m={};
+  factures().forEach(function(f){
+    var k=String(f.date||'').slice(0,7)||'?';
+    if(!m[k])m[k]={cle:k,n:0,total:0};
+    m[k].n++;m[k].total+=pf(f.montant);
+  });
+  return Object.keys(m).sort().reverse().map(function(k){return m[k];});
+}
+function factFiltrer(m){ _factFiltreMois=m; renderFactures(); }
+function renderFactures(){
+  var el=document.getElementById('facturesSection');
+  if(!el)return;
+  if(!U||U.role!=='owner'){el.innerHTML='';return;}
+  var fs=factures(), mois=factMois();
+  var vus=fs.filter(function(f){return !_factFiltreMois||String(f.date||'').slice(0,7)===_factFiltreMois;});
+  vus.sort(function(a,b){return String(b.date||'').localeCompare(String(a.date||''));});
+  var totalVus=vus.reduce(function(a,f){return a+pf(f.montant);},0);
+  var sansDep=fs.filter(function(f){return !factureDepense(f);}).length;
+  var veh=(C.vehicles||[]).filter(function(v){return v.active!==false;});
+  var cats=['Essence','Réparation','Entretien','Assurance','Location','Lavage','Pièces','Bureau','Autre'];
+  var h='<div class="card" style="border-color:rgba(96,165,250,.3);">'
+    +'<div class="ctit"><span><span class="ci">🧾</span>Factures photographiées</span></div>'
+    +'<div style="font-size:11px;color:var(--m2);line-height:1.6;margin-bottom:11px;">'
+    +'Prends la facture en photo tout de suite, à la station ou au garage. '
+    +'Au moment des taxes, tout est là — plus de boîte à chaussures.</div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:11px;">'
+    +'<div style="background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.25);border-radius:11px;padding:10px;text-align:center;">'
+    +'<div style="font-size:20px;font-weight:900;color:var(--blu);">'+vus.length+'</div>'
+    +'<div style="font-size:9px;color:var(--m2);font-weight:700;">facture'+(vus.length>1?'s':'')+(_factFiltreMois?' ce mois':'')+'</div></div>'
+    +'<div style="background:rgba(245,200,0,.08);border:1px solid rgba(245,200,0,.25);border-radius:11px;padding:10px;text-align:center;">'
+    +'<div style="font-size:20px;font-weight:900;color:var(--gold);">'+fm(totalVus)+'</div>'
+    +'<div style="font-size:9px;color:var(--m2);font-weight:700;">total</div></div>'
+    +'</div>';
+  if(sansDep>0){
+    h+='<div style="background:rgba(255,165,0,.08);border:1px solid rgba(255,165,0,.3);border-radius:11px;padding:10px;margin-bottom:11px;font-size:11px;color:var(--m3);line-height:1.6;">'
+      +'⚠️ <b>'+sansDep+' facture'+(sansDep>1?'s ne sont':' n\'est')+' pas encore liée'+(sansDep>1?'s':'')+' à une dépense.</b> '
+      +'Tant qu\'elle'+(sansDep>1?'s ne le sont':' ne l\'est')+' pas, ce montant n\'entre pas dans ton profit ni dans tes taxes.</div>';
+  }
+  if(mois.length>1||_factFiltreMois){
+    h+='<div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:3px;margin-bottom:11px;">'
+      +'<button onclick="factFiltrer(\'\')" style="flex-shrink:0;background:'+(_factFiltreMois?'rgba(255,255,255,.05)':'var(--gold)')+';border:1px solid '+(_factFiltreMois?'var(--brd2)':'var(--gold)')+';color:'+(_factFiltreMois?'var(--m2)':'#000')+';border-radius:20px;padding:7px 13px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;">Tous ('+fs.length+')</button>';
+    mois.forEach(function(m){
+      var on=_factFiltreMois===m.cle;
+      h+='<button onclick="factFiltrer(\''+m.cle+'\')" style="flex-shrink:0;background:'+(on?'var(--gold)':'rgba(255,255,255,.05)')+';border:1px solid '+(on?'var(--gold)':'var(--brd2)')+';color:'+(on?'#000':'var(--m2)')+';border-radius:20px;padding:7px 13px;font-size:11px;font-weight:800;cursor:pointer;white-space:nowrap;">'
+        +_cmpEsc(moisLbl(m.cle))+' ('+m.n+')</button>';
+    });
+    h+='</div>';
+  }
+  if(!fs.length){
+    h+='<div style="font-size:11px;color:var(--m2);line-height:1.6;text-align:center;padding:14px 8px;">'
+      +'Aucune facture. Prends la première en photo — ça prend cinq secondes et ça vaut cher au moment des impôts.</div>';
+  }else if(!vus.length){
+    h+='<div style="font-size:11px;color:var(--m2);text-align:center;padding:14px 8px;">Aucune facture ce mois-ci.</div>';
+  }
+  vus.forEach(function(f){
+    var dep=factureDepense(f);
+    h+='<div style="background:rgba(10,8,0,.55);border:1px solid '+(dep?'rgba(57,211,83,.3)':'var(--brd)')+';border-radius:12px;padding:11px;margin-bottom:9px;">'
+      +'<div style="display:flex;gap:9px;margin-bottom:9px;">'
+      +'<div id="factImg_'+f.id+'" onclick="voirFacture(\''+f.id+'\')" style="width:66px;height:66px;flex-shrink:0;border-radius:9px;border:1px solid var(--brd2);background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:18px;cursor:pointer;overflow:hidden;">🧾</div>'
+      +'<div style="flex:1;min-width:0;">'
+      +'<input type="text" value="'+_cmpEsc(f.fournisseur||'')+'" placeholder="Fournisseur (Ultramar, garage...)" '
+      +'onchange="majFacture(\''+f.id+'\',\'fournisseur\',this.value)" '
+      +'style="width:100%;background:transparent;border:none;border-bottom:1px solid var(--brd2);color:var(--txt);font-size:13px;font-weight:800;padding:2px 0 5px;margin-bottom:6px;">'
+      +'<div style="display:flex;gap:6px;">'
+      +'<input type="date" value="'+_cmpEsc(f.date||'')+'" onchange="majFacture(\''+f.id+'\',\'date\',this.value)" style="flex:1;min-width:0;background:rgba(0,0,0,.3);border:1px solid var(--brd2);color:var(--txt);border-radius:7px;padding:5px;font-size:11px;">'
+      +'<input type="number" inputmode="decimal" step="0.01" value="'+(pf(f.montant)||'')+'" placeholder="0.00" onchange="majFacture(\''+f.id+'\',\'montant\',this.value)" style="width:88px;background:rgba(0,0,0,.3);border:1px solid var(--brd2);color:var(--gold);font-weight:900;border-radius:7px;padding:5px;font-size:12px;text-align:right;">'
+      +'</div></div></div>'
+      +'<div class="frow">'
+      +'<div class="fsm"><label>Catégorie</label><div class="sw"><select onchange="majFacture(\''+f.id+'\',\'categorie\',this.value)">'
+      +cats.map(function(c){return '<option'+(f.categorie===c?' selected':'')+'>'+c+'</option>';}).join('')
+      +'</select></div></div>'
+      +'<div class="fsm"><label>Voiture</label><div class="sw"><select onchange="majFacture(\''+f.id+'\',\'vehicule\',this.value)">'
+      +'<option value="">— aucune —</option>'
+      +veh.map(function(v){return '<option value="'+_cmpEsc(v.num)+'"'+(f.vehicule===v.num?' selected':'')+'>'+_cmpEsc(v.num)+'</option>';}).join('')
+      +'</select></div></div></div>'
+      +(dep
+        ?'<div style="font-size:10px;color:var(--grn);font-weight:700;margin-top:2px;">✅ Liée à la dépense du '+_cmpEsc(dep.date)+' — '+fm(dep.amount)+'</div>'
+        :'<button onclick="factureVersDepense(\''+f.id+'\')" style="width:100%;margin-top:4px;background:rgba(57,211,83,.13);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:9px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;">➕ Créer la dépense correspondante</button>')
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:7px;">'
+      +'<span style="font-size:9px;color:var(--m2);">'+(f.poids?f.poids+' Ko':'')+(f.par?' · '+_cmpEsc(f.par):'')+'</span>'
+      +'<button onclick="supprFacture(\''+f.id+'\')" style="background:none;border:1px solid var(--brd2);color:var(--m2);border-radius:8px;padding:5px 11px;font-size:10px;font-weight:700;cursor:pointer;">🗑️ Supprimer</button>'
+      +'</div></div>';
+  });
+  h+='<button class="btn bsuc bsm" style="width:100%;padding:13px;margin-top:4px;" onclick="ajouterFacture()">📷 Photographier une facture</button>'
+    +(fs.length?'<button class="btn bblu bsm" style="width:100%;padding:12px;margin-top:8px;" onclick="exporterFactures()">📤 Dossier pour le comptable</button>':'')
+    +'<div style="background:rgba(255,165,0,.07);border:1px solid rgba(255,165,0,.25);border-radius:11px;padding:10px;margin-top:10px;font-size:10px;color:var(--m2);line-height:1.65;">'
+    +'📱 <b>Les photos restent sur ce téléphone.</b> Elles sont trop lourdes pour la synchronisation — deux images suffiraient à la bloquer pour toute la flotte. '
+    +'Les renseignements (date, fournisseur, montant) se synchronisent normalement. '
+    +'<b>Fais le dossier du comptable une fois par mois</b> et range-le dans Google Drive : si tu perds le téléphone, les photos partent avec.'
+    +'</div></div>';
+  el.innerHTML=h;
+  // Les vignettes se chargent après coup : la lecture d'IndexedDB est
+  // asynchrone et ne doit pas retarder l'affichage de la liste.
+  vus.forEach(function(f){
+    factPhotoGet(f.id).then(function(d){
+      var box=document.getElementById('factImg_'+f.id);
+      if(!box)return;
+      if(d)box.innerHTML='<img src="'+d+'" style="width:100%;height:100%;object-fit:cover;">';
+      else box.innerHTML='<span style="font-size:9px;color:var(--m2);text-align:center;line-height:1.2;">autre<br>appareil</span>';
+    });
+  });
+}
+function voirFacture(id){
+  factPhotoGet(id).then(function(d){
+    if(!d){alert('📱 La photo a été prise sur un autre appareil.\n\nLes images restent sur le téléphone qui les a prises — seuls les renseignements se synchronisent.');return;}
+    viewPhoto(d);
+  });
+}
+// Un seul fichier à donner au comptable : le tableau et toutes les
+// images dedans. Il s'ouvre dans n'importe quel navigateur et
+// s'imprime en PDF. Plus fiable, sur un téléphone, que vingt
+// téléchargements séparés.
+function exporterFactures(){
+  var fs=factures().filter(function(f){return !_factFiltreMois||String(f.date||'').slice(0,7)===_factFiltreMois;});
+  if(!fs.length){alert('Aucune facture à exporter.');return;}
+  fs.sort(function(a,b){return String(a.date||'').localeCompare(String(b.date||''));});
+  var periode=_factFiltreMois?moisLbl(_factFiltreMois):'toutes périodes';
+  Promise.all(fs.map(function(f){return factPhotoGet(f.id);})).then(function(imgs){
+    var esc=function(x){return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+    var tot=fs.reduce(function(a,f){return a+pf(f.montant);},0);
+    var manquantes=imgs.filter(function(x){return !x;}).length;
+    var h='<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">'
+      +'<meta name="viewport" content="width=device-width,initial-scale=1">'
+      +'<title>Factures '+esc(periode)+' — '+esc(C.companyName||'TaxiPro')+'</title>'
+      +'<style>body{font-family:Arial,sans-serif;margin:0;padding:18px;color:#111;}'
+      +'h1{font-size:19px;margin:0 0 4px;}h2{font-size:14px;margin:26px 0 8px;page-break-before:always;}'
+      +'table{width:100%;border-collapse:collapse;margin:14px 0;font-size:12px;}'
+      +'th,td{border:1px solid #bbb;padding:6px;text-align:left;}th{background:#f0f0f0;}'
+      +'td.r{text-align:right;}tr.tot td{font-weight:bold;background:#fffbe6;}'
+      +'img{max-width:100%;border:1px solid #ccc;border-radius:6px;}'
+      +'.meta{font-size:12px;color:#555;}@media print{h2{page-break-before:always;}}</style></head><body>'
+      +'<h1>🧾 Factures — '+esc(periode)+'</h1>'
+      +'<div class="meta">'+esc(C.companyName||'TaxiPro')+' · '+fs.length+' facture(s) · exporté le '
+      +new Date().toLocaleDateString('fr-CA')+'</div>'
+      +'<table><tr><th>#</th><th>Date</th><th>Fournisseur</th><th>Catégorie</th><th>Voiture</th><th class="r">Montant</th><th>Dépense</th></tr>';
+    fs.forEach(function(f,i){
+      var dep=factureDepense(f);
+      h+='<tr><td>'+(i+1)+'</td><td>'+esc(f.date)+'</td><td>'+esc(f.fournisseur||'—')+'</td>'
+        +'<td>'+esc(f.categorie||'')+'</td><td>'+esc(f.vehicule||'—')+'</td>'
+        +'<td class="r">'+fm(f.montant)+'</td><td>'+(dep?'oui':'NON')+'</td></tr>';
+    });
+    h+='<tr class="tot"><td colspan="5">TOTAL</td><td class="r">'+fm(tot)+'</td><td></td></tr></table>';
+    if(manquantes)h+='<div class="meta">⚠️ '+manquantes+' photo(s) absente(s) de cet appareil : elles ont été prises sur un autre téléphone.</div>';
+    fs.forEach(function(f,i){
+      h+='<h2>#'+(i+1)+' — '+esc(f.date)+' · '+esc(f.fournisseur||'sans fournisseur')+' · '+fm(f.montant)+'</h2>';
+      h+=imgs[i]?'<img src="'+imgs[i]+'">':'<div class="meta">Photo absente de cet appareil.</div>';
+    });
+    h+='</body></html>';
+    var blob=new Blob([h],{type:'text/html;charset=utf-8'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url;a.download='factures_'+(_factFiltreMois||'toutes')+'.html';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(function(){URL.revokeObjectURL(url);},4000);
+    audit('FACTURES_EXPORT',fs.length+' factures');
+    alert('✅ Dossier créé : '+fs.length+' facture(s), '+fm(tot)+'.\n\n'
+      +'Ouvre-le et « Imprimer → Enregistrer en PDF » pour le comptable.\n'
+      +'Range-le dans Google Drive : c\'est ta copie de sûreté.');
+  });
+}
 function renderExp(){
   const isOwner=U.role==='owner';
   let arr=getExpArr();
@@ -12341,7 +12671,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-09-09-v111-GARANTIES-PIECES';
+var APP_VERSION = '2026-09-09-v112-FACTURES-PHOTOS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
