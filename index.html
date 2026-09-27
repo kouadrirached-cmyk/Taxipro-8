@@ -2194,6 +2194,9 @@ async function txpResync(raison){
     if(d&&d.C){
       var localCm=pf(C&&C._cm), remoteCm=pf(d.C&&d.C._cm);
       if(remoteCm>=localCm)C=applyDefaults(d.C);
+      // Ce qui est arrivé pendant que le téléphone dormait doit s'annoncer,
+      // exactement comme si l'écoute temps réel l'avait reçu.
+      var entrants=notifEntrants(S||{},d.S||{});
       S=window.txpMerge(S,d.S||{},'s');
       EX=window.txpMerge(EX,d.EX||{},'e');
       if((d.AU||[]).length>=AU.length)AU=d.AU||[];
@@ -2207,6 +2210,7 @@ async function txpResync(raison){
         await window._fb.save(C,S,EX,AU);
       }
       if(typeof _refreshAfterSync==='function')_refreshAfterSync();
+      try{notifAnnoncer(entrants);}catch(e){}
       if(typeof initLogin==='function'&&!U)initLogin();
     }
     window._fbLastOk=Date.now();
@@ -2434,19 +2438,10 @@ function startRealtimeSync(){
     if(type==='shifts'){
       // Repérer les quarts vraiment nouveaux AVANT de fusionner, pour pouvoir
       // alerter le patron sans le déranger pour ses propres saisies.
-      var _avant=S||{};
-      var _entrants=[];
-      if(U.role==='owner'){
-        for(var _k in data){
-          if(!_avant[_k]&&data[_k]&&data[_k].createdBy&&data[_k].createdBy!==U.name
-             &&!(window.TOMB&&window.TOMB.has&&window.TOMB.has('s',_k))){
-            _entrants.push(data[_k]);
-          }
-        }
-      }
+      var _entrants=notifEntrants(S||{},data);
       S=window.txpMerge(S,data,'s');
       lSaveLocal();
-      _entrants.forEach(function(sh){try{notifQuartRecu(sh);}catch(e){}});
+      notifAnnoncer(_entrants);
       // Le local contient des quarts absents du cloud → renvoyer l'union (anti-perte)
       if(Object.keys(S).length>Object.keys(data).length)_schedulePushBack();
       _refreshAfterSync();
@@ -3265,6 +3260,52 @@ function activerNotifsSysteme(){
   });
 }
 // Appelé quand un quart arrive d'un autre appareil pendant que l'app est ouverte
+// Les quarts qui arrivent d'ailleurs — ceux que le patron doit savoir.
+// Une SEULE définition, utilisée par l'écoute temps réel ET par la
+// resynchronisation au retour au premier plan. Avant, seule l'écoute
+// alertait : un quart qui arrivait pendant que le téléphone dormait
+// entrait en silence, et le patron ne voyait jamais passer la notification.
+function notifEntrants(avant,apres){
+  if(!U||U.role!=='owner')return [];
+  var out=[];
+  for(var k in apres){
+    var sh=apres[k];
+    if(avant[k])continue;                               // déjà connu
+    if(!sh||!sh.createdBy||sh.createdBy===U.name)continue; // ma propre saisie
+    // Supprimé ailleurs : même règle que txpMerge, sinon un quart effacé
+    // reviendrait sonner. (L'ancien test appelait window.TOMB.has, qui
+    // n'existe pas : le garde-fou n'a jamais rien filtré.)
+    var tb=(window.TOMB&&window.TOMB.s&&window.TOMB.s[k])||0;
+    if(tb&&tb>=window.txpMTime(sh))continue;
+    out.push(sh);
+  }
+  return out;
+}
+// Annonce groupée : au retour d'une mise en veille, plusieurs quarts
+// peuvent arriver d'un coup. Trois bulles qui se chevauchent ne se lisent
+// pas — une seule qui totalise, oui.
+function notifAnnoncer(entrants){
+  if(!entrants||!entrants.length)return;
+  if(entrants.length===1){
+    try{notifQuartRecu(entrants[0]);}catch(e){}
+    return;
+  }
+  var pro=entrants.reduce(function(a,sh){return a+calcOwnerProfit(sh);},0);
+  var noms=[];
+  entrants.forEach(function(sh){
+    var n=sh.driver||'?';
+    if(noms.indexOf(n)<0)noms.push(n);
+  });
+  var txt=entrants.length+' quarts rentrés · '+fm(pro)+' pour toi';
+  try{showToastGrn('🔔 '+txt);}catch(e){}
+  try{
+    if(typeof Notification!=='undefined'&&Notification.permission==='granted'){
+      new Notification('TaxiPro — '+entrants.length+' quarts rentrés',
+        {body:noms.join(', ')+' · '+fm(pro)+' pour toi',tag:'txp-groupe'});
+    }
+  }catch(e){}
+  try{renderNotifBadge();}catch(e){}
+}
 function notifQuartRecu(sh){
   if(!U||U.role!=='owner')return;
   var pro=calcOwnerProfit(sh), ec=calcEcart(sh);
@@ -12804,7 +12845,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-09-27-v113-SYNC-IPHONE';
+var APP_VERSION = '2026-09-27-v114-NOTIF-APRES-VEILLE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
