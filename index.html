@@ -1665,6 +1665,13 @@ window.txpMerge = function(local, remote, tombType){
     };
     firebase.initializeApp(cfg);
     const db=firebase.firestore();
+    // TRANSPORT — iPhone et Safari : le canal temps réel de Firestore
+    // (WebChannel) reste parfois ouvert sans plus rien transmettre, derrière
+    // certains réseaux ou après une mise en veille. La détection automatique
+    // bascule alors sur le long polling, plus lent mais qui passe partout.
+    // À régler AVANT toute utilisation de Firestore.
+    try{ db.settings({experimentalAutoDetectLongPolling:true,merge:true}); }
+    catch(e){ console.warn('Transport auto non disponible:',e&&e.message); }
     // Cache hors-ligne Firestore : si la connexion coupe, les ecritures
     // sont mises en file d'attente et envoyees automatiquement au retour du reseau.
     try{ db.enablePersistence({synchronizeTabs:true}).catch(function(e){ console.warn('Persistence non dispo:', e&&e.code); }); }catch(e){}
@@ -2152,6 +2159,89 @@ function lSave(){
 // Flush utilisé par le verrou d'hydratation (sécurité 15 s)
 window._flushSave=function(){ if(window._fb&&C)window._fb.save(C,S,EX,AU); };
 
+// ═══════════════════════════════════════════════
+// 🔄 RESYNCHRONISATION AU RETOUR AU PREMIER PLAN
+//
+// LE PROBLÈME, ET POURQUOI IL FRAPPE SURTOUT LES iPHONE :
+// quand l'app passe en arrière-plan, iOS suspend la page et coupe le canal
+// temps réel de Firestore. Au retour, Safari restaure souvent la page
+// telle quelle, depuis son cache de navigation : aucun rechargement, donc
+// les écoutes onSnapshot restent accrochées à un canal mort. L'app a l'air
+// ouverte et ne reçoit plus rien — un chauffeur ajouté ne descend jamais,
+// un quart rentré ne remonte jamais.
+// La correction : à chaque retour au premier plan, on rebranche les écoutes
+// ET on relit une fois les documents, pour ne dépendre d'aucun canal.
+// Android ne le montrait pas parce que Chrome garde le canal vivant plus
+// longtemps et recharge plus volontiers la page.
+// ═══════════════════════════════════════════════
+window._txpResyncEnCours=false;
+window._txpResyncDernier=0;
+async function txpResync(raison){
+  if(!window._fb||!window._fbReady||!C)return false;
+  if(window._txpResyncEnCours)return false;
+  // Garde-fou : pas plus d'une resynchro toutes les 4 secondes, sinon une
+  // série d'événements (visible + focus + online) en déclencherait trois.
+  var maintenant=Date.now();
+  if(maintenant-window._txpResyncDernier<4000)return false;
+  window._txpResyncEnCours=true;
+  window._txpResyncDernier=maintenant;
+  try{
+    setSyncStatus('saving');
+    // 1) Rebrancher les écoutes : l'ancien canal est peut-être mort
+    if(typeof startRealtimeSync==='function')startRealtimeSync();
+    // 2) Relire une fois, sans dépendre du canal temps réel
+    var d=await window._fb.load();
+    if(d&&d.C){
+      var localCm=pf(C&&C._cm), remoteCm=pf(d.C&&d.C._cm);
+      if(remoteCm>=localCm)C=applyDefaults(d.C);
+      S=window.txpMerge(S,d.S||{},'s');
+      EX=window.txpMerge(EX,d.EX||{},'e');
+      if((d.AU||[]).length>=AU.length)AU=d.AU||[];
+      lSaveLocal();
+      try{localStorage.setItem(window.TXP_LSC,Object.keys(S).length);}catch(e){}
+      // 3) Renvoyer ce que le cloud n'a pas encore
+      if(Object.keys(S).length>Object.keys(d.S||{}).length
+        ||Object.keys(EX).length>Object.keys(d.EX||{}).length
+        ||localCm>remoteCm||window._fbPending){
+        window._fbPending=false;
+        await window._fb.save(C,S,EX,AU);
+      }
+      if(typeof _refreshAfterSync==='function')_refreshAfterSync();
+      if(typeof initLogin==='function'&&!U)initLogin();
+    }
+    window._fbLastOk=Date.now();
+    setSyncStatus('ok');
+    return true;
+  }catch(e){
+    console.warn('Resynchro impossible ('+raison+') :',e&&e.code);
+    setSyncStatus('offline');
+    return false;
+  }finally{
+    window._txpResyncEnCours=false;
+  }
+}
+// Tous les chemins par lesquels une app peut revenir au premier plan.
+// iOS en emprunte certains qu'Android n'utilise jamais — d'où la liste.
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='visible')txpResync('retour visible');
+});
+window.addEventListener('focus',function(){ txpResync('focus'); });
+window.addEventListener('pageshow',function(ev){
+  // ev.persisted : la page sort du cache de navigation de Safari. C'est
+  // exactement le cas où rien n'a été réexécuté et où le canal est mort.
+  txpResync(ev&&ev.persisted?'cache navigation':'pageshow');
+});
+window.addEventListener('online',function(){ txpResync('réseau retrouvé'); });
+// Veilleur : visible, en ligne, et pourtant plus rien depuis 2 minutes →
+// le canal est probablement mort sans l'avoir dit. On le rebranche.
+setInterval(function(){
+  if(document.visibilityState!=='visible')return;
+  if(!navigator.onLine)return;
+  if(!window._fbReady||!C)return;
+  var silence=Date.now()-(window._fbLastOk||0);
+  if(silence>120000)txpResync('silence de '+Math.round(silence/1000)+' s');
+},45000);
+
 // ── FIABILITÉ : relance automatique si une sauvegarde Firebase a échoué ──
 setInterval(function(){
   if(window._fbPending && navigator.onLine && window._fb && C){ window._fb.save(C,S,EX,AU); }
@@ -2286,10 +2376,53 @@ function audit(action,detail=''){
 function setSyncStatus(status){
   const el=document.getElementById('syncStatus');
   if(!el)return;
-  if(status==='ok')el.innerHTML='<span style="color:var(--grn)">☁️ Sync ✓</span>';
+  // Le badge devient un bouton : sur un téléphone qui a dormi, pouvoir
+  // forcer la synchro et VOIR qu'elle a réussi vaut mieux que d'attendre.
+  el.style.cursor='pointer';
+  el.title='Toucher pour synchroniser maintenant';
+  el.onclick=function(){ syncMaintenant(); };
+  if(status==='ok'){
+    window._fbLastOk=Date.now();
+    el.innerHTML='<span style="color:var(--grn)">☁️ Sync ✓</span>';
+  }
   else if(status==='saving')el.innerHTML='<span style="color:var(--gold)">☁️ Sync...</span>';
   else if(status==='offline')el.innerHTML='<span style="color:var(--red)">📵 Local</span>';
 }
+// Âge de la dernière synchro réussie, en clair
+function syncAge(){
+  if(!window._fbLastOk)return null;
+  return Math.round((Date.now()-window._fbLastOk)/1000);
+}
+function syncMaintenant(){
+  var el=document.getElementById('syncStatus');
+  if(!window._fbReady){
+    alert('☁️ Pas de connexion au cloud pour le moment.\n\n'
+      +'Tes données sont gardées sur cet appareil et partiront toutes seules '
+      +'dès que la connexion revient.');
+    return;
+  }
+  if(el)el.innerHTML='<span style="color:var(--gold)">☁️ Sync...</span>';
+  window._txpResyncDernier=0;   // demande explicite : on passe outre le garde-fou
+  txpResync('bouton').then(function(ok){
+    if(ok){
+      if(typeof showToastGrn==='function')showToastGrn('✓ Synchronisé');
+    }else{
+      alert('☁️ Synchronisation impossible pour le moment.\n\n'
+        +'Vérifie la connexion. Rien n\'est perdu : tout est gardé sur '
+        +'l\'appareil et repartira tout seul.');
+    }
+  });
+}
+// Rappel discret quand la dernière synchro remonte à loin
+setInterval(function(){
+  var el=document.getElementById('syncStatus');
+  if(!el||!window._fbReady)return;
+  if(document.visibilityState!=='visible')return;
+  var a=syncAge();
+  if(a!==null&&a>180){
+    el.innerHTML='<span style="color:var(--gold)">☁️ '+(a<3600?Math.round(a/60)+' min':Math.round(a/3600)+' h')+'</span>';
+  }
+},30000);
 
 // ── Real-time listener — update data when another device saves ──
 let _unlistenFb=null;
@@ -12671,7 +12804,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-09-09-v112-FACTURES-PHOTOS';
+var APP_VERSION = '2026-09-27-v113-SYNC-IPHONE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
