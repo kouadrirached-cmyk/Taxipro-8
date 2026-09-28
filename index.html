@@ -1760,12 +1760,52 @@ window.txpMerge = function(local, remote, tombType){
           // Auth + adhésion à la flotte AVANT toute écriture (règles de sécurité)
           await window._fbEnsure();
           if(typeof setSyncStatus==='function')setSyncStatus('saving');
+
+          // ═══ GARDE 3 : NE JAMAIS ÉCRIRE MOINS QUE CE QUE LE CLOUD A ═══
+          // batch.set REMPLACE le document entier. Un appareil dont l'écoute
+          // temps réel était morte (le cas iPhone) a un S incomplet : en
+          // sauvegardant n'importe quoi — un réglage, un quart, une paie — il
+          // effaçait du cloud les quarts qu'il n'avait jamais reçus. C'est
+          // ainsi qu'un quart rentré par un chauffeur disparaissait « tout
+          // seul », sans que personne ne l'ait supprimé.
+          // On relit donc le cloud et on écrit l'UNION. Les vraies
+          // suppressions passent toujours : txpMerge respecte les tombstones.
+          var Sfinal=S, EXfinal=EX, sauves=0;
+          try{
+            const [cs,ce]=await Promise.all([
+              COL().doc('shifts').get(),
+              COL().doc('expenses').get()
+            ]);
+            const distS=cs.exists?(cs.data().data||{}):{};
+            const distE=ce.exists?(ce.data().data||{}):{};
+            Sfinal=window.txpMerge(S,distS,'s');
+            EXfinal=window.txpMerge(EX,distE,'e');
+            sauves=Object.keys(Sfinal).length-Object.keys(S).length;
+            if(sauves>0){
+              // Des quarts que cet appareil ne connaissait pas : on les garde
+              // ET on les remet en local, sinon il les réécraserait au tour
+              // suivant.
+              console.warn('PROTECTION : '+sauves+' quart(s) du cloud récupérés avant écriture');
+              try{
+                for(var _k in Sfinal){if(!S[_k])S[_k]=Sfinal[_k];}
+                for(var _e in EXfinal){if(!EX[_e])EX[_e]=EXfinal[_e];}
+                if(typeof window.S!=='undefined')window.S=S;
+                if(typeof lSaveLocal==='function')lSaveLocal();
+                if(typeof _refreshAfterSync==='function')_refreshAfterSync();
+              }catch(e2){}
+            }
+          }catch(eRead){
+            // Lecture impossible (hors ligne) : on écrit ce qu'on a. Le cache
+            // Firestore et la fusion des autres appareils rattraperont.
+            console.warn('Relecture avant écriture impossible :',eRead&&eRead.code);
+          }
+
           // ÉCRITURE ATOMIQUE : les 5 documents partent en UN SEUL commit.
           // Si la connexion coupe, rien n'est écrit à moitié.
           const batch=db.batch();
           batch.set(COL().doc('config'),C);
-          batch.set(COL().doc('shifts'),{data:S});
-          batch.set(COL().doc('expenses'),{data:EX});
+          batch.set(COL().doc('shifts'),{data:Sfinal});
+          batch.set(COL().doc('expenses'),{data:EXfinal});
           batch.set(COL().doc('audit'),{data:(AU||[]).slice(-1000)});
           batch.set(COL().doc('deleted'),{s:window.TOMB.s,e:window.TOMB.e,r:window.TOMB.r||0});
           await batch.commit();
@@ -1775,7 +1815,7 @@ window.txpMerge = function(local, remote, tombType){
           if(typeof setSyncStatus==='function')setSyncStatus('ok');
           // Surveillance de taille (limite Firestore ~1 Mo par document)
           try{
-            var sz=JSON.stringify(S).length;
+            var sz=JSON.stringify(Sfinal).length;
             if(sz>750000 && !window._bigWarned){
               window._bigWarned=true;
               setTimeout(function(){alert('\u26A0\uFE0F Base de donnees volumineuse ('+Math.round(sz/1024)+' Ko / limite ~1000 Ko).\n\nVa dans \u2699\uFE0F Reglages \u2192 \u00AB Archiver les vieux quarts \u00BB pour alleger l\'app et rester securitaire.');},1500);
@@ -6867,12 +6907,117 @@ function diagnosticQuarts(){
     orphelins:orphelins,proches:proches,fantomes:fantomes,
     sansDate:sansDate,sansTs:sansTs,total:Object.keys(S).length};
 }
+// ═══════════════════════════════════════════════
+// 🔎 RETROUVER LES QUARTS PERDUS
+// L'app garde un instantané hebdomadaire en local (txpro_bkp_*) et les
+// 30 derniers éléments supprimés (corbeille). Quand un quart a disparu
+// sans que personne ne l'ait supprimé — écriture cloud qui a écrasé plus
+// récent qu'elle, appareil resté en arrière-plan — il dort souvent encore
+// dans l'un des deux. On les fouille, et on ne propose QUE ce qui manque.
+// ═══════════════════════════════════════════════
+function _bkpCles(){
+  var t=window.TXP_TENANT||'taxipro';
+  return Object.keys(localStorage).filter(function(k){
+    if(t==='taxipro')return /^txpro_bkp_\d{4}W\d+$/.test(k);
+    return k.indexOf('txpro_bkp_'+t+'_')===0;
+  }).sort();
+}
+function quartsPerdus(){
+  var trouves={}, sources={};
+  var ajouter=function(sh,source){
+    if(!sh||!sh.id)return;
+    if(S[sh.id])return;                                   // déjà là
+    var tb=(window.TOMB&&window.TOMB.s&&window.TOMB.s[sh.id])||0;
+    if(tb&&tb>=window.txpMTime(sh))return;                // vraiment supprimé
+    if(!trouves[sh.id]){trouves[sh.id]=sh;sources[sh.id]=source;}
+  };
+  _bkpCles().forEach(function(k){
+    try{
+      var b=JSON.parse(localStorage.getItem(k));
+      var lbl=k.replace(/^txpro_bkp_/,'').replace((window.TXP_TENANT||'')+'_','');
+      Object.values((b&&b.S)||{}).forEach(function(sh){ajouter(sh,'sauvegarde '+lbl);});
+    }catch(e){}
+  });
+  try{
+    (window.txpTrashGet()||[]).forEach(function(it){
+      if(it&&it.kind==='s')ajouter(it.obj,'corbeille');
+    });
+  }catch(e){}
+  return Object.keys(trouves).map(function(id){
+    var sh=trouves[id];
+    return {sh:sh,source:sources[id],date:sh.date||'?',driver:sh.driver||'?',
+      montant:pf(sh.recette),tax:pf(sh.taxf)-pf(sh.taxd)};
+  }).sort(function(a,b){return String(b.date).localeCompare(String(a.date));});
+}
+function restaurerQuartPerdu(id){
+  var p=quartsPerdus().find(function(x){return x.sh.id===id;});
+  if(!p){alert('Ce quart n\'est plus dans les sauvegardes.');return;}
+  if(!confirm('Remettre ce quart ?\n\n'+p.date+' — '+p.driver+'\nTaximètre '+fm(p.tax)
+    +' · recette '+fm(p.montant)+'\n\nRetrouvé dans : '+p.source))return;
+  var sh=JSON.parse(JSON.stringify(p.sh));
+  sh._m=Date.now();                       // plus récent que tout : il survivra aux fusions
+  if(window.TOMB&&window.TOMB.s)delete window.TOMB.s[sh.id];
+  window.txpTombSave();
+  S[sh.id]=sh;
+  lSave();
+  audit('QUART_RECUPERE',p.date+'/'+p.driver+'/'+fm(p.montant));
+  showToastGrn('✓ Quart remis');
+  renderVerifQuarts();
+}
+function restaurerTousQuartsPerdus(){
+  var l=quartsPerdus();
+  if(!l.length)return;
+  if(!confirm('Remettre les '+l.length+' quart(s) retrouvé(s) ?\n\n'
+    +l.slice(0,6).map(function(p){return '• '+p.date+' — '+p.driver+' — '+fm(p.montant);}).join('\n')
+    +(l.length>6?'\n…':'')))return;
+  l.forEach(function(p){
+    var sh=JSON.parse(JSON.stringify(p.sh));
+    sh._m=Date.now();
+    if(window.TOMB&&window.TOMB.s)delete window.TOMB.s[sh.id];
+    S[sh.id]=sh;
+  });
+  window.txpTombSave();
+  lSave();
+  audit('QUARTS_RECUPERES',l.length+' quarts');
+  alert('✅ '+l.length+' quart(s) remis.\n\nIls repartent vers le cloud et les autres appareils.');
+  renderVerifQuarts();
+}
+function quartsPerdusHTML(){
+  var l=quartsPerdus();
+  var nbSauv=_bkpCles().length;
+  if(!l.length){
+    return '<div style="background:rgba(57,211,83,.07);border:1px solid rgba(57,211,83,.25);border-radius:11px;padding:11px;margin-bottom:11px;font-size:11px;color:var(--m3);line-height:1.6;">'
+      +'✅ <b>Aucun quart manquant.</b> '+nbSauv+' sauvegarde'+(nbSauv>1?'s':'')+' hebdomadaire'+(nbSauv>1?'s':'')
+      +' et la corbeille ont été fouillées : tout ce qu\'elles contiennent est déjà dans l\'app.</div>';
+  }
+  var tot=l.reduce(function(a,p){return a+p.montant;},0);
+  var h='<div style="background:rgba(255,58,58,.09);border:1.5px solid rgba(255,58,58,.4);border-radius:12px;padding:12px;margin-bottom:11px;">'
+    +'<div style="font-size:13px;font-weight:900;color:var(--red);margin-bottom:5px;">'
+    +'🔎 '+l.length+' quart'+(l.length>1?'s':'')+' retrouvé'+(l.length>1?'s':'')+' — '+fm(tot)+'</div>'
+    +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:10px;">'
+    +'Présent'+(l.length>1?'s':'')+' dans une sauvegarde ou la corbeille, mais absent'+(l.length>1?'s':'')+' de l\'app. '
+    +'Personne ne les a supprimés : remets-les et ils repartiront vers le cloud.</div>';
+  l.forEach(function(p){
+    h+='<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:10px;padding:9px;margin-bottom:7px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+      +'<div style="min-width:0;"><div style="font-size:12px;font-weight:800;color:var(--m3);">'
+      +_cmpEsc(p.date)+' — '+_cmpEsc(p.driver)+'</div>'
+      +'<div style="font-size:9px;color:var(--m2);">🔢 '+fm(p.tax)+' · 💰 '+fm(p.montant)+' · '+_cmpEsc(p.source)+'</div></div>'
+      +'<button onclick="restaurerQuartPerdu(\''+_cmpEsc(p.sh.id)+'\')" style="flex-shrink:0;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.45);color:var(--grn);border-radius:9px;padding:8px 12px;font-size:10px;font-weight:800;cursor:pointer;">♻️ Remettre</button>'
+      +'</div></div>';
+  });
+  if(l.length>1){
+    h+='<button class="btn bsuc bsm" style="width:100%;padding:11px;margin-top:3px;" onclick="restaurerTousQuartsPerdus()">♻️ Tout remettre ('+l.length+')</button>';
+  }
+  return h+'</div>';
+}
 function diagnosticQuartsHTML(){
   var d=diagnosticQuarts();
   var pb=d.orphelins.length+d.proches.length+d.fantomes.length+d.sansDate;
   var h='<div style="font-size:11px;color:var(--m2);line-height:1.6;margin-bottom:10px;">'
-    +'Si un chauffeur ne retrouve plus ses quarts, la cause est presque toujours ici : '
-    +'un quart rangé sous un nom qui n\'existe plus dans l\'équipe.</div>';
+    +'Si un chauffeur ne retrouve plus ses quarts, la réponse est ici : '
+    +'soit le quart a disparu de l\'app, soit il est rangé sous un nom qui n\'existe plus.</div>';
+  h+=quartsPerdusHTML();
   h+='<div style="background:'+(pb?'rgba(255,58,58,.08)':'rgba(57,211,83,.08)')+';border:1px solid '+(pb?'rgba(255,58,58,.3)':'rgba(57,211,83,.3)')+';border-radius:11px;padding:11px;margin-bottom:11px;">'
     +'<div style="font-size:12px;font-weight:900;color:'+(pb?'var(--red)':'var(--grn)')+';">'
     +(pb?'⚠️ '+pb+' anomalie'+(pb>1?'s':'')+' trouvée'+(pb>1?'s':''):'✅ Rien d\'anormal')+'</div>'
@@ -12845,7 +12990,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-09-27-v114-NOTIF-APRES-VEILLE';
+var APP_VERSION = '2026-09-28-v115-QUART-NE-DISPARAIT-PLUS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
