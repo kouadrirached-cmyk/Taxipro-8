@@ -1761,54 +1761,111 @@ window.txpMerge = function(local, remote, tombType){
           await window._fbEnsure();
           if(typeof setSyncStatus==='function')setSyncStatus('saving');
 
-          // ═══ GARDE 3 : NE JAMAIS ÉCRIRE MOINS QUE CE QUE LE CLOUD A ═══
-          // batch.set REMPLACE le document entier. Un appareil dont l'écoute
-          // temps réel était morte (le cas iPhone) a un S incomplet : en
-          // sauvegardant n'importe quoi — un réglage, un quart, une paie — il
-          // effaçait du cloud les quarts qu'il n'avait jamais reçus. C'est
-          // ainsi qu'un quart rentré par un chauffeur disparaissait « tout
-          // seul », sans que personne ne l'ait supprimé.
-          // On relit donc le cloud et on écrit l'UNION. Les vraies
-          // suppressions passent toujours : txpMerge respecte les tombstones.
-          var Sfinal=S, EXfinal=EX, sauves=0;
-          try{
-            const [cs,ce]=await Promise.all([
-              COL().doc('shifts').get(),
-              COL().doc('expenses').get()
-            ]);
-            const distS=cs.exists?(cs.data().data||{}):{};
-            const distE=ce.exists?(ce.data().data||{}):{};
-            Sfinal=window.txpMerge(S,distS,'s');
-            EXfinal=window.txpMerge(EX,distE,'e');
+          // ═══ UNE ÉCRITURE NE DOIT JAMAIS EN ENLEVER ═══
+          // set() REMPLACE le document entier. Un appareil en retard — écoute
+          // temps réel morte (le cas iPhone), ou simplement un instant de
+          // décalage — écrasait donc le cloud avec sa version incomplète :
+          // des quarts rentrés par un chauffeur disparaissaient « tout seuls »,
+          // et un chauffeur tout juste créé sur un téléphone « ne paraissait
+          // pas » chez les autres.
+          //
+          // On fusionne donc avant d'écrire. Mais fusionner ne suffit PAS si
+          // on lit puis écrit en deux temps : entre la lecture et l'écriture,
+          // l'autre téléphone peut avoir écrit, et sa nouveauté est perdue
+          // quand même (c'est mesuré : la lecture renvoyait l'état d'avant).
+          // D'où une TRANSACTION Firestore : les documents lus sont
+          // surveillés, et si quelqu'un les modifie entre-temps, tout est
+          // rejoué automatiquement sur les données fraîches.
+          var Sfinal=S, EXfinal=EX, Cfinal=C, ecrireConfig=true, sauves=0, repris=0;
+          var cfgRef=COL().doc('config'), sRef=COL().doc('shifts'),
+              eRef=COL().doc('expenses'), auRef=COL().doc('audit'),
+              delRef=COL().doc('deleted');
+
+          // Ne touche à RIEN de local : une transaction peut être rejouée.
+          function _fusionner(dc,distS,distE){
+            Sfinal=window.txpMerge(S,distS||{},'s');      // respecte les tombstones
+            EXfinal=window.txpMerge(EX,distE||{},'e');
             sauves=Object.keys(Sfinal).length-Object.keys(S).length;
-            if(sauves>0){
-              // Des quarts que cet appareil ne connaissait pas : on les garde
-              // ET on les remet en local, sinon il les réécraserait au tour
-              // suivant.
-              console.warn('PROTECTION : '+sauves+' quart(s) du cloud récupérés avant écriture');
-              try{
+            Cfinal=C; ecrireConfig=true; repris=0;
+            if(!dc)return;
+            // UNION DES CHAUFFEURS ET DES VÉHICULES : ici on ne supprime
+            // jamais un chauffeur ni une voiture, on les désactive
+            // (togDrv/togVeh posent active=false). Reprendre ceux que le
+            // cloud a et que cet appareil n'a pas encore ne peut donc rien
+            // ressusciter — et plus personne ne peut effacer le chauffeur
+            // qu'un autre vient de créer.
+            var fusD=_unionParId(C&&C.drivers,dc.drivers);
+            var fusV=_unionParId(C&&C.vehicles,dc.vehicles);
+            repris=(fusD.length-((C&&C.drivers||[]).length))
+                  +(fusV.length-((C&&C.vehicles||[]).length));
+            if(repris>0)Cfinal=Object.assign({},C,{drivers:fusD,vehicles:fusV});
+            // Pour le reste de la config (pourcentages, redevance, réglages
+            // de taxes), le plus récent gagne : on ne remplace pas une
+            // config plus fraîche que la nôtre. _cm n'est tamponné que
+            // lorsque la config change vraiment (voir lSave).
+            if(pf(dc._cm)>pf(C&&C._cm))ecrireConfig=false;
+          }
+          // Une fois l'écriture passée : garder en local ce qui a été repris
+          // du cloud, sinon cet appareil le réécraserait au tour suivant.
+          function _recuperer(){
+            try{
+              if(sauves>0){
                 for(var _k in Sfinal){if(!S[_k])S[_k]=Sfinal[_k];}
                 for(var _e in EXfinal){if(!EX[_e])EX[_e]=EXfinal[_e];}
                 if(typeof window.S!=='undefined')window.S=S;
-                if(typeof lSaveLocal==='function')lSaveLocal();
-                if(typeof _refreshAfterSync==='function')_refreshAfterSync();
-              }catch(e2){}
-            }
-          }catch(eRead){
-            // Lecture impossible (hors ligne) : on écrit ce qu'on a. Le cache
-            // Firestore et la fusion des autres appareils rattraperont.
-            console.warn('Relecture avant écriture impossible :',eRead&&eRead.code);
+              }
+              if(repris>0&&C){
+                C.drivers=Cfinal.drivers; C.vehicles=Cfinal.vehicles;
+                window._cfgEmpreinteVue=_cfgEmpreinte(C);
+              }
+              if(typeof lSaveLocal==='function')lSaveLocal();
+              if(typeof _refreshAfterSync==='function')_refreshAfterSync();
+            }catch(eRec){}
+          }
+          // Les 5 documents partent ENSEMBLE : rien n'est écrit à moitié.
+          function _ecrire(cible){
+            if(ecrireConfig)cible.set(cfgRef,Cfinal);
+            cible.set(sRef,{data:Sfinal});
+            cible.set(eRef,{data:EXfinal});
+            cible.set(auRef,{data:(AU||[]).slice(-1000)});
+            cible.set(delRef,{s:window.TOMB.s,e:window.TOMB.e,r:window.TOMB.r||0});
           }
 
-          // ÉCRITURE ATOMIQUE : les 5 documents partent en UN SEUL commit.
-          // Si la connexion coupe, rien n'est écrit à moitié.
-          const batch=db.batch();
-          batch.set(COL().doc('config'),C);
-          batch.set(COL().doc('shifts'),{data:Sfinal});
-          batch.set(COL().doc('expenses'),{data:EXfinal});
-          batch.set(COL().doc('audit'),{data:(AU||[]).slice(-1000)});
-          batch.set(COL().doc('deleted'),{s:window.TOMB.s,e:window.TOMB.e,r:window.TOMB.r||0});
-          await batch.commit();
+          var enTransaction=false;
+          try{
+            await db.runTransaction(async function(tx){
+              // toutes les lectures AVANT toute écriture : règle des transactions
+              const lus=await Promise.all([tx.get(cfgRef),tx.get(sRef),tx.get(eRef)]);
+              _fusionner(lus[0].exists?(lus[0].data()||{}):null,
+                         lus[1].exists?(lus[1].data().data||{}):{},
+                         lus[2].exists?(lus[2].data().data||{}):{});
+              _ecrire(tx);
+            });
+            enTransaction=true;
+          }catch(eTx){
+            // Une transaction exige le réseau : hors ligne, elle échoue. On
+            // retombe alors sur l'ancien chemin, qui met l'écriture en file
+            // dans le cache Firestore et partira au retour du réseau.
+            console.warn('Transaction impossible ('+(eTx&&eTx.code)+') — écriture en lot');
+          }
+          if(!enTransaction){
+            try{
+              const lus2=await Promise.all([cfgRef.get(),sRef.get(),eRef.get()]);
+              _fusionner(lus2[0].exists?(lus2[0].data()||{}):null,
+                         lus2[1].exists?(lus2[1].data().data||{}):{},
+                         lus2[2].exists?(lus2[2].data().data||{}):{});
+            }catch(eRead){
+              console.warn('Relecture avant écriture impossible :',eRead&&eRead.code);
+            }
+            const batch=db.batch();
+            _ecrire(batch);
+            await batch.commit();
+          }
+          if(sauves>0||repris>0){
+            console.warn('PROTECTION : '+sauves+' quart(s) et '+repris
+              +' chauffeur(s)/voiture(s) du cloud conservés à l\'écriture');
+            _recuperer();
+          }
           window._fbPending=false;
           window._fbLastOk=Date.now();
           localStorage.setItem('txpro_lastSave',new Date().toISOString());
@@ -1962,6 +2019,15 @@ const expandedDrv={};
 // ═══ UTILS ═══
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2);}
 function fm(n){return '$'+parseFloat(n||0).toFixed(2);}
+// L'argent à la québécoise : 1 234,56 $. Réservé aux documents qui
+// sortent de l'app (feuille de taxes, papiers du comptable) — les
+// écrans gardent fm() pour ne pas changer d'apparence en cours de route.
+function fmQc(n){
+  var x=parseFloat(n)||0, signe=x<0?'−':'';
+  var p=Math.abs(x).toFixed(2).split('.');
+  p[0]=p[0].replace(/\B(?=(\d{3})+(?!\d))/g,' ');   // espace fine aux milliers
+  return signe+p[0]+','+p[1]+' $';
+}
 function pf(v){return parseFloat(v)||0;}
 function pi(v){return parseInt(v)||0;}
 function gv(id){const e=document.getElementById(id);return e?e.value:'';}
@@ -2189,10 +2255,41 @@ function lSaveLocal(){
 }
 
 // Main save — Firebase + local backup simultaneously
+// Union de deux listes par identifiant. Sert aux chauffeurs et aux
+// véhicules, qui ne sont jamais supprimés mais désactivés : reprendre
+// ce que l'autre appareil connaît ne peut donc rien ressusciter.
+function _unionParId(mien,distant){
+  var out=(mien||[]).slice(), vus={};
+  out.forEach(function(x){if(x&&x.id)vus[x.id]=1;});
+  (distant||[]).forEach(function(x){if(x&&x.id&&!vus[x.id]){out.push(x);vus[x.id]=1;}});
+  return out;
+}
+// Empreinte de la config, sans son horodatage : sert à savoir si un
+// appel à lSave() correspond à un VRAI changement.
+function _cfgEmpreinte(o){
+  if(!o)return '';
+  try{var sans=Object.assign({},o); delete sans._cm; return JSON.stringify(sans);}
+  catch(e){return String(Date.now());}   // illisible : traité comme modifié
+}
 function lSave(){
-  // Horodater la config à chaque modification : permet au listener temps réel
-  // de distinguer une config distante PLUS ANCIENNE et de ne pas l'appliquer.
-  if(C)C._cm=Date.now();
+  // Horodater la config quand elle CHANGE : le listener temps réel s'en
+  // sert pour ne pas appliquer une config distante plus ancienne, et
+  // l'écriture (garde 4) pour ne pas écraser une config plus récente.
+  //
+  // POURQUOI « quand elle change » et pas « à chaque fois » : l'app
+  // sauvegarde aussi sans rien modifier (hydratation, rendus, battement
+  // de l'annuaire). En tamponnant Date.now() à chaque passage, un
+  // appareil qui n'avait rien changé se déclarait le plus frais et
+  // écrasait pour de bon le chauffeur qu'un autre venait d'ajouter —
+  // c'est pour ça qu'un nouveau nom « ne paraissait pas » chez les
+  // autres. Sans vraie modification, on garde l'horodatage reçu.
+  if(C){
+    var emp=_cfgEmpreinte(C);
+    if(emp!==window._cfgEmpreinteVue){
+      C._cm=Date.now();
+      window._cfgEmpreinteVue=emp;
+    }
+  }
   lSaveLocal();
   if(window._fb)window._fb.save(C,S,EX,AU);
 }
@@ -2233,7 +2330,7 @@ async function txpResync(raison){
     var d=await window._fb.load();
     if(d&&d.C){
       var localCm=pf(C&&C._cm), remoteCm=pf(d.C&&d.C._cm);
-      if(remoteCm>=localCm)C=applyDefaults(d.C);
+      if(remoteCm>=localCm){C=applyDefaults(d.C);window._cfgEmpreinteVue=_cfgEmpreinte(C);}
       // Ce qui est arrivé pendant que le téléphone dormait doit s'annoncer,
       // exactement comme si l'écoute temps réel l'avait reçu.
       var entrants=notifEntrants(S||{},d.S||{});
@@ -2341,7 +2438,7 @@ function doRestore(){
         if(!confirm('Fichier valide ✅\n\n'+shiftsCount+' quarts trouvés\nDate backup: '+(data.ts||'?')+'\n\nConfirmer la restauration ?'))return;
 
         // Appliquer les données
-        C=applyDefaults(data.cfg);
+        C=applyDefaults(data.cfg);window._cfgEmpreinteVue=_cfgEmpreinte(C);
         S=data.shifts||{};
         EX=data.expenses||{};
         AU=data.audit||[];
@@ -2396,7 +2493,7 @@ function showWeeklyBackups(){
   try{
     const d=JSON.parse(raw);
     if(!confirm('Restaurer ce backup ?\n'+Object.keys(d.S||{}).length+' quarts'))return;
-    C=applyDefaults(d.C);S=d.S||{};EX=d.EX||{};
+    C=applyDefaults(d.C);window._cfgEmpreinteVue=_cfgEmpreinte(C);S=d.S||{};EX=d.EX||{};
     window.TOMB={s:{},e:{},r:Date.now()};window.txpTombSave();
     lSaveLocal();
     localStorage.setItem(window.TXP_LSC,Object.keys(d.S||{}).length);
@@ -2496,7 +2593,7 @@ function startRealtimeSync(){
       if(localCm>remoteCm){
         _schedulePushBack(); // ma version est la bonne : la renvoyer au cloud
       }else{
-        C=applyDefaults(data);
+        C=applyDefaults(data);window._cfgEmpreinteVue=_cfgEmpreinte(C);
         lSaveLocal();
         // Rafraîchir l'écran ouvert si la config vient de changer
         var cur=document.querySelector('.pg.on');
@@ -2574,7 +2671,7 @@ function initApp(){
         // On n'applique la config distante que si elle n'est pas plus vieille
         // que la locale — sinon la modification serait perdue en silence.
         var _localCm=pf(C&&C._cm), _remoteCm=pf(fbData.C&&fbData.C._cm);
-        if(_remoteCm>=_localCm)C=applyDefaults(fbData.C);
+        if(_remoteCm>=_localCm){C=applyDefaults(fbData.C);window._cfgEmpreinteVue=_cfgEmpreinte(C);}
         else console.warn('Config locale plus récente : chargement cloud ignoré');
         // FUSION : union local + cloud — jamais de remplacement brut
         const remoteS=fbData.S||{}, remoteE=fbData.EX||{};
@@ -11285,6 +11382,7 @@ function taxeParams(){
     periode: t.periode||'trimestre',
     depTTC: t.depTTC!==false,                                   // dépenses saisies taxes incluses
     location: t.location!==false,                               // récupérer la taxe sur la location
+    neq: t.neq||'', noTps: t.noTps||'', noTvq: t.noTvq||'',     // pour pré-remplir la feuille
     remis: t.remis||{}
   };
 }
@@ -11394,6 +11492,17 @@ function taxesHTML(){
       +'<label style="display:flex;align-items:center;gap:9px;cursor:pointer;margin-top:6px;">'
       +'<input type="checkbox" '+(p.depTTC?'checked':'')+' onchange="saveTaxeParams({depTTC:this.checked})" style="width:17px;height:17px;flex-shrink:0;">'
       +'<span style="font-size:10px;color:var(--m2);">Mes dépenses sont saisies taxes incluses</span></label>';
+    // Saisis une fois, ils se reportent tout seuls sur chaque feuille
+    h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:9px;">'
+      +'<div style="font-size:10px;color:var(--m2);margin-bottom:7px;">Mes numéros, pour que la feuille sorte déjà remplie :</div>'
+      +[['neq','NEQ','1234567890'],['noTps','Numéro de TPS','123456789 RT0001'],['noTvq','Numéro de TVQ','1234567890 TQ0001']]
+        .map(function(f){
+          return '<div style="margin-bottom:6px;"><label style="font-size:9px;color:var(--m2);display:block;margin-bottom:2px;">'+f[1]+'</label>'
+            +'<input id="tx_'+f[0]+'" value="'+_cmpEsc(p[f[0]])+'" placeholder="'+f[2]+'" '
+            +'onchange="var o={};o[\''+f[0]+'\']=this.value.trim();saveTaxeParams(o);" '
+            +'style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:8px;padding:8px;font-size:12px;font-weight:700;"></div>';
+        }).join('')
+      +'</div>';
   }
   h+='</div>';
 
@@ -11417,12 +11526,204 @@ function taxesHTML(){
       +'<div style="display:flex;justify-content:space-between;"><span>− RTI (TVQ récupérée)</span><span style="color:var(--grn);font-weight:800;">−'+fm(x.rti)+'</span></div>'
       +(x.exonere>0.005?'<div style="display:flex;justify-content:space-between;"><span>Assurance (exonérée)</span><span style="color:var(--m2);">'+fm(x.exonere)+'</span></div>':'')
       +'</div>'
-      +'<button onclick="taxeToggleRemis(\''+x.key+'\')" style="width:100%;background:'+(x.remis?'rgba(255,255,255,.06)':'rgba(57,211,83,.16)')+';border:1px solid '+(x.remis?'var(--brd2)':'rgba(57,211,83,.4)')+';color:'+(x.remis?'var(--m2)':'var(--grn)')+';border-radius:9px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;margin-top:9px;">'
+      +'<div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap;">'
+      +'<button onclick="exporterFeuilleCredits(\''+x.key+'\')" style="flex:1;min-width:130px;background:rgba(88,166,255,.16);border:1px solid rgba(88,166,255,.45);color:var(--blu);border-radius:9px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;">'
+      +'📄 Feuille à remplir</button>'
+      +'<button onclick="taxeToggleRemis(\''+x.key+'\')" style="flex:1;min-width:130px;background:'+(x.remis?'rgba(255,255,255,.06)':'rgba(57,211,83,.16)')+';border:1px solid '+(x.remis?'var(--brd2)':'rgba(57,211,83,.4)')+';color:'+(x.remis?'var(--m2)':'var(--grn)')+';border-radius:9px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;">'
       +(x.remis?'↩️ Annuler « remis »':'✓ Marquer comme remis')+'</button>'
-      +'</div>';
+      +'</div></div>';
   });
   h+='<div style="font-size:9px;color:var(--m2);line-height:1.6;">ℹ️ Le taximètre facture taxes incluses : la TPS et la TVQ sont extraites du montant encaissé. L\'assurance est exonérée, aucune taxe n\'est récupérable dessus. Ces chiffres préparent ta déclaration — c\'est ton comptable qui la signe.</div>';
   return h+'</div>';
+}
+
+// ═══════════════════════════════════════════════
+// 📄 LA FEUILLE À REMPLIR — CASES DU FORMULAIRE FPZ-500
+// Les chiffres sont déjà dans l'app ; ce qui manquait, c'est la
+// feuille avec les numéros de cases du formulaire de Revenu Québec,
+// à recopier ou à donner au comptable. Rien n'est inventé ici : les
+// mêmes formules que taxesPeriodes(), pour que les deux écrans ne se
+// contredisent jamais.
+// ═══════════════════════════════════════════════
+// Arrondi au cent, moitié vers le haut. Sur une déclaration, les
+// lignes doivent s'additionner EXACTEMENT : on arrondit une fois, puis
+// on calcule les totaux sur les montants arrondis. Sans ça, 29,925
+// s'imprime 29,92 mais pèse 29,925 dans le total, et le comptable
+// trouve un cent qui ne tombe pas.
+function _cents(x){
+  var v=(parseFloat(x)||0)*100;
+  return Math.round(v+(v<0?-1e-6:1e-6))/100;
+}
+// Fin de la période et date limite de production
+function taxeEcheance(k,mode){
+  var fin;
+  if(/^\d{4}$/.test(k))fin=new Date(parseInt(k,10),11,31);
+  else if(/^\d{4}-T\d$/.test(k)){var q=k.split('-T');fin=new Date(parseInt(q[0],10),parseInt(q[1],10)*3,0);}
+  else {var m=k.split('-');fin=new Date(parseInt(m[0],10),parseInt(m[1],10),0);}
+  // un mois après la fin pour le mensuel et le trimestriel, trois pour l'annuel
+  var limite=new Date(fin.getFullYear(),fin.getMonth()+(mode==='annee'?4:2),0);
+  return {fin:fin,limite:limite};
+}
+function _dateLongue(d){
+  try{return d.toLocaleDateString('fr-CA',{day:'numeric',month:'long',year:'numeric'});}
+  catch(e){return d.toISOString().slice(0,10);}
+}
+// Le détail d'une période : d'où viennent les crédits, ligne par ligne
+function feuilleCreditsData(key){
+  var p=taxeParams();
+  var diviseur=100+p.tps+p.tvq;
+  var ttc=0,ess=0,quarts=0,cats={},exo={};
+  getArr().forEach(function(sh){
+    if(!sh.date||taxePeriodeKey(sh.date,p.periode)!==key)return;
+    ttc+=taxNetQuart(sh);
+    ess+=pf(sh.essence);                      // le carburant donne droit au crédit
+    quarts++;
+  });
+  getExpArr().forEach(function(e){
+    if(!e.date||taxePeriodeKey(e.date,p.periode)!==key)return;
+    var c=e.category||'Autre';
+    if(CAT_SANS_TAXE.indexOf(e.category)>=0)exo[c]=(exo[c]||0)+pf(e.amount);
+    else cats[c]=(cats[c]||0)+pf(e.amount);
+  });
+  var nbMois=taxeNbMois(key);
+  var loc=p.location?fixedCostsMo().carRental*nbMois:0;
+  var lignes=[];
+  if(ess>0.005)lignes.push({lbl:'Carburant relevé sur les quarts',v:ess});
+  Object.keys(cats).sort().forEach(function(c){lignes.push({lbl:c,v:cats[c]});});
+  if(loc>0.005)lignes.push({lbl:'Location des voitures ('+nbMois+' mois)',v:loc});
+  var achats=lignes.reduce(function(a,x){return a+x.v;},0);
+  var base=p.depTTC?(achats/diviseur*100):achats;
+  var ech=taxeEcheance(key,p.periode);
+  // chaque case de la feuille est arrondie au cent, et les nets sont
+  // calculés sur ces montants arrondis : ce qui est imprimé s'additionne
+  var tpsP=_cents(ttc*p.tps/diviseur), tvqP=_cents(ttc*p.tvq/diviseur);
+  var cti=_cents(base*p.tps/100), rti=_cents(base*p.tvq/100);
+  return {p:p,key:key,lbl:taxePeriodeLbl(key),quarts:quarts,
+    ttc:_cents(ttc),ht:_cents(ttc/diviseur*100),
+    tpsPercue:tpsP,tvqPercue:tvqP,
+    lignes:lignes.map(function(l){return {lbl:l.lbl,v:_cents(l.v)};}),
+    achats:_cents(achats),achatsHT:_cents(base),
+    cti:cti,rti:rti,
+    netTps:_cents(tpsP-cti),netTvq:_cents(tvqP-rti),
+    net:_cents(_cents(tpsP-cti)+_cents(tvqP-rti)),
+    exo:Object.keys(exo).sort().map(function(c){return {lbl:c,v:_cents(exo[c])};}),
+    exoTotal:_cents(Object.keys(exo).reduce(function(a,c){return a+exo[c];},0)),
+    fin:ech.fin,limite:ech.limite};
+}
+function exporterFeuilleCredits(key){
+  var d=feuilleCreditsData(key);
+  var fm=fmQc;   // sur cette feuille, l'argent s'écrit 1 234,56 $ : elle part à Revenu Québec
+  var esc=function(x){return String(x==null?'':x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+  var blanc='<span class="bl">&nbsp;</span>';
+  var ident=function(lbl,val){
+    return '<tr><td class="k">'+esc(lbl)+'</td><td>'+(val?'<b>'+esc(val)+'</b>':blanc)+'</td></tr>';
+  };
+  // une ligne du formulaire : numéro de case, libellé, montant ou blanc
+  var cas=function(no,lbl,val,gras,vide){
+    return '<tr'+(gras?' class="tot"':'')+'><td class="no">'+no+'</td><td>'+esc(lbl)+'</td>'
+      +'<td class="r">'+(vide?blanc:fm(val))+'</td></tr>';
+  };
+  var netTps=d.netTps, netTvq=d.netTvq;
+  var h='<!DOCTYPE html><html lang="fr"><head><meta charset="utf-8">'
+    +'<meta name="viewport" content="width=device-width,initial-scale=1">'
+    +'<title>Feuille TPS-TVQ '+esc(d.lbl)+' — '+esc(C.companyName||'TaxiPro')+'</title>'
+    +'<style>body{font-family:Arial,sans-serif;margin:0;padding:18px;color:#111;font-size:13px;}'
+    +'h1{font-size:19px;margin:0 0 3px;}h2{font-size:14px;margin:22px 0 7px;border-bottom:2px solid #e0c050;padding-bottom:3px;}'
+    +'.meta{font-size:12px;color:#555;margin-bottom:4px;}'
+    +'table{width:100%;border-collapse:collapse;margin:9px 0;font-size:12px;}'
+    +'th,td{border:1px solid #bbb;padding:6px 7px;text-align:left;vertical-align:middle;}'
+    +'th{background:#f0f0f0;font-size:11px;}td.r{text-align:right;white-space:nowrap;}'
+    +'td.no{width:46px;font-weight:bold;text-align:center;background:#f7f7f7;}'
+    +'td.k{width:46%;color:#555;}tr.tot td{font-weight:bold;background:#fffbe6;}'
+    +'.bl{display:inline-block;min-width:92px;border-bottom:1px solid #777;}'
+    +'.gros{font-size:17px;font-weight:900;}'
+    +'.note{font-size:11px;color:#555;line-height:1.6;margin:9px 0;}'
+    +'.sign{margin-top:22px;font-size:12px;}'
+    +'.sign div{margin-top:20px;border-top:1px solid #777;width:62%;padding-top:4px;color:#555;}'
+    +'@media print{.noprint{display:none!important;}}</style></head><body>'
+    +'<h1>🧾 Feuille à remplir — TPS et TVQ</h1>'
+    +'<div class="meta"><b>'+esc(d.lbl)+'</b> · '+d.quarts+' quart'+(d.quarts>1?'s':'')+' · formulaire FPZ-500</div>'
+    +'<div class="meta">'+esc(C.companyName||'TaxiPro')+' · préparé le '+_dateLongue(new Date())+'</div>';
+
+  h+='<h2>Identification</h2><table>'
+    +ident('Nom de l\'entreprise',C.companyName||((C.company||{}).name||''))
+    +ident('Numéro d\'entreprise (NEQ)',(d.p.neq||''))
+    +ident('Numéro de TPS',(d.p.noTps||''))
+    +ident('Numéro de TVQ',(d.p.noTvq||''))
+    +ident('Période visée',d.lbl)
+    +ident('Fin de la période',_dateLongue(d.fin))
+    +ident('À produire au plus tard le',_dateLongue(d.limite))
+    +'</table>';
+
+  h+='<h2>TPS / TVH — '+d.p.tps+' %</h2><table>'
+    +'<tr><th>Case</th><th>Ce qu\'il faut inscrire</th><th class="r">Montant</th></tr>'
+    +cas(101,'Ventes et autres recettes (hors taxes)',d.ht)
+    +cas(103,'TPS et TVH perçues ou percevables',d.tpsPercue)
+    +cas(104,'Redressements à ajouter (s\'il y en a)',0,false,true)
+    +cas(105,'Total de la TPS et des redressements (103 + 104)',d.tpsPercue,true)
+    +cas(106,'Crédits de taxe sur les intrants (CTI)',d.cti)
+    +cas(107,'Redressements à déduire (s\'il y en a)',0,false,true)
+    +cas(108,'Total des CTI et des redressements (106 + 107)',d.cti,true)
+    +cas(109,'Taxe nette (105 − 108)',netTps,true)
+    +'</table>';
+
+  h+='<h2>TVQ — '+d.p.tvq+' %</h2><table>'
+    +'<tr><th>Case</th><th>Ce qu\'il faut inscrire</th><th class="r">Montant</th></tr>'
+    +cas(201,'Ventes et autres recettes (hors taxes)',d.ht)
+    +cas(203,'TVQ perçue ou percevable',d.tvqPercue)
+    +cas(204,'Redressements à ajouter (s\'il y en a)',0,false,true)
+    +cas(205,'Total de la TVQ et des redressements (203 + 204)',d.tvqPercue,true)
+    +cas(206,'Remboursements de la taxe sur les intrants (RTI)',d.rti)
+    +cas(207,'Redressements à ajouter aux RTI (s\'il y en a)',0,false,true)
+    +cas(208,'Total des RTI et des redressements (206 + 207)',d.rti,true)
+    +cas(209,'Taxe nette (205 − 208)',netTvq,true)
+    +'</table>';
+
+  h+='<h2>Ce qu\'il reste à remettre</h2><table>'
+    +'<tr><td class="k">Taxe nette TPS (case 109)</td><td class="r">'+fm(netTps)+'</td></tr>'
+    +'<tr><td class="k">Taxe nette TVQ (case 209)</td><td class="r">'+fm(netTvq)+'</td></tr>'
+    +'<tr><td class="k">Acomptes déjà versés pour la période</td><td class="r">'+blanc+'</td></tr>'
+    +'<tr class="tot"><td>TOTAL À PAYER (ou à te faire rembourser)</td>'
+    +'<td class="r gros">'+fm(d.net)+'</td></tr>'
+    +'</table>'
+    +'<div class="note">Un montant négatif veut dire que tu as payé plus de taxes que tu n\'en as perçu : c\'est un remboursement à demander, pas un paiement à faire.</div>';
+
+  h+='<h2>D\'où viennent les crédits (cases 106 et 206)</h2><table>'
+    +'<tr><th>Achat taxable</th><th class="r">Taxes incluses</th></tr>';
+  if(!d.lignes.length)h+='<tr><td colspan="2">Aucun achat taxable saisi pour cette période.</td></tr>';
+  d.lignes.forEach(function(l){
+    h+='<tr><td>'+esc(l.lbl)+'</td><td class="r">'+fm(l.v)+'</td></tr>';
+  });
+  h+='<tr class="tot"><td>Total des achats'+(d.p.depTTC?' (taxes incluses)':' (hors taxes)')+'</td><td class="r">'+fm(d.achats)+'</td></tr>'
+    +'<tr><td>Même total, hors taxes</td><td class="r">'+fm(d.achatsHT)+'</td></tr>'
+    +'<tr><td>CTI à inscrire — '+d.p.tps+' % de '+fm(d.achatsHT)+'</td><td class="r">'+fm(d.cti)+'</td></tr>'
+    +'<tr><td>RTI à inscrire — '+d.p.tvq+' % de '+fm(d.achatsHT)+'</td><td class="r">'+fm(d.rti)+'</td></tr>'
+    +'</table>';
+  if(d.exoTotal>0.005){
+    h+='<div class="note"><b>Exonéré, aucun crédit là-dessus :</b> '
+      +d.exo.map(function(x){return esc(x.lbl)+' '+fm(x.v);}).join(' · ')
+      +' — total '+fm(d.exoTotal)+'. L\'assurance ne porte pas de taxe, il n\'y a donc rien à récupérer.</div>';
+  }
+
+  h+='<div class="note">Les montants sont au cent près. Si le formulaire demande des dollars entiers, arrondis en les recopiant. '
+    +'Le taximètre facture taxes incluses : la TPS et la TVQ ont été extraites du montant encaissé, elles n\'ont jamais été un revenu.</div>'
+    +'<div class="sign">Préparé par TaxiPro à partir des quarts et des dépenses saisies. '
+    +'Les chiffres doivent être vérifiés et la déclaration signée par le comptable.'
+    +'<div>Signature du comptable et date</div></div>'
+    +'<div class="noprint" style="margin-top:22px;"><button onclick="window.print()" style="padding:11px 16px;font-size:14px;font-weight:bold;">🖨️ Imprimer ou enregistrer en PDF</button></div>'
+    +'</body></html>';
+
+  var blob=new Blob([h],{type:'text/html;charset=utf-8'});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download='feuille_tps_tvq_'+key+'.html';
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  setTimeout(function(){URL.revokeObjectURL(url);},4000);
+  audit('FEUILLE_TAXES',d.lbl+' · à remettre '+fm(d.net));
+  alert('✅ Feuille créée pour '+d.lbl+'.\n\n'
+    +'À remettre : '+fm(d.net)+'\n'
+    +'À produire au plus tard le '+_dateLongue(d.limite)+'\n\n'
+    +'Ouvre le fichier, puis « Imprimer → Enregistrer en PDF » pour ton comptable.');
 }
 
 // ═══════════════════════════════════════════════
@@ -12990,7 +13291,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-09-28-v115-QUART-NE-DISPARAIT-PLUS';
+var APP_VERSION = '2026-10-06-v116-FEUILLE-CREDITS-ET-ECRITURE-TRANSACTIONNELLE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
