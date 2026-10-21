@@ -17,6 +17,12 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 2. **Surplus visible par le propriétaire seulement** : les chauffeurs ne voient jamais les données financières globales ni le surplus.
 3. **Séparation des permissions chauffeur / propriétaire** : rôles distincts, le chauffeur ne voit que ses propres courses et sa paie.
 4. **Mots de passe** : hachés en SHA-256, jamais en clair.
+5. **Un quart ne doit JAMAIS valoir zéro parce que le nom a changé (v117)** : `calcSalary` et `partPatronQuart` rendaient 0 dès que `getDrv(s.driver)` ne trouvait personne — nom corrigé, chauffeur retiré, orthographe différente. Le salaire du chauffeur ET la part du patron disparaissaient en silence alors que l'argent avait été gagné et versé. `pctQuart(s)` prend le taux de l'équipe si le chauffeur existe, sinon le `drvPct` **enregistré sur le quart** (écrit à la saisie pour ça). Ne jamais revenir à un retour 0 silencieux.
+
+### Les paies versées (`C.payes`)
+- Clé : `"AAAA-MM-JJ|Nom du chauffeur"`, où la date est le **lundi** de la semaine, en heure LOCALE (`_wkKeyDe`). Ne pas fabriquer cette clé avec `toISOString()` : au Québec les deux coïncident, mais pas dans un fuseau à l'est de Greenwich — ce qui compte pour la revente du produit.
+- La clé contient le NOM : renommer un chauffeur doit passer par `renommerChauffeur()`, qui déplace aussi les clés `C.payes` (et les suffixes `_deductCash` / `_essCash`).
+- Cocher une semaine « payée » crée de **vraies sorties de trésorerie** (`payeKey` sur la transaction). Un rattrapage en masse ne doit donc JAMAIS rejouer ces paiements : `payerToutJusqua()` ne fait que solder le passif (`horsApp:true`), sans toucher à la trésorerie, et consigne un lot annulable dans `C.payeLots`.
 
 ## Mécanismes de synchronisation (fragiles — manipuler avec précaution)
 - **Tombstones** : les suppressions sont marquées (tombstones) et non effacées, pour éviter qu'un appareil hors ligne ressuscite des données supprimées.

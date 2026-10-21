@@ -2147,22 +2147,34 @@ function basePaieQuart(s){
 function partPatronQuart(s){
   var net=taxNetQuart(s);
   if(isOwnerShift(s))return net;
+  var pct=pctQuart(s);
+  if(pct<=0)return 0;
+  return parseFloat((net-basePaieQuart(s)*(pct/100)).toFixed(2));
+}
+// Le pourcentage qui s'applique à ce quart.
+// Si le nom inscrit sur le quart ne correspond plus à personne dans
+// l'équipe — nom corrigé, chauffeur retiré, orthographe différente — on
+// prend le taux ENREGISTRÉ SUR LE QUART : il y est écrit au moment de la
+// saisie précisément pour ça. Auparavant on rendait 0, ce qui faisait
+// disparaître en silence le salaire du chauffeur ET la part du patron :
+// l'argent avait bel et bien été gagné et versé.
+function pctQuart(s){
   var d=getDrv(s&&s.driver);
-  if(!d)return 0;
-  return parseFloat((net-basePaieQuart(s)*(pf(d.pct)/100)).toFixed(2));
+  if(d)return pf(d.pct);
+  return pf(s&&s.drvPct);
 }
 function calcSalary(s){
   // Salaire = argent PAYÉ à un chauffeur employé.
   // Quand le patron conduit : aucun salaire versé (il ne se paie pas un salaire de chauffeur).
   if(isOwnerShift(s))return 0;
-  const drv=getDrv(s.driver);
-  if(!drv)return 0;
+  const pct=pctQuart(s);
+  if(pct<=0)return 0;
   const base=basePaieQuart(s);
   // L'essence avancée par le chauffeur N'EST PAS un salaire : c'est une
   // avance qu'on lui rembourse à part. La mêler à la paie faussait le
   // salaire affiché ET la faisait déduire deux fois du profit mensuel,
   // une fois dans les salaires et une fois dans le poste carburant.
-  return parseFloat((base*(drv.pct/100)+pf(s.pourboire)).toFixed(2));
+  return parseFloat((base*(pct/100)+pf(s.pourboire)).toFixed(2));
 }
 // Essence sortie de la poche du chauffeur, à lui rembourser
 function essenceAvancee(s){
@@ -6217,9 +6229,257 @@ function auditEssenceHTML(){
   return h+'</div>';
 }
 
+// ═══════════════════════════════════════════════
+// 🔎 POURQUOI CES SEMAINES SONT-ELLES ENCORE DUES ?
+//
+// Le bilan additionne toutes les semaines qui n'ont jamais été cochées
+// « payée ». Trois raisons possibles, et elles ne se soignent pas de la
+// même façon :
+//   1. la semaine a été versée AVANT que l'app ne suive les paies —
+//      il n'y a rien à sortir de la trésorerie, juste à solder ;
+//   2. elle a été cochée sous une autre orthographe du nom du chauffeur
+//      (« Dialo sarifo » et « Dialo Sarifo » font deux dossiers) ;
+//   3. elle n'est réellement pas payée.
+// Cette carte dit laquelle, au lieu de laisser deviner.
+// ═══════════════════════════════════════════════
+function _normNom(n){
+  return String(n||'').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // sans accents
+    .replace(/\s+/g,' ').trim();
+}
+// La clé de semaine, en heure LOCALE — la même partout dans l'app
+function _wkKeyDe(dateStr){
+  var ws=gwS(parseLocalDate(dateStr));
+  return ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
+}
+function diagnosticPayes(){
+  var dus=salairesDus();
+  var existe={},noms={};
+  getArr().forEach(function(s){
+    if(!s.date||isOwnerShift(s))return;
+    existe[_wkKeyDe(s.date)+'|'+s.driver]=true;
+    var nn=_normNom(s.driver);
+    if(!noms[nn])noms[nn]={};
+    noms[nn][s.driver]=(noms[nn][s.driver]||0)+1;
+  });
+  // Les marques de paiement : combien, et lesquelles ne correspondent
+  // à aucune semaine réelle (donc rangées sous un nom qui a changé).
+  var marques=0,orphelines=[];
+  Object.keys(C.payes||{}).forEach(function(k){
+    if(/_deductCash$|_essCash$/.test(k))return;
+    var v=C.payes[k];
+    if(!v||!v.paid)return;
+    marques++;
+    if(!existe[k]){
+      var i=k.indexOf('|');
+      if(i<0)return;
+      orphelines.push({cle:k,wk:k.slice(0,i),drv:k.slice(i+1),net:pf(v.net),ts:v.ts||''});
+    }
+  });
+  // Noms qui ne diffèrent que par la casse, les accents ou les espaces
+  var variantes=Object.keys(noms).filter(function(nn){return Object.keys(noms[nn]).length>1;})
+    .map(function(nn){
+      return Object.keys(noms[nn]).map(function(raw){return {nom:raw,quarts:noms[nn][raw]};})
+        .sort(function(a,b){return b.quarts-a.quarts;});
+    });
+  // Une marque orpheline vise-t-elle une autre orthographe du même nom ?
+  var clesReelles=Object.keys(existe);
+  orphelines.forEach(function(o){
+    o.variante=null;
+    for(var i=0;i<clesReelles.length;i++){
+      var p=clesReelles[i].indexOf('|');
+      if(clesReelles[i].slice(0,p)===o.wk
+        &&_normNom(clesReelles[i].slice(p+1))===_normNom(o.drv)){
+        o.variante=clesReelles[i].slice(p+1);break;
+      }
+    }
+  });
+  // Noms portés par des quarts mais absents de l'équipe : leur taux vient
+  // désormais du quart lui-même, mais le patron doit savoir qu'ils existent.
+  var equipe={};(C.drivers||[]).forEach(function(d){equipe[d.name]=true;});
+  var inconnus=Object.keys(noms).reduce(function(acc,nn){
+    Object.keys(noms[nn]).forEach(function(raw){
+      if(!equipe[raw])acc.push({nom:raw,quarts:noms[nn][raw]});
+    });
+    return acc;
+  },[]).sort(function(a,b){return b.quarts-a.quarts;});
+  var sems=dus.detail.map(function(d){return d.wk;}).sort();
+  return {total:dus.total,n:dus.detail.length,detail:dus.detail,
+    plusVieille:sems[0]||'',plusRecente:sems[sems.length-1]||'',
+    marques:marques,orphelines:orphelines,variantes:variantes,
+    inconnus:inconnus,lots:(C.payeLots||[])};
+}
+// Solder d'un coup les semaines déjà versées hors de l'application.
+// AUCUNE sortie de trésorerie n'est créée : cet argent est parti il y a
+// longtemps, du vrai portefeuille, sans passer par l'app. Rejouer 40
+// paiements fausserait les comptes au lieu de les redresser.
+function payerToutJusqua(){
+  var lim=gv('payeRattrapLim');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(lim)){alert('Choisis d\'abord une date.');return;}
+  var cibles=salairesDus().detail.filter(function(d){return d.wk<=lim;});
+  if(!cibles.length){alert('Aucune semaine due jusqu\'au '+lim+'.');return;}
+  var tot=cibles.reduce(function(a,d){return a+d.net;},0);
+  var apercu=cibles.slice(0,6).map(function(d){return '• '+d.drv+' — sem. '+d.wk+' : '+fm(d.net);}).join('\n');
+  if(cibles.length>6)apercu+='\n• … et '+(cibles.length-6)+' autre(s)';
+  if(!confirm('Solder '+cibles.length+' semaine(s) jusqu\'au '+lim+' ?\n\n'
+    +apercu+'\n\nTOTAL RETIRÉ DU PASSIF : '+fm(tot)+'\n\n'
+    +'⚠️ À n\'utiliser que pour des payes DÉJÀ VERSÉES hors de l\'app.\n'
+    +'Aucune sortie de trésorerie ne sera créée : cet argent est déjà parti.\n'
+    +'Pour une paye que tu verses MAINTENANT, utilise plutôt le bouton de sa semaine.\n\n'
+    +'Annulable juste après.'))return;
+  var lot=uid(), now=new Date().toISOString();
+  if(!C.payes)C.payes={};
+  cibles.forEach(function(d){
+    C.payes[d.wk+'|'+d.drv]={paid:true,ts:now,by:U.name,
+      net:parseFloat(d.net.toFixed(2)),horsApp:true,lot:lot};
+  });
+  if(!C.payeLots)C.payeLots=[];
+  C.payeLots.unshift({id:lot,ts:now,lim:lim,n:cibles.length,
+    total:parseFloat(tot.toFixed(2)),by:U.name});
+  C.payeLots=C.payeLots.slice(0,10);
+  audit('PAYE_RETRO',cibles.length+' semaines soldées jusqu\'au '+lim+' ('+fm(tot)+')');
+  lSave();
+  renderPaye();
+  alert('✅ '+cibles.length+' semaine(s) soldée(s).\n\n'
+    +fm(tot)+' retirés du passif.\n\nTa trésorerie n\'a pas bougé : cet argent était déjà sorti.');
+}
+function annulerLotPaye(lotId){
+  var lot=(C.payeLots||[]).find(function(l){return l.id===lotId;});
+  if(!lot)return;
+  if(!confirm('↩️ Annuler ce rattrapage ?\n\n'+lot.n+' semaine(s) redeviendront dues ('+fm(lot.total)+').'))return;
+  var n=0;
+  Object.keys(C.payes||{}).forEach(function(k){
+    if(C.payes[k]&&C.payes[k].lot===lotId){delete C.payes[k];n++;}
+  });
+  C.payeLots=(C.payeLots||[]).filter(function(l){return l.id!==lotId;});
+  audit('PAYE_RETRO_ANNUL',n+' semaines remises en dû');
+  lSave();renderPaye();
+  alert('↩️ '+n+' semaine(s) remises au passif.');
+}
+// Rattacher une marque de paiement rangée sous une autre orthographe
+function rattacherPayeOrpheline(cle,nomCible){
+  if(!C.payes||!C.payes[cle])return;
+  var i=cle.indexOf('|');
+  var nk=cle.slice(0,i)+'|'+nomCible;
+  if(C.payes[nk]&&C.payes[nk].paid){alert('Cette semaine est déjà marquée payée.');return;}
+  if(!confirm('Rattacher ce paiement à « '+nomCible+' » ?\n\n'
+    +'Semaine du '+cle.slice(0,i)+'\nClassé sous : '+cle.slice(i+1)+'\n→ Devient : '+nomCible))return;
+  C.payes[nk]=C.payes[cle];
+  delete C.payes[cle];
+  audit('PAYE_RATTACHEE',cle+' → '+nk);
+  lSave();renderPaye();
+}
+function payesDiagHTML(){
+  var d=diagnosticPayes();
+  if(!d.n&&!d.orphelines.length&&!d.variantes.length&&!d.lots.length)return '';
+  var ouvert=!!window._payeDiagOpen;
+  var h='<div class="card" style="border-color:'+(d.n?'rgba(255,58,58,.35)':'var(--brd)')+';">'
+    +'<div class="ctit" onclick="window._payeDiagOpen=!window._payeDiagOpen;renderPaye();" style="cursor:pointer;">'
+    +'<span><span class="ci">🔎</span>Pourquoi ces semaines sont dues</span>'
+    +'<span style="font-size:12px;font-weight:900;color:'+(d.n?'var(--red)':'var(--grn)')+';">'
+    +(d.n?fm(d.total):'à jour')+' '+(ouvert?'▾':'▸')+'</span></div>';
+  if(!ouvert)return h+'</div>';
+  if(d.n){
+    h+='<div style="font-size:11px;color:var(--m2);line-height:1.7;margin-bottom:10px;">'
+      +'<b style="color:var(--m3);">'+d.n+' semaine'+(d.n>1?'s':'')+'</b> jamais cochée'+(d.n>1?'s':'')+' « payée »'
+      +(d.plusVieille?', de la semaine du <b style="color:var(--m3);">'+_cmpEsc(d.plusVieille)+'</b> à celle du <b style="color:var(--m3);">'+_cmpEsc(d.plusRecente)+'</b>':'')
+      +'. Le bilan les compte comme un passif — c\'est tout ce qu\'il sait.</div>';
+  }else{
+    h+='<div style="font-size:11px;color:var(--grn);line-height:1.6;margin-bottom:10px;">✅ Aucune semaine en attente.</div>';
+  }
+  h+='<div style="font-size:10px;color:var(--m2);line-height:1.7;margin-bottom:11px;">'
+    +'Paiements enregistrés dans l\'app : <b style="color:var(--m3);">'+d.marques+'</b></div>';
+
+  // 1) Noms écrits de deux façons
+  if(d.variantes.length){
+    h+='<div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.35);border-radius:11px;padding:11px;margin-bottom:10px;">'
+      +'<div style="font-size:11px;font-weight:900;color:var(--neon);margin-bottom:6px;">⚠️ Un même chauffeur écrit de deux façons</div>'
+      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:8px;">Chaque orthographe fait un dossier séparé : une semaine payée sous l\'une reste due sous l\'autre.</div>';
+    d.variantes.forEach(function(g){
+      var cible=g[0].nom;
+      h+='<div style="border-top:1px solid var(--brd);padding-top:7px;margin-top:7px;">';
+      g.forEach(function(v,i){
+        h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;padding:3px 0;">'
+          +'<span style="color:var(--m3);font-weight:'+(i===0?'900':'700')+';">'+_cmpEsc(v.nom)+'</span>'
+          +'<span style="color:var(--m2);font-size:10px;">'+v.quarts+' quart'+(v.quarts>1?'s':'')+'</span></div>';
+        if(i>0){
+          h+='<button onclick="if(confirm(\'Renommer &quot;'+_cmpEsc(v.nom)+'&quot; en &quot;'+_cmpEsc(cible)+'&quot; ?\\n\\nLes quarts ET les paies suivront.\')){var r=renommerChauffeur(\''+_cmpEsc(v.nom)+'\',\''+_cmpEsc(cible)+'\',false);lSave();renderPaye();alert(\'✅ \'+r.quarts+\' quart(s) et \'+r.paies+\' paie(s) regroupés sous &quot;'+_cmpEsc(cible)+'&quot;.\');}" '
+            +'style="width:100%;background:rgba(255,107,0,.16);border:1px solid rgba(255,107,0,.4);color:var(--neon);border-radius:9px;padding:7px;font-size:10px;font-weight:800;cursor:pointer;margin:4px 0 2px;">'
+            +'🔗 Regrouper sous « '+_cmpEsc(cible)+' »</button>';
+        }
+      });
+      h+='</div>';
+    });
+    h+='</div>';
+  }
+
+  // 2) Paiements rangés sous un nom qui n'existe plus
+  if(d.orphelines.length){
+    h+='<div style="background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.35);border-radius:11px;padding:11px;margin-bottom:10px;">'
+      +'<div style="font-size:11px;font-weight:900;color:var(--blu);margin-bottom:6px;">🔗 '+d.orphelines.length+' paiement'+(d.orphelines.length>1?'s':'')+' classé'+(d.orphelines.length>1?'s':'')+' sous un nom sans quart</div>'
+      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:8px;">Tu as bien payé, mais la semaine est rangée sous un nom qui ne correspond à aucun quart. Elle reste donc due.</div>';
+    d.orphelines.slice(0,12).forEach(function(o){
+      h+='<div style="border-top:1px solid var(--brd);padding-top:7px;margin-top:7px;font-size:11px;">'
+        +'<div style="color:var(--m3);font-weight:800;">'+_cmpEsc(o.drv)+' — sem. '+_cmpEsc(o.wk)+(o.net?' · '+fm(o.net):'')+'</div>';
+      if(o.variante){
+        h+='<button onclick="rattacherPayeOrpheline(\''+_cmpEsc(o.cle).replace(/'/g,"\\'")+'\',\''+_cmpEsc(o.variante)+'\')" '
+          +'style="width:100%;background:rgba(88,166,255,.16);border:1px solid rgba(88,166,255,.4);color:var(--blu);border-radius:9px;padding:7px;font-size:10px;font-weight:800;cursor:pointer;margin-top:5px;">'
+          +'🔗 Rattacher à « '+_cmpEsc(o.variante)+' »</button>';
+      }else{
+        h+='<div style="font-size:10px;color:var(--m2);margin-top:3px;">Aucun quart de cette semaine ne porte un nom approchant — ce paiement vise sans doute un chauffeur parti.</div>';
+      }
+      h+='</div>';
+    });
+    if(d.orphelines.length>12)h+='<div style="font-size:10px;color:var(--m2);margin-top:7px;">… et '+(d.orphelines.length-12)+' autre(s).</div>';
+    h+='</div>';
+  }
+
+  // 2 bis) Quarts dont le nom n'est plus dans l'équipe
+  if(d.inconnus.length){
+    h+='<div style="background:rgba(255,58,58,.07);border:1px solid rgba(255,58,58,.3);border-radius:11px;padding:11px;margin-bottom:10px;">'
+      +'<div style="font-size:11px;font-weight:900;color:var(--red);margin-bottom:6px;">👤 Des quarts portent un nom absent de l\'équipe</div>'
+      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:7px;">'
+      +'Leur paie est calculée avec le pourcentage inscrit sur le quart. Ajoute le chauffeur ou corrige le nom dans Réglages → « 🔍 Vérifier les quarts ».</div>';
+    d.inconnus.slice(0,8).forEach(function(x){
+      h+='<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;border-top:1px solid var(--brd);padding:5px 0;">'
+        +'<span style="color:var(--m3);font-weight:700;">'+_cmpEsc(x.nom)+'</span>'
+        +'<span style="color:var(--m2);font-size:10px;">'+x.quarts+' quart'+(x.quarts>1?'s':'')+'</span></div>';
+    });
+    h+='</div>';
+  }
+
+  // 3) Solder l'historique
+  if(d.n){
+    var parDefaut=d.plusRecente;
+    h+='<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:11px;padding:11px;margin-bottom:10px;">'
+      +'<div style="font-size:11px;font-weight:900;color:var(--m3);margin-bottom:6px;">🧹 Solder les semaines déjà versées</div>'
+      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:8px;">'
+      +'Si tu as payé ces semaines avant d\'utiliser l\'app, elles n\'ont jamais été cochées ici. '
+      +'Choisis jusqu\'où remonter : elles sortiront du passif, et <b>ta trésorerie ne bougera pas</b> — cet argent est déjà parti.</div>'
+      +'<label style="font-size:10px;color:var(--m2);display:block;margin-bottom:3px;">Tout solder jusqu\'au (inclus)</label>'
+      +'<input type="date" id="payeRattrapLim" value="'+_cmpEsc(parDefaut)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:9px;padding:9px;font-size:12px;font-weight:700;margin-bottom:8px;">'
+      +'<button onclick="payerToutJusqua()" style="width:100%;background:rgba(57,211,83,.16);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:9px;padding:10px;font-size:11px;font-weight:800;cursor:pointer;">'
+      +'✅ Marquer payées — déjà versées hors app</button>'
+      +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">Pour une paye que tu verses <b>maintenant</b>, utilise le bouton de sa semaine plus bas : lui sort l\'argent de la trésorerie.</div>'
+      +'</div>';
+  }
+
+  // 4) Annuler un rattrapage
+  if(d.lots.length){
+    h+='<div style="font-size:10px;color:var(--m2);line-height:1.7;">Rattrapages faits :';
+    d.lots.forEach(function(l){
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--brd);padding:6px 0;">'
+        +'<span>'+l.n+' sem. jusqu\'au '+_cmpEsc(l.lim)+' · '+fm(l.total)+'</span>'
+        +'<button onclick="annulerLotPaye(\''+l.id+'\')" style="flex-shrink:0;background:rgba(255,58,58,.14);border:1px solid rgba(255,58,58,.35);color:var(--red);border-radius:8px;padding:5px 9px;font-size:10px;font-weight:800;cursor:pointer;">↩️ Annuler</button></div>';
+    });
+    h+='</div>';
+  }
+  return h+'</div>';
+}
+
 function renderPaye(){
   const c=document.getElementById('payeContent');
-  var _audEss=auditEssenceHTML();
+  var _audEss=payesDiagHTML()+auditEssenceHTML();
   if(!C.payes)C.payes={};
   const allArr=getArr();
   if(!allArr.length){c.innerHTML='<div class="empty"><div class="ei">💵</div>Aucun quart enregistré.</div>';return;}
@@ -12333,6 +12593,19 @@ function bilanHTML(){
     +'<span style="font-size:24px;font-weight:900;color:'+(nette>=0?'var(--gold)':'var(--red)')+';">'+fm(nette)+'</span></div>';
   h+='<button onclick="C.treso._voirBilan=!C.treso._voirBilan;renderTreso();" style="width:100%;margin-top:8px;background:none;border:none;color:var(--m2);font-size:10px;font-weight:700;cursor:pointer;padding:6px;text-align:left;">'
     +(C.treso._voirBilan?'▾ Masquer le détail':'▸ Voir le détail ligne par ligne')+'</button>';
+  // Le passif le plus souvent mal compris : des semaines réellement
+  // versées, mais jamais cochées « payée » dans l'app.
+  try{
+    var _sd=salairesDus();
+    if(_sd.total>0.005){
+      h+='<div style="background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.3);border-radius:10px;padding:10px;margin-bottom:9px;">'
+        +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:7px;">'
+        +'💼 Les <b style="color:var(--m3);">'+fm(_sd.total)+'</b> de salaires comptés ici sont les semaines <b>jamais cochées « payée »</b> dans l\'app — '
+        +_sd.detail.length+' au total. Si tu les as déjà versées, elles se soldent d\'un coup.</div>'
+        +'<button onclick="window._payeDiagOpen=true;goPage(\'paye\');" style="width:100%;background:rgba(88,166,255,.16);border:1px solid rgba(88,166,255,.42);color:var(--blu);border-radius:9px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;">'
+        +'🔎 Voir pourquoi, et solder</button></div>';
+    }
+  }catch(e){}
   h+='<div style="font-size:9px;color:var(--m2);line-height:1.5;border-top:1px solid var(--brd);padding-top:7px;">ℹ️ Les valeurs des biens sont celles que tu saisis (aucun amortissement automatique). Pour un bilan comptable officiel, réfère-toi à ton comptable.</div>';
   return h+'</div>';
 }
@@ -13291,7 +13564,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-06-v116-FEUILLE-CREDITS-ET-ECRITURE-TRANSACTIONNELLE';
+var APP_VERSION = '2026-10-21-v117-POURQUOI-CES-SEMAINES-SONT-DUES';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
