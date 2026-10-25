@@ -2065,7 +2065,18 @@ function fmQc(n){
 function pf(v){return parseFloat(v)||0;}
 function pi(v){return parseInt(v)||0;}
 function gv(id){const e=document.getElementById(id);return e?e.value:'';}
-function today(){return new Date().toISOString().split('T')[0];}
+// La date en heure LOCALE. toISOString() rend l'heure UTC : au Québec,
+// à partir de 20 h (19 h l'hiver), elle renvoie DEMAIN. Conséquences
+// mesurées : la vue « Jour » comparait les quarts d'aujourd'hui à la
+// date de demain et n'affichait plus RIEN à partir de 20 h — soit
+// exactement quand les chauffeurs de soir rentrent leur quart — et le
+// formulaire se pré-remplissait à la date du lendemain.
+// TOUTE date au format AAAA-MM-JJ doit passer par ici.
+function ymdLocal(d){
+  var x=(d===undefined||d===null)?new Date():new Date(d);
+  return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+}
+function today(){return ymdLocal();}
 function getDrv(name){return C.drivers.find(d=>d.name===name);}
 function getArr(){return Object.values(S).sort((a,b)=>new Date(b.date+' '+(b.time||'00:00'))-new Date(a.date+' '+(a.time||'00:00')));}
 function getExpArr(){return Object.values(EX).sort((a,b)=>new Date(b.date)-new Date(a.date));}
@@ -2074,7 +2085,7 @@ function getExpArr(){return Object.values(EX).sort((a,b)=>new Date(b.date)-new D
 function gwS(d){const dt=new Date(d);const day=dt.getDay();dt.setDate(dt.getDate()-day+(day===0?-6:1));dt.setHours(0,0,0,0);return dt;}
 // Parse YYYY-MM-DD as LOCAL date (avoid UTC timezone offset bug)
 function parseLocalDate(ds){const[y,m,d]=ds.split('-').map(Number);return new Date(y,m-1,d);}
-function inDay(ds,ref){return ds===ref.toISOString().split('T')[0];}
+function inDay(ds,ref){return ds===ymdLocal(ref);}
 function inWk(ds,ref){const d=parseLocalDate(ds),ws=gwS(ref),we=new Date(ws);we.setDate(we.getDate()+7);return d>=ws&&d<we;}
 function inMo(ds,ref){const d=parseLocalDate(ds),r=new Date(ref);return d.getMonth()===r.getMonth()&&d.getFullYear()===r.getFullYear();}
 function inYr(ds,ref){return parseLocalDate(ds).getFullYear()===new Date(ref).getFullYear();}
@@ -2476,7 +2487,7 @@ function doBackup(){
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  const dt=new Date().toISOString().slice(0,10);
+  const dt=ymdLocal();
   a.href=url;a.download='taxipro_backup_'+dt+'.json';
   document.body.appendChild(a);a.click();
   document.body.removeChild(a);URL.revokeObjectURL(url);
@@ -4336,7 +4347,7 @@ function _groupByWeek(shifts){
   var byWk={};
   shifts.forEach(function(s){
     var ws=gwS(parseLocalDate(s.date));
-    var wk=ws.toISOString().slice(0,10);
+    var wk=ymdLocal(ws);
     if(!byWk[wk]){
       var we=new Date(ws);we.setDate(we.getDate()+6);
       byWk[wk]={
@@ -4362,7 +4373,7 @@ function _groupByWeek(shifts){
 function _wkBlock(wk, expandKey, isOwner, drvName){
   var isOpen=_histWkExpanded[expandKey]||false;
   // Est-ce la semaine courante ?
-  var nowWk=gwS(new Date()).toISOString().slice(0,10);
+  var nowWk=ymdLocal(gwS(new Date()));
   var isCurrent=wk.key===nowWk;
   var hasEcart=wk.ecarts>0;
   var borderCol=hasEcart?'rgba(255,58,58,.4)':isCurrent?'rgba(245,200,0,.4)':'rgba(255,255,255,.08)';
@@ -4868,7 +4879,7 @@ function renderAnalyse(){
         ecShifts.forEach(s=>{
           const d=parseLocalDate(s.date);
           const ws=gwS(d);
-          const wkey=ws.toISOString().slice(0,10);
+          const wkey=ymdLocal(ws);
           if(!byWk[wkey]){const we=new Date(ws);we.setDate(we.getDate()+6);
             byWk[wkey]={label:ws.toLocaleDateString('fr-CA',{month:'short',day:'numeric'})+' – '+we.toLocaleDateString('fr-CA',{month:'short',day:'numeric'}),moins:0,moinsAmt:0,plus:0,plusAmt:0};}
           const ec=calcEcart(s);
@@ -6130,7 +6141,7 @@ function payeWeekCalc(wkKey,drvName){
   getArr().forEach(function(s){
     if(s.isOwner||s.driver!==drvName)return;
     var ws=gwS(parseLocalDate(s.date));
-    if(ws.toISOString().slice(0,10)!==wkKey)return;
+    if(ymdLocal(ws)!==wkKey)return;
     sal+=calcSalary(s);
     tax+=basePaieQuart(s);
     brut+=pf(s.taxf)-pf(s.taxd);
@@ -6600,7 +6611,7 @@ function renderPaye(){
     if(s.isOwner)return;
     const d=parseLocalDate(s.date);
     const ws=gwS(d);
-    const wkey=ws.toISOString().slice(0,10);
+    const wkey=ymdLocal(ws);
     if(!byWk[wkey]){
       const we=new Date(ws);we.setDate(we.getDate()+6);
       byWk[wkey]={
@@ -6630,7 +6641,7 @@ function renderPaye(){
   // Toutes les semaines — incluant la semaine en cours
   const today=new Date();today.setHours(0,0,0,0);
   const curWkStart=gwS(today);curWkStart.setHours(0,0,0,0);
-  const curWkKey=curWkStart.toISOString().slice(0,10);
+  const curWkKey=ymdLocal(curWkStart);
 
   const wksSorted=Object.entries(byWk).sort((a,b)=>b[0].localeCompare(a[0]));
   let html='';
@@ -7449,6 +7460,70 @@ function restaurerTousQuartsPerdus(){
   alert('✅ '+l.length+' quart(s) remis.\n\nIls repartent vers le cloud et les autres appareils.');
   renderVerifQuarts();
 }
+// ── QUARTS DATÉS DU LENDEMAIN ──
+// Jusqu'à la v119, le formulaire se pré-remplissait avec today(), qui
+// passait par toISOString() : à partir de 20 h au Québec, il proposait
+// DEMAIN. Un quart de soir saisi à 21 h était donc enregistré au
+// lendemain, sauf si le chauffeur corrigeait la date à la main.
+// La signature est nette : le quart porte une date POSTÉRIEURE au
+// moment où il a été créé, et il a été créé en soirée. On ne touche
+// jamais à un quart saisi le matin pour le lendemain — ce serait une
+// saisie d'avance, volontaire.
+function quartsDateDecalee(){
+  var out=[];
+  Object.keys(S).forEach(function(k){
+    var s=S[k];
+    if(!s||!s.date||!s.ts)return;
+    var t=new Date(s.ts);
+    if(isNaN(t))return;
+    var jourSaisie=ymdLocal(t);
+    if(s.date>jourSaisie&&t.getHours()>=19){
+      out.push({id:s.id,date:s.date,corrige:jourSaisie,driver:s.driver||'?',
+        heure:String(t.getHours()).padStart(2,'0')+'h'+String(t.getMinutes()).padStart(2,'0'),
+        montant:pf(s.taxf)-pf(s.taxd)});
+    }
+  });
+  return out.sort(function(a,b){return b.date.localeCompare(a.date);});
+}
+function corrigerDatesDecalees(){
+  var liste=quartsDateDecalee();
+  if(!liste.length){alert('Aucun quart à corriger ✅');return;}
+  var apercu=liste.slice(0,6).map(function(x){
+    return '• '+x.driver+' : '+x.date+' → '+x.corrige+' (saisi à '+x.heure+')';
+  }).join('\n');
+  if(liste.length>6)apercu+='\n• … et '+(liste.length-6)+' autre(s)';
+  if(!confirm('Corriger la date de '+liste.length+' quart'+(liste.length>1?'s':'')+' ?\n\n'
+    +apercu+'\n\nChacun avait été enregistré au LENDEMAIN de sa saisie, à cause de '
+    +'l\'ancien calcul de la date du jour. On le ramène au jour où il a été rentré.\n\n'
+    +'Les montants ne changent pas.'))return;
+  var n=0;
+  liste.forEach(function(x){
+    if(S[x.id]){S[x.id].date=x.corrige;S[x.id]._m=Date.now();n++;}
+  });
+  audit('DATES_CORRIGEES',n+' quart(s) ramenés au jour de leur saisie');
+  lSave();
+  renderVerifQuarts();
+  alert('✅ '+n+' quart(s) remis à la bonne date.');
+}
+function datesDecaleesHTML(){
+  var liste=quartsDateDecalee();
+  if(!liste.length)return '';
+  var h='<div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.4);border-radius:12px;padding:12px;margin-bottom:11px;">'
+    +'<div style="font-size:12px;font-weight:900;color:var(--neon);margin-bottom:6px;">📅 '
+    +liste.length+' quart'+(liste.length>1?'s':'')+' daté'+(liste.length>1?'s':'')+' du lendemain</div>'
+    +'<div style="font-size:10px;color:var(--m2);line-height:1.7;margin-bottom:9px;">'
+    +'Rentrés le soir, ils ont été enregistrés au jour suivant : jusqu\'à cette mise à jour, '
+    +'l\'app proposait la date de demain passé 20 h. Les montants sont bons, seule la date est à reculer d\'un jour.</div>';
+  liste.slice(0,10).forEach(function(x){
+    h+='<div style="border-top:1px solid var(--brd);padding:6px 0;font-size:11px;">'
+      +'<div style="color:var(--m3);font-weight:800;">'+_cmpEsc(x.driver)+' · '+fm(x.montant)+'</div>'
+      +'<div style="font-size:10px;color:var(--m2);">'+_cmpEsc(x.date)+' → <b style="color:var(--grn);">'+_cmpEsc(x.corrige)+'</b> (saisi à '+_cmpEsc(x.heure)+')</div></div>';
+  });
+  if(liste.length>10)h+='<div style="font-size:10px;color:var(--m2);padding-top:6px;">… et '+(liste.length-10)+' autre(s).</div>';
+  h+='<button onclick="corrigerDatesDecalees()" style="width:100%;background:rgba(255,107,0,.18);border:1px solid rgba(255,107,0,.45);color:var(--neon);border-radius:9px;padding:10px;font-size:11px;font-weight:800;cursor:pointer;margin-top:9px;">'
+    +'📅 Remettre à la bonne date</button>';
+  return h+'</div>';
+}
 function quartsPerdusHTML(){
   var l=quartsPerdus();
   var nbSauv=_bkpCles().length;
@@ -7485,6 +7560,7 @@ function diagnosticQuartsHTML(){
     +'Si un chauffeur ne retrouve plus ses quarts, la réponse est ici : '
     +'soit le quart a disparu de l\'app, soit il est rangé sous un nom qui n\'existe plus.</div>';
   h+=quartsPerdusHTML();
+  h+=datesDecaleesHTML();
   h+='<div style="background:'+(pb?'rgba(255,58,58,.08)':'rgba(57,211,83,.08)')+';border:1px solid '+(pb?'rgba(255,58,58,.3)':'rgba(57,211,83,.3)')+';border-radius:11px;padding:11px;margin-bottom:11px;">'
     +'<div style="font-size:12px;font-weight:900;color:'+(pb?'var(--red)':'var(--grn)')+';">'
     +(pb?'⚠️ '+pb+' anomalie'+(pb>1?'s':'')+' trouvée'+(pb>1?'s':''):'✅ Rien d\'anormal')+'</div>'
@@ -9026,7 +9102,7 @@ async function loginJoinFleet(){
 function archiveOldShifts(){
   if(!U||U.role!=='owner'){alert('Réservé au patron.');return;}
   var lim=new Date();lim.setMonth(lim.getMonth()-12);
-  var limStr=lim.toISOString().split('T')[0];
+  var limStr=ymdLocal(lim);
   var olds=Object.values(S).filter(function(s){return s.date&&s.date<limStr;});
   if(!olds.length){alert('Aucun quart de plus de 12 mois. Rien à archiver ✅');return;}
   if(!confirm('🗄️ ARCHIVAGE\n\n'+olds.length+' quarts datés avant '+limStr+' seront :\n\n1️⃣ Téléchargés en fichier d\'archive (garde-le pour la comptabilité/impôts !)\n2️⃣ Retirés de l\'application pour l\'alléger\n\nContinuer ?'))return;
@@ -10483,7 +10559,7 @@ function renderSoldeBar(){
     const lastMonday=new Date(now);
     lastMonday.setDate(now.getDate()-((now.getDay()+6)%7)-7);
     lastMonday.setHours(0,0,0,0);
-    const prevWkKey=lastMonday.toISOString().slice(0,10);
+    const prevWkKey=ymdLocal(lastMonday);
     const prevWkEnd=new Date(lastMonday);prevWkEnd.setDate(prevWkEnd.getDate()+6);
     const prevWkArr=getArr().filter(s=>s.driver===U.name&&inWk(s.date,new Date(lastMonday.getTime()+1)));
     const prevSal=prevWkArr.reduce((a,s)=>a+calcSalary(s),0);
@@ -10531,7 +10607,7 @@ function renderSoldeBar(){
     // ── Cartes cadeaux disponibles ──
     const myTaxNet=myShifts.reduce(function(a,s){return a+(taxNetQuart(s));},0);
     const myDrvObj=C.drivers.find(function(d){return d.name===U.name;});
-    const curWkKey2=gwS(now).toISOString().slice(0,10);
+    const curWkKey2=ymdLocal(gwS(now));
     const cards=getDriverGiftCardsThisWeek(myDrvObj,curWkKey2);
     if(cards.length){
       var gcHTML='<div style="margin-top:10px;">';
@@ -11936,7 +12012,7 @@ function taxeEcheance(k,mode){
 }
 function _dateLongue(d){
   try{return d.toLocaleDateString('fr-CA',{day:'numeric',month:'long',year:'numeric'});}
-  catch(e){return d.toISOString().slice(0,10);}
+  catch(e){return ymdLocal(d);}
 }
 // Le détail d'une période : d'où viennent les crédits, ligne par ligne
 function feuilleCreditsData(key){
@@ -12432,7 +12508,7 @@ function hebdoHTML(){
 
 // Résultat sur une période libre. Les coûts fixes sont mensuels : on n'en
 // compte que la part écoulée, sinon un mois entamé paraît catastrophique.
-function _ymdLoc(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function _ymdLoc(d){return ymdLocal(d);}   // une seule mise en forme pour toute l'app
 function resultatPeriode(du,au){
   var a=_ymdLoc(du), b=_ymdLoc(au);
   var sh=getArr().filter(function(s){return s.date&&s.date>=a&&s.date<=b;});
@@ -13674,7 +13750,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-25-v118-ECARTS-ET-EXPLICATIONS-DES-CHAUFFEURS';
+var APP_VERSION = '2026-10-25-v119-DATE-LOCALE-QUARTS-DU-SOIR';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
