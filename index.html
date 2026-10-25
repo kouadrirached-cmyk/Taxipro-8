@@ -1776,7 +1776,8 @@ window.txpMerge = function(local, remote, tombType){
           // D'où une TRANSACTION Firestore : les documents lus sont
           // surveillés, et si quelqu'un les modifie entre-temps, tout est
           // rejoué automatiquement sur les données fraîches.
-          var Sfinal=S, EXfinal=EX, Cfinal=C, ecrireConfig=true, sauves=0, repris=0;
+          var Sfinal=S, EXfinal=EX, Cfinal=C, ecrireConfig=true, sauves=0, repris=0,
+              reprisReg=0, pousses=0;
           var cfgRef=COL().doc('config'), sRef=COL().doc('shifts'),
               eRef=COL().doc('expenses'), auRef=COL().doc('audit'),
               delRef=COL().doc('deleted');
@@ -1798,12 +1799,36 @@ window.txpMerge = function(local, remote, tombType){
             var fusV=_unionParId(C&&C.vehicles,dc.vehicles);
             repris=(fusD.length-((C&&C.drivers||[]).length))
                   +(fusV.length-((C&&C.vehicles||[]).length));
-            if(repris>0)Cfinal=Object.assign({},C,{drivers:fusD,vehicles:fusV});
-            // Pour le reste de la config (pourcentages, redevance, réglages
-            // de taxes), le plus récent gagne : on ne remplace pas une
-            // config plus fraîche que la nôtre. _cm n'est tamponné que
-            // lorsque la config change vraiment (voir lSave).
-            if(pf(dc._cm)>pf(C&&C._cm))ecrireConfig=false;
+            // UNION DES REGISTRES DE QUARTS (justifications d'écart, manques
+            // réglés, manques débités). Ils vivent dans la config parce
+            // qu'ils sont classés par identifiant de quart, et la config
+            // s'écrit en UN document entier : sans union, l'appareil qui
+            // écrit efface ceux qu'il n'a pas encore reçus. C'est ainsi que
+            // la justification écrite par un chauffeur n'arrivait jamais
+            // chez le patron. On n'y retire jamais rien (voir
+            // toggleEcartRegle / debiterManque), donc l'union ne peut rien
+            // ressusciter.
+            var regs=_unionRegistres(C,dc);
+            reprisReg=regs.reprisDuCloud;
+            var cloudPlusRecent=pf(dc._cm)>pf(C&&C._cm);
+            if(cloudPlusRecent){
+              // La config du cloud est plus fraîche : on ne remplace pas ses
+              // réglages par les nôtres. Mais ce que CET appareil vient
+              // d'ajouter aux registres — la justification qu'un chauffeur
+              // écrit à l'instant — ne doit pas être jeté pour autant : il
+              // l'était en silence. On repart donc de la config du cloud,
+              // horodatage compris, en y posant nos ajouts.
+              pousses=regs.aPousser;
+              if(pousses>0||repris>0){
+                Cfinal=Object.assign({},dc,regs.registres,{drivers:fusD,vehicles:fusV});
+              }else{
+                ecrireConfig=false;
+              }
+            }else{
+              // Nos réglages sont les plus récents : on écrit les nôtres,
+              // mais sans effacer les registres venus des autres appareils.
+              Cfinal=Object.assign({},C,regs.registres,{drivers:fusD,vehicles:fusV});
+            }
           }
           // Une fois l'écriture passée : garder en local ce qui a été repris
           // du cloud, sinon cet appareil le réécraserait au tour suivant.
@@ -1816,8 +1841,16 @@ window.txpMerge = function(local, remote, tombType){
               }
               if(repris>0&&C){
                 C.drivers=Cfinal.drivers; C.vehicles=Cfinal.vehicles;
-                window._cfgEmpreinteVue=_cfgEmpreinte(C);
               }
+              // Les justifications et les manques réglés venus des autres
+              // appareils : les garder ici aussi, sinon on refait l'union
+              // à chaque sauvegarde sans jamais les afficher.
+              if(reprisReg>0&&C&&Cfinal){
+                REGISTRES_QUARTS.forEach(function(nom){
+                  if(Cfinal[nom])C[nom]=Cfinal[nom];
+                });
+              }
+              if((repris>0||reprisReg>0)&&C)window._cfgEmpreinteVue=_cfgEmpreinte(C);
               if(typeof lSaveLocal==='function')lSaveLocal();
               if(typeof _refreshAfterSync==='function')_refreshAfterSync();
             }catch(eRec){}
@@ -1861,9 +1894,10 @@ window.txpMerge = function(local, remote, tombType){
             _ecrire(batch);
             await batch.commit();
           }
-          if(sauves>0||repris>0){
-            console.warn('PROTECTION : '+sauves+' quart(s) et '+repris
-              +' chauffeur(s)/voiture(s) du cloud conservés à l\'écriture');
+          if(sauves>0||repris>0||reprisReg>0||pousses>0){
+            console.warn('PROTECTION : '+sauves+' quart(s), '+repris
+              +' chauffeur(s)/voiture(s), '+reprisReg+' note(s) d\'écart du cloud conservés'
+              +(pousses>0?' · '+pousses+' note(s) de cet appareil poussées malgré une config plus récente':''));
             _recuperer();
           }
           window._fbPending=false;
@@ -2275,6 +2309,24 @@ function _unionParId(mien,distant){
   out.forEach(function(x){if(x&&x.id)vus[x.id]=1;});
   (distant||[]).forEach(function(x){if(x&&x.id&&!vus[x.id]){out.push(x);vus[x.id]=1;}});
   return out;
+}
+// Les registres classés par identifiant de quart. Ils voyagent dans la
+// config faute d'un document à eux, et on n'y retire JAMAIS une entrée :
+// on ajoute, ou on bascule une valeur. L'union est donc sûre.
+// Si une suppression franche est ajoutée un jour à l'un d'eux, il faudra
+// le sortir de cette liste ou lui donner des tombstones.
+var REGISTRES_QUARTS=['justifs','ecartsRegles','ecartsDebits'];
+function _unionRegistres(mien,distant){
+  var out={},reprisDuCloud=0,aPousser=0;
+  REGISTRES_QUARTS.forEach(function(nom){
+    var a=(mien&&mien[nom])||{}, b=(distant&&distant[nom])||{};
+    var k;
+    for(k in b){if(!Object.prototype.hasOwnProperty.call(a,k))reprisDuCloud++;}
+    for(k in a){if(!Object.prototype.hasOwnProperty.call(b,k))aPousser++;}
+    // ce que cet appareil connaît prime ; ce qu'il ignore est repris
+    out[nom]=Object.assign({},b,a);
+  });
+  return {registres:out,reprisDuCloud:reprisDuCloud,aPousser:aPousser};
 }
 // Empreinte de la config, sans son horodatage : sert à savoir si un
 // appel à lSave() correspond à un VRAI changement.
@@ -3476,6 +3528,49 @@ function showToastGrn(msg){
   document.body.appendChild(t);
   setTimeout(function(){t.remove();},2500);
 }
+// ── LES ÉCARTS, CÔTÉ PATRON ──
+// Le tableau de bord n'annonçait qu'un nombre : « 3 quarts avec écart
+// d'argent ». Ni qui, ni combien, ni surtout CE QUE LE CHAUFFEUR A
+// ÉCRIT pour l'expliquer — alors que lui lit « Justification envoyée,
+// en attente du patron » et attend une réponse. On montre tout, avec
+// les deux décisions possibles sous la main.
+function ecartsPatronHTML(alerts){
+  if(!alerts||!alerts.length)return '';
+  var ouvert=window._ecartsOuvert!==false;   // ouvert par défaut : c'est de l'argent
+  var tot=alerts.reduce(function(a,s){return a+Math.abs(calcEcart(s));},0);
+  var avecMot=alerts.filter(function(s){return !!(C.justifs&&C.justifs[s.id]);}).length;
+  var h='<div class="bn bn-red" onclick="window._ecartsOuvert=(window._ecartsOuvert===false);renderDash();" style="cursor:pointer;">'
+    +'⚠️ '+alerts.length+' quart'+(alerts.length>1?'s':'')+' avec écart d\'argent · '+fm(tot)
+    +(avecMot?' · '+avecMot+' explication'+(avecMot>1?'s':''):'')
+    +' '+(ouvert?'▾':'▸')+'</div>';
+  if(!ouvert)return h;
+  h+='<div class="card" style="border-color:rgba(255,58,58,.35);">';
+  alerts.slice(0,12).forEach(function(s){
+    var ec=calcEcart(s);
+    var mot=(C.justifs&&C.justifs[s.id])||'';
+    h+='<div style="border-bottom:1px solid var(--brd);padding:9px 0;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
+      +'<div style="min-width:0;"><div style="font-size:12px;font-weight:800;color:var(--m3);">'+_cmpEsc(s.driver||'?')+'</div>'
+      +'<div style="font-size:10px;color:var(--m2);">'+_cmpEsc(s.date||'')+' · '+_cmpEsc(s.vehicle||'')+'</div></div>'
+      +'<div style="font-size:16px;font-weight:900;color:'+(ec>0?'var(--red)':'var(--pur)')+';flex-shrink:0;">'
+      +(ec>0?'−':'+')+fm(Math.abs(ec))+'</div></div>';
+    if(mot){
+      h+='<div style="background:rgba(245,200,0,.09);border-left:3px solid var(--gold);border-radius:0 9px 9px 0;padding:7px 9px;margin-top:6px;font-size:10px;color:var(--m3);line-height:1.5;">'
+        +'<b style="color:var(--gold);">💬 Il explique :</b><br>'+_cmpEsc(mot)+'</div>';
+    }else if(ec>0){
+      h+='<div style="font-size:10px;color:var(--m2);margin-top:5px;">Aucune explication écrite.</div>';
+    }
+    if(ec>0&&!isEcartDebite(s.id)){
+      h+='<div style="display:flex;gap:6px;margin-top:7px;">'
+        +'<button onclick="toggleEcartRegle(\''+s.id+'\');renderDash();" style="flex:1;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:9px;padding:8px;font-size:10px;font-weight:800;cursor:pointer;">✅ Accepter</button>'
+        +'<button onclick="debiterManqueCustom(\''+s.id+'\','+Math.abs(ec)+');renderDash();" style="flex:1;background:rgba(255,58,58,.15);border:1px solid rgba(255,58,58,.4);color:var(--red);border-radius:9px;padding:8px;font-size:10px;font-weight:800;cursor:pointer;">💸 Déduire</button>'
+        +'</div>';
+    }
+    h+='</div>';
+  });
+  if(alerts.length>12)h+='<div style="font-size:10px;color:var(--m2);padding-top:8px;">… et '+(alerts.length-12)+' autre(s), dans l\'historique.</div>';
+  return h+'</div>';
+}
 function toggleEcartRegle(shiftId){
   if(!C.ecartsRegles)C.ecartsRegles={};
   C.ecartsRegles[shiftId]=!C.ecartsRegles[shiftId];
@@ -3886,7 +3981,7 @@ function renderDash(){
       +'<span style="font-weight:700;color:var(--txt);">💰 Total recette</span>'
       +'<span style="font-weight:900;color:var(--gold);font-size:15px;">'+fm(totRec)+'</span></div>'
       +'</div>';
-    c.innerHTML=(alerts.length?'<div class="bn bn-red">⚠️ '+alerts.length+' quart'+(alerts.length>1?'s':'')+' avec écart d\'argent</div>':'')
+    c.innerHTML=ecartsPatronHTML(alerts)
       +'<div class="sg">'
       +'<div class="sb gold full"><div class="slb">💰 Recette totale</div><div class="sv cgold">'+fm(totRec)+'</div><div class="ssb">'+arr.length+' quarts · '+totCrs+' courses</div></div>'
       +'<div class="sb grn"><div class="slb">👑 Profit patron</div><div class="sv cgrn">'+fm(totProfit)+'</div></div>'
@@ -4199,6 +4294,21 @@ function _shiftCard(s, isOwner){
   if(ptags)h+='<div style="margin-bottom:6px;">'+ptags+'</div>';
   if(Math.abs(ec)>0.5&&(ec>0||isOwner)){
     h+='<div style="font-size:10px;font-weight:800;color:'+(ec>0?'var(--red)':'var(--pur)')+';margin-bottom:5px;">'+(ec>0?'⚠️ Manque: −':'💰 Surplus: +')+fm(Math.abs(ec))+'</div>';
+    // CE QUE LE CHAUFFEUR A ÉCRIT. Il le tape au moment de saisir son
+    // quart, et il lit « Justification envoyée — en attente du patron ».
+    // Elle n'était affichée nulle part côté patron : il voyait le manque
+    // sans jamais voir l'explication, et le chauffeur attendait une
+    // réponse à un message que personne ne recevait.
+    if(ec>0){
+      var _jz=(C.justifs&&C.justifs[s.id])||'';
+      if(_jz){
+        h+='<div style="background:rgba(245,200,0,.09);border-left:3px solid var(--gold);border-radius:0 9px 9px 0;padding:7px 9px;margin:0 0 6px;font-size:10px;color:var(--m3);line-height:1.5;">'
+          +'<b style="color:var(--gold);">💬 '+_cmpEsc(s.driver||'Le chauffeur')+' explique :</b><br>'
+          +_cmpEsc(_jz)+'</div>';
+      }else if(isOwner&&!isEcartRegle(s.id)&&!isEcartDebite(s.id)){
+        h+='<div style="font-size:10px;color:var(--m2);margin-bottom:6px;">Aucune explication écrite par le chauffeur.</div>';
+      }
+    }
     if(ec>0&&!isEcartRegle(s.id)&&!isEcartDebite(s.id)&&isOwner){
       h+='<div style="display:flex;gap:6px;margin-top:5px;">';
       h+='<button onclick="event.stopPropagation();toggleEcartRegle(\''+s.id+'\');renderHist();" style="flex:1;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:8px;padding:7px;font-size:10px;font-weight:800;cursor:pointer;">✅ Accepter</button>';
@@ -13564,7 +13674,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-21-v117-POURQUOI-CES-SEMAINES-SONT-DUES';
+var APP_VERSION = '2026-10-25-v118-ECARTS-ET-EXPLICATIONS-DES-CHAUFFEURS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
