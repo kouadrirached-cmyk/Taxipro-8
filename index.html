@@ -1939,6 +1939,7 @@ window.txpMerge = function(local, remote, tombType){
           window._fbPending=false;
           window._fbLastOk=Date.now();
           window._fbDernierEchec=null;
+          if(typeof baliseEtat==='function')setTimeout(baliseEtat,500);
           localStorage.setItem('txpro_lastSave',new Date().toISOString());
           if(typeof setSyncStatus==='function')setSyncStatus('ok');
           // Surveillance de taille (limite Firestore ~1 Mo par document)
@@ -4277,7 +4278,8 @@ function renderDash(){
       // après un vidage de cache — voit ses écritures REFUSÉES : le
       // chauffeur garde ses quarts sous les yeux et les croit partis,
       // pendant que le patron ne reçoit rien.
-      +envoiStatutHTML();
+      +envoiStatutHTML()
+      +renvoyerMesQuartsBoutonHTML();
   }
 }
 
@@ -6724,6 +6726,96 @@ function envoiStatut(){
     detail:window._fbLastOk?('Dernier envoi réussi à '+new Date(window._fbLastOk).toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})):'',
     quoiFaire:''};
 }
+// ═══════════════════════════════════════════════
+// 📤 RENVOYER MES QUARTS — ET VÉRIFIER QU'ILS Y SONT
+//
+// Mesuré chez le patron : le cloud ne contenait qu'UN des six quarts
+// d'un chauffeur, alors que son téléphone affichait « Sync ✓ ». Ses
+// écritures ne montaient pas, et rien ne le disait. Ce bouton force le
+// renvoi PUIS relit le cloud pour compter ce qui y est vraiment —
+// aucune promesse sans vérification.
+// ═══════════════════════════════════════════════
+// ── BALISE D'ÉTAT : chaque téléphone dit où il en est ──
+// Le patron ne peut pas courir après quatre chauffeurs pour savoir
+// lequel est bloqué. Chaque appareil dépose donc une petite fiche dans
+// le document `etat` — écriture ADDITIVE, chacun sa clé, personne
+// n'écrase personne. Un appareil qui n'arrive plus à écrire ne dépose
+// rien : son silence est lui-même le signal.
+function baliseEtat(){
+  try{
+    if(!window._fbReady||!window._fbUid||!U)return;
+    var maintenant=Date.now();
+    if(window._baliseDernier&&maintenant-window._baliseDernier<120000)return;
+    window._baliseDernier=maintenant;
+    var miens=Object.keys(S||{}).filter(function(k){
+      return U.role==='owner'||(S[k]&&S[k].driver===U.name);
+    });
+    var fiche={nom:String(U.name||'?').slice(0,40),role:U.role||'',
+      version:String(typeof APP_VERSION!=='undefined'?APP_VERSION:'').slice(0,40),
+      quarts:miens.length,
+      enAttente:!!window._fbPending,
+      memoirePleine:!!window._stockagePlein,
+      erreur:String((window._fbDernierEchec&&window._fbDernierEchec.code)||'').slice(0,40),
+      ts:maintenant};
+    // La fiche va dans `members`, pas dans un document à part : les
+    // règles publiées n'autorisent que config/shifts/expenses/audit/
+    // deleted + members, et le patron ne peut pas republier les règles
+    // tant que la console Firebase lui est fermée. Écriture additive,
+    // une clé par appareil : personne n'écrase personne.
+    var payload={etats:{}}; payload.etats[window._fbUid]=fiche;
+    window._fbEnsure().then(function(){
+      return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
+        .doc('members').set(payload,{merge:true});
+    }).catch(function(){});
+  }catch(e){}
+}
+function renvoyerMesQuartsBoutonHTML(){
+  if(!U)return '';
+  return '<div style="margin-top:9px;">'
+    +'<button onclick="renvoyerMesQuarts()" style="width:100%;background:rgba(96,165,250,.18);border:1px solid rgba(96,165,250,.5);color:var(--blu);border-radius:10px;padding:12px;font-size:12px;font-weight:900;cursor:pointer;">'
+    +'📤 Renvoyer mes quarts maintenant</button>'
+    +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:5px;text-align:center;">'
+    +'À utiliser si ton patron ne voit pas ton travail. L\'app vérifiera ensuite ce qui est vraiment arrivé.</div></div>';
+}
+function renvoyerMesQuarts(){
+  var miens=Object.keys(S||{}).filter(function(k){
+    return U.role==='owner'||S[k].driver===U.name;
+  });
+  if(!miens.length){alert('Aucun quart à renvoyer sur ce téléphone.');return;}
+  if(!window._fbReady){
+    alert('📴 Pas de connexion au cloud.\n\nTes '+miens.length+' quart(s) restent ici et partiront au retour du réseau.');
+    return;
+  }
+  var av=document.activeElement;
+  if(av&&av.blur)av.blur();
+  window._fbPending=true;
+  window._fbDernierEchec=null;
+  lSave();                       // force une écriture complète
+  setTimeout(function(){
+    window._fbEnsure().then(function(){
+      return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
+        .doc('shifts').get({source:'server'});
+    }).then(function(snap){
+      var dist=snap.exists?((snap.data()||{}).data||{}):{};
+      var arrives=miens.filter(function(k){return !!dist[k];}).length;
+      var manquants=miens.length-arrives;
+      if(manquants===0){
+        alert('✅ Tes '+miens.length+' quart(s) sont bien dans le cloud.\n\n'
+          +'Ton patron les verra. S\'il ne les voit pas, c\'est de son côté : '
+          +'qu\'il ouvre sa page Paye, l\'app lui proposera de les récupérer.');
+      }else{
+        var ech=window._fbDernierEchec;
+        alert('⛔ '+manquants+' de tes '+miens.length+' quart(s) ne sont PAS montés.\n\n'
+          +(ech?('Raison donnée par le serveur : '+ech.code+'\n\n'):'')
+          +(window._stockagePlein?'La mémoire de ce téléphone est pleine.\n\n':'')
+          +'Montre ce message à ton patron.');
+      }
+      if(typeof renderDash==='function'&&document.querySelector('#pg-dash.on'))renderDash();
+    }).catch(function(e){
+      alert('⛔ Impossible de vérifier : '+((e&&e.code)||e)+'\n\nMontre ce message à ton patron.');
+    });
+  },2500);
+}
 function envoiStatutHTML(){
   var e=envoiStatut();
   var coul=e.niveau==='ok'?'rgba(57,211,83,':e.niveau==='attente'?'rgba(255,107,0,':'rgba(255,58,58,';
@@ -7953,7 +8045,16 @@ async function diagnosticSyncLire(semaine){
       out.membres=Object.keys(md.uids||{}).length;
       out.verrouillee=md.locked===true;
       out.jeSuisMembre=!!(md.uids&&window._fbUid&&md.uids[window._fbUid]);
-    }catch(eM){ out.membresErreur=(eM&&eM.code)||'?'; }
+      // Les fiches d'état des téléphones voyagent dans le même document :
+      // une par appareil, on garde la plus récente par chauffeur.
+      var ed=md.etats||{}, parNom={};
+      Object.keys(ed).forEach(function(uid){
+        var f=ed[uid]; if(!f||!f.nom)return;
+        if(!parNom[f.nom]||pf(f.ts)>pf(parNom[f.nom].ts))parNom[f.nom]=f;
+      });
+      out.appareils=Object.keys(parNom).map(function(n){return parNom[n];})
+        .sort(function(a,b){return pf(b.ts)-pf(a.ts);});
+    }catch(eM){ out.membresErreur=(eM&&eM.code)||'?'; out.appareils=null; }
     out.cloud=_quartsParSemaine(dist,semaine);
     // ce que le cloud a et que CE téléphone n'a pas (hors suppressions)
     var tomb=(window.TOMB&&window.TOMB.s)||{};
@@ -8087,6 +8188,39 @@ function diagSyncHTML(d){
       });
       h+='</div>';
     }
+  }
+  // CE QUE CHAQUE TÉLÉPHONE DIT DE LUI-MÊME. Le silence d'un appareil
+  // est aussi parlant que son message : s'il n'arrive plus à écrire, il
+  // ne dépose plus rien et sa dernière nouvelle vieillit.
+  if(d.ok&&d.appareils&&d.appareils.length){
+    h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;">'
+      +'<div style="font-size:10px;color:var(--m2);font-weight:800;margin-bottom:6px;">Téléphones de l\'équipe</div>';
+    d.appareils.forEach(function(a){
+      var age=Date.now()-pf(a.ts);
+      var h24=24*3600*1000;
+      var vieux=age>h24;
+      var quand='';
+      try{quand=new Date(pf(a.ts)).toLocaleString('fr-CA',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){}
+      var souci=a.memoirePleine||a.erreur||a.enAttente||vieux;
+      h+='<div style="border-top:1px solid var(--brd);padding:6px 0;font-size:11px;">'
+        +'<div style="display:flex;justify-content:space-between;gap:8px;">'
+        +'<span style="color:var(--m3);font-weight:800;">'+_cmpEsc(a.nom)+'</span>'
+        +'<span style="color:'+(souci?'var(--red)':'var(--grn)')+';font-weight:800;">'
+        +(a.quarts||0)+' quart'+((a.quarts||0)>1?'s':'')+'</span></div>'
+        +'<div style="font-size:9px;color:var(--m2);margin-top:2px;">'
+        +'dernière nouvelle : '+_cmpEsc(quand||'?')
+        +(vieux?' <b style="color:var(--red);">— plus de 24 h !</b>':'')
+        +(a.version?' · '+_cmpEsc(String(a.version).slice(0,24)):'')
+        +'</div>'
+        +(a.memoirePleine?'<div style="font-size:10px;color:var(--red);font-weight:800;">🚨 mémoire pleine</div>':'')
+        +(a.erreur?'<div style="font-size:10px;color:var(--red);font-weight:800;">⛔ dernier envoi refusé : '+_cmpEsc(a.erreur)+'</div>':'')
+        +(a.enAttente&&!a.erreur?'<div style="font-size:10px;color:var(--neon);font-weight:800;">⏳ envoi en attente</div>':'')
+        +'</div>';
+    });
+    h+='<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">'
+      +'Un chauffeur absent de cette liste, ou dont la dernière nouvelle est vieille, n\'arrive plus à écrire : '
+      +'fais-lui ouvrir l\'app et appuyer sur « 📤 Renvoyer mes quarts ».</div>'
+      +'</div>';
   }
   // LE VERROU ET LES APPAREILS AUTORISÉS. C'est la cause la plus
   // sournoise : la flotte verrouillée refuse les nouveaux téléphones,
@@ -14351,7 +14485,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-28-v124-LAPP-VOIT-ELLE-MEME-CE-QUI-MANQUE';
+var APP_VERSION = '2026-10-28-v125-RENVOYER-MES-QUARTS-ET-ETAT-DES-TELEPHONES';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
