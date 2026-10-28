@@ -1453,6 +1453,10 @@ body{
         <button class="btn bsec bsm" id="fleetLockBtn" style="width:100%;padding:10px;margin-top:8px;" onclick="toggleFleetLock()">🔒 Verrouiller la flotte (bloquer les nouveaux appareils)</button>
         <button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:8px;" onclick="archiveOldShifts()">🗄️ Archiver les vieux quarts (+12 mois)</button>
       </div>
+      <div class="card" style="border-color:rgba(96,165,250,.4);">
+        <div class="ctit"><span><span class="ci">🩺</span>Où sont les quarts de mes chauffeurs</span></div>
+        <div id="diagSyncContent"></div>
+      </div>
       <div class="card" style="border-color:rgba(255,120,120,.3);">
         <div class="ctit"><span><span class="ci">🔍</span>Vérifier les quarts</span></div>
         <div id="verifQuartsContent"></div>
@@ -4180,7 +4184,19 @@ function renderDash(){
       +(arr.length
         ?'<div class="card"><div class="ctit"><span class="ci">📋</span>Vos quarts — Taximètre & Salaire</div>'+drvShiftRows+'</div>'
         :'<div class="empty"><div class="ei">📭</div>Aucun quart pour cette période.</div>')
-      +annualDrvSummaryHTML(U.name);
+      +annualDrvSummaryHTML(U.name)
+      // SON CODE DE FLOTTE. Quand le patron ne voit pas les quarts d'un
+      // chauffeur, la première question est : travaillent-ils sur la même
+      // flotte ? Le chauffeur n'a pas accès aux Réglages, il n'avait donc
+      // aucun moyen de lire ce code et de le donner à son patron.
+      +'<div style="margin-top:12px;padding:10px;background:rgba(0,0,0,.25);border:1px solid var(--brd);border-radius:10px;font-size:10px;color:var(--m2);line-height:1.6;text-align:center;">'
+      +'Ma flotte : <b style="font-family:monospace;color:var(--m3);font-size:12px;">'
+      +_cmpEsc(window.TXP_TENANT||'taxipro')+'</b>'
+      +'<div style="margin-top:3px;">Si ton patron ne voit pas tes quarts, lis-lui ce code.</div>'
+      +'<div style="margin-top:4px;">'+Object.keys(S||{}).length+' quart(s) enregistrés sur ce téléphone'
+      +(window._fbPending?' · <b style="color:var(--neon);">envoi en attente</b>'
+        :(window._fbReady?' · <b style="color:var(--grn);">envoyés</b>':' · <b style="color:var(--red);">hors ligne</b>'))
+      +'</div></div>';
   }
 }
 
@@ -7608,6 +7624,180 @@ function datesDecaleesHTML(){
     +'📅 Remettre à la bonne date</button>';
   return h+'</div>';
 }
+// ═══════════════════════════════════════════════
+// 🩺 OÙ SONT LES QUARTS DE MES CHAUFFEURS
+//
+// « Les chauffeurs ont rentré leur quart, je le vois pas dans ma
+// session. » Trois causes possibles, et deviner ne mène nulle part :
+//   1. le quart est dans le cloud mais pas descendu sur CE téléphone ;
+//   2. le quart n'est jamais monté dans le cloud (appareil du chauffeur
+//      bloqué, hors ligne, écriture refusée) ;
+//   3. le chauffeur travaille sur une AUTRE flotte — il voit ses quarts
+//      chez lui, et ils n'arrivent jamais ici.
+// On lit donc le cloud en direct et on compare, au lieu de supposer.
+// ═══════════════════════════════════════════════
+function _quartsParSemaine(src,lundi){
+  var fin=new Date(parseLocalDate(lundi)); fin.setDate(fin.getDate()+7);
+  var finStr=ymdLocal(fin);
+  var out={total:0,parDrv:{},ids:[]};
+  Object.keys(src||{}).forEach(function(k){
+    var s=src[k];
+    if(!s||!dateValide(s.date))return;
+    if(s.date<lundi||s.date>=finStr)return;
+    out.total++;
+    out.ids.push(k);
+    var n=s.driver||'(sans nom)';
+    if(!out.parDrv[n])out.parDrv[n]={n:0,tax:0};
+    out.parDrv[n].n++;
+    out.parDrv[n].tax+=pf(s.taxf)-pf(s.taxd);
+  });
+  return out;
+}
+async function diagnosticSyncLire(semaine){
+  var out={flotte:window.TXP_TENANT||'taxipro',nom:(C&&C.companyName)||'',
+    semaine:semaine,ok:false,
+    localTotal:Object.keys(S||{}).length,
+    derniereSync:localStorage.getItem('txpro_lastSave')||'',
+    enAttente:!!window._fbPending,
+    ecouteVivante:(typeof _unlistenFb==='function')};
+  out.local=_quartsParSemaine(S,semaine);
+  try{
+    if(!window._fbReady)throw {code:'cloud-indisponible'};
+    await window._fbEnsure();
+    var snap=await firebase.firestore().collection(out.flotte).doc('shifts')
+      .get({source:'server'});
+    var dist=snap.exists?((snap.data()||{}).data||{}):{};
+    out.cloudTotal=Object.keys(dist).length;
+    out.cloud=_quartsParSemaine(dist,semaine);
+    // ce que le cloud a et que CE téléphone n'a pas (hors suppressions)
+    var tomb=(window.TOMB&&window.TOMB.s)||{};
+    out.manquants=Object.keys(dist).filter(function(k){
+      return !S[k]&&!tomb[k];
+    });
+    out.ok=true;
+  }catch(e){
+    out.erreur=(e&&e.code)||String((e&&e.message)||e);
+  }
+  return out;
+}
+function recupererQuartsDuCloud(){
+  if(!window._fbReady){alert('Pas de connexion au cloud pour l\'instant.');return;}
+  window._fbEnsure().then(function(){
+    return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
+      .doc('shifts').get({source:'server'});
+  }).then(function(snap){
+    var dist=snap.exists?((snap.data()||{}).data||{}):{};
+    var avant=Object.keys(S).length;
+    // txpMerge respecte les tombstones : une vraie suppression ne revient pas
+    var fusion=window.txpMerge(S,dist,'s');
+    var ajoutes=Object.keys(fusion).length-avant;
+    if(!ajoutes){alert('Rien de nouveau : ton téléphone a déjà tout ce que le cloud contient.');return;}
+    for(var k in fusion){if(!S[k])S[k]=fusion[k];}
+    if(typeof window.S!=='undefined')window.S=S;
+    lSave();
+    audit('QUARTS_RECUPERES',ajoutes+' quart(s) repris du cloud');
+    renderDiagSync();
+    if(typeof _refreshAfterSync==='function')_refreshAfterSync();
+    alert('✅ '+ajoutes+' quart(s) récupérés du cloud.\n\nVa voir la page Paye : ils devraient y être.');
+  }).catch(function(e){
+    alert('Lecture du cloud impossible : '+((e&&e.code)||e)+'\n\nRéessaie quand le réseau sera revenu.');
+  });
+}
+function renderDiagSync(){
+  var el=document.getElementById('diagSyncContent');
+  if(!el)return;
+  if(!U||U.role!=='owner'){el.innerHTML='';return;}
+  var sem=window._diagSyncSem||derniereSemaineTerminee();
+  el.innerHTML='<div style="font-size:11px;color:var(--m2);line-height:1.7;margin-bottom:9px;">'
+    +'Compare ce que <b style="color:var(--m3);">ton téléphone</b> contient avec ce que le '
+    +'<b style="color:var(--m3);">cloud</b> contient vraiment, pour une semaine donnée. '
+    +'C\'est la réponse à « mon chauffeur a travaillé mais je ne le vois pas ».</div>'
+    +'<label style="font-size:10px;color:var(--m2);display:block;margin-bottom:3px;">Semaine à vérifier (lundi)</label>'
+    +'<input type="date" id="diagSyncSem" value="'+_cmpEsc(sem)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:9px;padding:9px;font-size:12px;font-weight:700;margin-bottom:8px;">'
+    +'<button onclick="lancerDiagSync()" style="width:100%;background:rgba(96,165,250,.18);border:1px solid rgba(96,165,250,.45);color:var(--blu);border-radius:9px;padding:10px;font-size:11px;font-weight:800;cursor:pointer;">'
+    +'🩺 Vérifier maintenant</button>'
+    +'<div id="diagSyncRes" style="margin-top:10px;">'+(window._diagSyncHTML||'')+'</div>';
+}
+function lancerDiagSync(){
+  var v=gv('diagSyncSem');
+  if(!dateValide(v)){alert('Choisis une date.');return;}
+  // on se cale toujours sur le lundi de la semaine choisie
+  var lundi=ymdLocal(gwS(parseLocalDate(v)));
+  window._diagSyncSem=lundi;
+  var res=document.getElementById('diagSyncRes');
+  if(res)res.innerHTML='<div style="font-size:11px;color:var(--m2);">⏳ Lecture du cloud…</div>';
+  diagnosticSyncLire(lundi).then(function(d){
+    window._diagSyncHTML=diagSyncHTML(d);
+    renderDiagSync();
+  }).catch(function(e){
+    window._diagSyncHTML='<div style="font-size:11px;color:var(--red);">Échec : '+_cmpEsc(String(e))+'</div>';
+    renderDiagSync();
+  });
+}
+function diagSyncHTML(d){
+  var lig=function(lbl,val,coul){
+    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;">'
+      +'<span style="color:var(--m2);">'+lbl+'</span>'
+      +'<span style="font-weight:800;color:'+(coul||'var(--m3)')+';">'+val+'</span></div>';
+  };
+  var h='<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:11px;padding:11px;">'
+    +'<div style="font-size:11px;font-weight:900;color:var(--m3);margin-bottom:7px;">Semaine du '+_cmpEsc(d.semaine)+'</div>'
+    +lig('🏢 Ma flotte','<span style="font-family:monospace;">'+_cmpEsc(d.flotte)+'</span>')
+    +lig('📱 Quarts sur ce téléphone',String(d.local.total))
+    +(d.ok?lig('☁️ Quarts dans le cloud',String(d.cloud.total),
+        d.cloud.total>d.local.total?'var(--red)':'var(--grn)')
+      :lig('☁️ Cloud','illisible : '+_cmpEsc(d.erreur||'?'),'var(--red)'));
+
+  if(d.ok){
+    // Le verdict, en une phrase
+    if(d.cloud.total>d.local.total){
+      h+='<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.4);border-radius:10px;padding:10px;margin-top:9px;font-size:11px;color:var(--m3);line-height:1.6;">'
+        +'<b style="color:var(--red);">Le cloud a '+(d.cloud.total-d.local.total)+' quart(s) de plus que ton téléphone.</b><br>'
+        +'Les chauffeurs ont bien envoyé leur travail : c\'est la descente vers cet appareil qui n\'a pas suivi.</div>'
+        +'<button onclick="recupererQuartsDuCloud()" style="width:100%;background:rgba(57,211,83,.18);border:1px solid rgba(57,211,83,.45);color:var(--grn);border-radius:9px;padding:11px;font-size:12px;font-weight:900;cursor:pointer;margin-top:9px;">'
+        +'⬇️ Récupérer ces quarts maintenant</button>';
+    }else if(d.cloud.total===0&&d.local.total===0){
+      h+='<div style="background:rgba(255,107,0,.1);border:1px solid rgba(255,107,0,.4);border-radius:10px;padding:10px;margin-top:9px;font-size:11px;color:var(--m3);line-height:1.6;">'
+        +'<b style="color:var(--neon);">Aucun quart cette semaine, ni ici ni dans le cloud.</b><br>'
+        +'Si tes chauffeurs ont bien travaillé et voient leurs quarts sur LEUR téléphone, '
+        +'c\'est qu\'ils ne sont pas sur la même flotte que toi. Demande à chacun d\'ouvrir '
+        +'Réglages et de te lire le code de flotte : il doit être <b style="font-family:monospace;">'
+        +_cmpEsc(d.flotte)+'</b>. S\'il est différent, il travaille à côté et il faut le faire rejoindre ta flotte.</div>';
+    }else{
+      h+='<div style="background:rgba(57,211,83,.1);border:1px solid rgba(57,211,83,.35);border-radius:10px;padding:10px;margin-top:9px;font-size:11px;color:var(--m3);line-height:1.6;">'
+        +'<b style="color:var(--grn);">Ton téléphone a tout ce que le cloud contient.</b><br>'
+        +'Si un quart manque quand même, il n\'a jamais été envoyé : regarde du côté du téléphone du chauffeur.</div>';
+    }
+    // Le détail par chauffeur, les deux côtés face à face
+    var noms={};
+    Object.keys(d.local.parDrv).forEach(function(n){noms[n]=1;});
+    Object.keys(d.cloud.parDrv).forEach(function(n){noms[n]=1;});
+    var liste=Object.keys(noms).sort();
+    if(liste.length){
+      h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;">'
+        +'<div style="font-size:10px;color:var(--m2);font-weight:800;margin-bottom:5px;">Par chauffeur — ici / dans le cloud</div>';
+      liste.forEach(function(n){
+        var a=d.local.parDrv[n]||{n:0,tax:0}, b=d.cloud.parDrv[n]||{n:0,tax:0};
+        var manque=b.n>a.n;
+        h+='<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;">'
+          +'<span style="color:var(--m3);">'+_cmpEsc(n)+'</span>'
+          +'<span style="font-weight:800;color:'+(manque?'var(--red)':'var(--m3)')+';">'
+          +a.n+' / '+b.n+' quart'+(b.n>1?'s':'')+(manque?' ⚠️':'')+'</span></div>';
+      });
+      h+='</div>';
+    }
+  }
+  // L'état de la liaison, utile quand rien ne descend
+  h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;font-size:10px;color:var(--m2);line-height:1.7;">'
+    +'Écoute temps réel : <b style="color:'+(d.ecouteVivante?'var(--grn)':'var(--red)')+';">'
+    +(d.ecouteVivante?'branchée':'coupée')+'</b>'
+    +(d.enAttente?' · <b style="color:var(--neon);">écriture en attente</b>':'')
+    +(d.derniereSync?'<br>Dernière sauvegarde : '+_cmpEsc(new Date(d.derniereSync).toLocaleString('fr-CA')):'')
+    +'<br>Quarts au total sur ce téléphone : '+d.localTotal
+    +(d.ok?' · dans le cloud : '+d.cloudTotal:'')
+    +'</div>';
+  return h+'</div>';
+}
 function quartsPerdusHTML(){
   var l=quartsPerdus();
   var nbSauv=_bkpCles().length;
@@ -8257,6 +8447,7 @@ function renderSet(){
   renderGiftCardDrvSel();
   // Multi-flotte
   renderFleetInfo();
+  renderDiagSync();
   renderVerifQuarts();
   renderMesure();
   renderAnnuaire();
@@ -13834,7 +14025,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-28-v120-PAYE-VISIBLE-ET-SEMAINE-EN-COURS-PROTEGEE';
+var APP_VERSION = '2026-10-28-v121-OU-SONT-LES-QUARTS-DE-MES-CHAUFFEURS';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
