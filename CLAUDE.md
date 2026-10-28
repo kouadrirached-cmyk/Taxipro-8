@@ -1,26 +1,33 @@
 # TaxiPro — Contexte du projet
 
 > ## ⏪ RETOUR EN ARRIÈRE EN COURS — à lire avant toute modification
-> **`index.html` a été ramené à la v116 (6 octobre) le 28 octobre, à la demande d'Amin.**
+> **`index.html` a été ramené à la v115 (27 septembre) le 28 octobre, à la demande d'Amin.**
+> Deuxième étape de son test : la v116 (6 octobre) avait d'abord été remise, le problème a
+> persisté, donc on recule avant la réécriture du chemin d'écriture (transactions Firestore).
+>
 > Raison : l'app a fonctionné quatre mois sans incident, puis des quarts de chauffeurs ont cessé
-> d'arriver chez le patron pendant la semaine du 19 au 25 octobre — la semaine où les v117, v118
-> et v119 ont été poussées. Le but est d'éliminer le code comme cause : si le problème persiste
-> sur la v116, il vient de Firebase ou de la configuration du cloud, pas des dernières versions.
+> d'arriver chez le patron. Mesure certaine : le cloud ne contient qu'UN des six quarts d'un
+> chauffeur pour la semaine du 19 au 25, alors que son téléphone les affiche tous avec « Sync ✓ ».
+> Ses écritures ne montent pas. Le but du retour en arrière est d'éliminer le code comme cause.
 >
-> **Les sections ci-dessous décrivent les v117 à v126, qui ne sont PLUS dans `index.html`.**
-> Elles sont conservées intactes : chaque correctif y est documenté avec sa mesure, et il faudra
-> les réintroduire une fois la cause établie. Les versions concernées sont dans l'historique git
-> (v126 = commit `f6763ef`).
+> **Résultat acquis : le problème persiste sur la v116.** Les v117 à v126 sont donc écartées.
+> Tentative de prouver que la v116 est coupable (un appareil à liste incomplète qui écraserait
+> les autres) : **NON reproduite** en émulateur. Ne pas l'affirmer sans preuve.
 >
-> **Ce qu'Amin a accepté de perdre pendant le test**, et qu'il faudra remettre en premier :
-> détection de la mémoire pleine (v123), écriture additive des quarts (v123), garde-fous contre
+> **Les sections ci-dessous décrivent les v116 à v126, qui ne sont PLUS dans `index.html`.**
+> Elles sont conservées : chaque correctif y est documenté avec sa mesure, et il faudra les
+> réintroduire une fois la cause établie. Repères git : v115 = `3598c7d`, v116 = `51784ef`,
+> v126 = `f6763ef`.
+>
+> **Ce qui n'est plus actif pendant le test** : écriture transactionnelle et feuille de crédits
+> TPS/TVQ (v116), détection de la mémoire pleine et écriture additive (v123), garde-fous contre
 > l'écran blanc (v120), date locale du formulaire (v119) — **les quarts saisis après 20 h sont de
-> nouveau datés du lendemain**, protection du rattrapage de paie (v120), et tous les outils de
+> nouveau datés du lendemain** —, protection du rattrapage de paie (v120), et tous les outils de
 > diagnostic (v121 à v126).
 >
-> Vérifié avant la bascule : le calcul de la paie est **identique** entre v116 et v126
-> (taximètre net 329,75 · salaire 162,00 · part patron 197,85 sur le quart de référence).
-> Aucune donnée Firestore n'est touchée par ce retour en arrière.
+> Vérifié avant chaque bascule : le calcul de la paie est **identique** (taximètre net 329,75 ·
+> salaire 162,00 · part patron 197,85 · essence avancée 40,00 sur le quart de référence).
+> Aucune donnée Firestore n'est touchée par ces retours en arrière.
 
 ## Vue d'ensemble
 TaxiPro est une application de gestion de flotte de taxis pour petits propriétaires-opérateurs au Québec. Développée par Amin, propriétaire de 3 Toyota Prius (véhicules 707, 718, 732) chez Taxis Unis de Chicoutimi (9420-1001 Québec Inc.).
