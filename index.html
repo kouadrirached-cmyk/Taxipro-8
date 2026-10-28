@@ -6203,6 +6203,45 @@ function payeWeekCalc(wkKey,drvName){
   return {sal:sal,cash:cash,ess:ess,tax:tax,brut:brut,crs:crs,part:part,pour:pour,n:n};
 }
 
+// Payer ce qu'un chauffeur a gagné APRÈS avoir déjà été payé pour la
+// semaine. Nécessaire depuis qu'on peut payer en milieu de semaine :
+// sans ça, les quarts roulés ensuite seraient avalés par le « payé ».
+// On ne touche pas au versement d'origine, on ajoute la différence.
+function payerComplement(wkKey,drvName){
+  if(!C.payes)C.payes={};
+  var k=wkKey+'|'+drvName;
+  var p=C.payes[k];
+  if(!p||!p.paid){alert('Cette semaine n\'est pas marquée payée.');return;}
+  var dd=payeWeekCalc(wkKey,drvName);
+  var deductCash=C.payes[k+'_deductCash']===true;
+  var essCash=C.payes[k+'_essCash']===true;
+  var cashNet=essCash?Math.max(0,pf(dd.cash)-pf(dd.ess)):pf(dd.cash);
+  var net=deductCash?Math.max(0,dd.sal-cashNet):dd.sal;
+  var recu=pf(p.net);
+  var reste=parseFloat((net-recu).toFixed(2));
+  if(reste<=0.005){alert('Rien de plus à verser : il a déjà reçu '+fm(recu)+'.');return;}
+  if(p.horsApp&&!confirm('Cette semaine a été SOLDÉE en bloc, pas versée par l\'app.\n\n'
+    +'Payer la différence créera une vraie sortie de trésorerie de '+fm(reste)+'.\n\n'
+    +'Si tu n\'as jamais versé cette semaine, annule plutôt le solde et paie la semaine en entier.\n\nContinuer quand même ?'))return;
+  if(!confirm('💵 Complément pour '+drvName+' — semaine du '+wkKey+'\n\n'
+    +'Déjà versé : '+fm(recu)+'\n'
+    +'Gagné depuis : '+fm(reste)+'\n'
+    +'Total de la semaine : '+fm(net)+'\n\n'
+    +'➡️ Tu verses maintenant : '+fm(reste)+'\n\n'
+    +'Sortie automatique du Compte Commercial.'))return;
+  var t=getTresoAccounts();
+  t.transactions.push({id:uid(),date:ymdLocal(),accountId:'comm',type:'out',
+    amount:reste,cat:'Salaire',
+    desc:'💼 Complément de paye '+drvName+' (sem. '+wkKey.slice(5)+')',
+    payeKey:k,auto:true});
+  p.net=parseFloat(net.toFixed(2));
+  if(!p.complements)p.complements=[];
+  p.complements.push({ts:new Date().toISOString(),montant:reste,by:U.name});
+  audit('PAYE_COMPLEMENT',drvName+'/'+wkKey+'/'+fm(reste));
+  lSave();
+  renderPaye();
+  alert('✅ Complément de '+fm(reste)+' versé à '+drvName+'.');
+}
 function payeToggle(wkKey,drvName){
   if(!C.payes)C.payes={};
   const k=wkKey+'|'+drvName;
@@ -6562,6 +6601,31 @@ function rattacherPayeOrpheline(cle,nomCible){
   audit('PAYE_RATTACHEE',cle+' → '+nk);
   lSave();renderPaye();
 }
+// ── LA BANNIÈRE QUI DÉBLOQUE ──
+// Une semaine soldée en bloc porte « Soldé », pas « Payer » : le patron
+// croit l'app cassée alors qu'elle le croit payé. Si ce solde était une
+// erreur, il faut pouvoir revenir en arrière SANS aller chercher dans
+// une carte repliée — on le met en haut de la page Paye.
+function soldeEnBlocBanniereHTML(){
+  var lots=(C&&C.payeLots)||[];
+  if(!lots.length)return '';
+  var l=lots[0];
+  var quand='';
+  try{quand=new Date(l.ts).toLocaleDateString('fr-CA',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});}catch(e){}
+  return '<div style="background:rgba(255,107,0,.12);border:2px solid rgba(255,107,0,.5);border-radius:14px;padding:13px;margin-bottom:12px;">'
+    +'<div style="font-size:13px;font-weight:900;color:var(--neon);margin-bottom:6px;">🧹 '
+    +l.n+' semaine'+(l.n>1?'s':'')+' marquée'+(l.n>1?'s':'')+' « déjà versée » — pas payée par l\'app</div>'
+    +'<div style="font-size:11px;color:var(--m3);line-height:1.7;margin-bottom:10px;">'
+    +'Le '+_cmpEsc(quand)+', '+fm(l.total)+' ont été retirés du passif d\'un seul coup, '
+    +'comme des payes déjà versées en dehors de l\'application. '
+    +'<b style="color:var(--neon);">Aucun argent n\'est sorti de ta trésorerie.</b><br>'
+    +'Si en réalité tu n\'avais pas encore versé ces semaines, remets-les à payer : '
+    +'leur bouton « 💵 Payer » reviendra.</div>'
+    +'<button onclick="annulerLotPaye(\''+l.id+'\')" style="width:100%;background:rgba(57,211,83,.18);border:1px solid rgba(57,211,83,.5);color:var(--grn);border-radius:10px;padding:12px;font-size:12px;font-weight:900;cursor:pointer;">'
+    +'↩️ Remettre ces semaines à payer</button>'
+    +(lots.length>1?'<div style="font-size:9px;color:var(--m2);margin-top:7px;">'+(lots.length-1)+' autre(s) rattrapage(s) plus ancien(s) : voir la carte de vérification plus bas.</div>':'')
+    +'</div>';
+}
 function payesDiagHTML(){
   var d=diagnosticPayes();
   if(!d.n&&!d.orphelines.length&&!d.variantes.length&&!d.lots.length)return '';
@@ -6694,7 +6758,7 @@ function payesDiagHTML(){
 
 function renderPaye(){
   const c=document.getElementById('payeContent');
-  var _audEss=payesDiagHTML()+auditEssenceHTML();
+  var _audEss=soldeEnBlocBanniereHTML()+payesDiagHTML()+auditEssenceHTML();
   if(!C.payes)C.payes={};
   const allArr=getArr();
   if(!allArr.length){c.innerHTML='<div class="empty"><div class="ei">💵</div>Aucun quart enregistré.</div>';return;}
@@ -6787,7 +6851,7 @@ function renderPaye(){
     const totBrutWk=drvEntries.reduce((a,[,d])=>a+d.brut,0);
     const totPourWk=drvEntries.reduce((a,[,d])=>a+d.pour,0);
     const totPartWk=drvEntries.reduce((a,[,d])=>a+d.part,0);
-    const allPaid=!isCurWk&&drvEntries.every(([dn])=>{const k=wkey+'|'+dn;return C.payes[k]&&C.payes[k].paid;});
+    const allPaid=drvEntries.every(([dn])=>{const k=wkey+'|'+dn;return C.payes[k]&&C.payes[k].paid;});
 
     // Couleur bordure selon statut
     const wkBorder=isCurWk?'rgba(245,200,0,.3)':allPaid?'rgba(57,211,83,.25)':'rgba(255,58,58,.25)';
@@ -6796,13 +6860,14 @@ function renderPaye(){
     html+='<div class="paye-week" style="border-color:'+wkBorder+';background:'+wkBg+';">'
       +'<div class="paye-week-title">'
       +'<span>'+(isCurWk?'🟡':'📅')+' '+wd.short+(isCurWk?' <span style="font-size:9px;color:var(--gold);background:rgba(245,200,0,.12);padding:2px 7px;border-radius:20px;border:1px solid rgba(245,200,0,.2);">En cours</span>':'')+'</span>'
-      +(isCurWk?'<span style="font-size:10px;color:var(--gold);">Solde accumulé</span>'
-        :'<span style="color:'+(allPaid?'var(--grn)':'var(--red)')+';">'+(allPaid?'✅ Tout payé':'🔴 En attente')+'</span>')
+      +(allPaid?'<span style="color:var(--grn);">✅ Tout payé</span>'
+        :isCurWk?'<span style="font-size:10px;color:var(--gold);">Solde accumulé — payable quand tu veux</span>'
+        :'<span style="color:var(--red);">🔴 En attente</span>')
       +'</div>';
 
     drvEntries.forEach(([drvName,dd])=>{
       const k=wkey+'|'+drvName;
-      const isPaid=!isCurWk&&C.payes[k]&&C.payes[k].paid;
+      const isPaid=!!(C.payes[k]&&C.payes[k].paid);
       const paidTs=isPaid?new Date(C.payes[k].ts).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
       const deductCash=C.payes[k+'_deductCash']===true;
       const essCash=C.payes[k+'_essCash']===true;
@@ -6872,20 +6937,38 @@ function renderPaye(){
             +(deductCash?'💵 '+fm(cashNet)+' cash déduit':'')
             +(deductCash&&essCash?' · ':'')
             +(essCash?'⛽ '+fm(dd.ess)+' d\'essence pris dans le cash':'')+'</div>':''))
-        +'<div class="paye-status" style="color:'+(isCurWk?'var(--gold)':isPaid?'var(--grn)':'var(--red)')+';">'
-        +(isCurWk?'🟡 '+dd.n+' quart'+(dd.n>1?'s':'')+' cette semaine'
-          // Un solde de rattrapage N'EST PAS un versement : aucun argent
-          // n'est sorti de la trésorerie. Le dire, sinon une semaine
-          // soldée en bloc ressemble à une paye faite une par une.
-          :isPaid?((C.payes[k]&&C.payes[k].horsApp)
+        +'<div class="paye-status" style="color:'+(isPaid?'var(--grn)':isCurWk?'var(--gold)':'var(--red)')+';">'
+        // Un solde de rattrapage N'EST PAS un versement : aucun argent
+        // n'est sorti de la trésorerie. Le dire, sinon une semaine
+        // soldée en bloc ressemble à une paye faite une par une.
+        +(isPaid?((C.payes[k]&&C.payes[k].horsApp)
             ?'🧹 Soldé le '+paidTs+' — déjà versé hors app'
             :'✅ Payé le '+paidTs)
+          :isCurWk?'🟡 '+dd.n+' quart'+(dd.n>1?'s':'')+' cette semaine'
           :'🔴 En attente de paiement')
         +'</div>'
+        // PAYÉ PUIS DE NOUVEAUX QUARTS. Payer en milieu de semaine est
+        // maintenant permis ; le chauffeur qui roule encore après doit
+        // être payé pour ça aussi. On compare ce qu'il a reçu avec ce
+        // qu'il a gagné depuis, et on propose le complément.
+        +(function(){
+          if(!isPaid)return '';
+          var recu=pf(C.payes[k]&&C.payes[k].net);
+          var reste=parseFloat((net-recu).toFixed(2));
+          if(reste<=0.005)return '';
+          return '<div style="margin-top:5px;background:rgba(255,107,0,.12);border:1px solid rgba(255,107,0,.4);border-radius:9px;padding:7px 9px;">'
+            +'<div style="font-size:10px;color:var(--neon);font-weight:800;">⚠️ '+fm(reste)+' gagnés depuis le paiement</div>'
+            +'<div style="font-size:9px;color:var(--m2);margin-top:2px;">Versé : '+fm(recu)+' · Dû maintenant : '+fm(net)+'</div>'
+            +'<button onclick="payerComplement(\''+wkey+'\',\''+drvName+'\')" style="width:100%;background:rgba(255,107,0,.2);border:1px solid rgba(255,107,0,.5);color:var(--neon);border-radius:8px;padding:7px;font-size:10px;font-weight:800;cursor:pointer;margin-top:6px;">'
+            +'💵 Payer la différence</button></div>';
+        })()
         +'</div>'
-        +(isCurWk
-          ?'<div style="font-size:10px;color:var(--m2);text-align:right;min-width:60px;">Paye<br>lundi prochain</div>'
-          :'<button class="paye-btn '+(isPaid?'paye-btn-unpay':'paye-btn-pay')+'" onclick="payeToggle(\''+wkey+'\',\''+drvName+'\')">'+(isPaid?'↩ Annuler':'💵 Payer')+'</button>')
+        // Le patron paie quand il le décide. L'app proposait « Paye
+        // lundi prochain » SANS bouton pendant la semaine en cours : un
+        // chauffeur qui finit le mercredi ne pouvait pas être payé, et
+        // le patron se retrouvait en retard sans pouvoir rien y faire.
+        +'<button class="paye-btn '+(isPaid?'paye-btn-unpay':'paye-btn-pay')+'" onclick="payeToggle(\''+wkey+'\',\''+drvName+'\')">'
+        +(isPaid?'↩ Annuler':(isCurWk?'💵 Payer<br><span style="font-size:8px;font-weight:700;">maintenant</span>':'💵 Payer'))+'</button>'
         +'</div>';
     });
 
@@ -14025,7 +14108,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-28-v121-OU-SONT-LES-QUARTS-DE-MES-CHAUFFEURS';
+var APP_VERSION = '2026-10-28-v122-PAYER-QUAND-JE-VEUX';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
