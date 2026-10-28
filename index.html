@@ -1453,10 +1453,6 @@ body{
         <button class="btn bsec bsm" id="fleetLockBtn" style="width:100%;padding:10px;margin-top:8px;" onclick="toggleFleetLock()">🔒 Verrouiller la flotte (bloquer les nouveaux appareils)</button>
         <button class="btn bsec bsm" style="width:100%;padding:10px;margin-top:8px;" onclick="archiveOldShifts()">🗄️ Archiver les vieux quarts (+12 mois)</button>
       </div>
-      <div class="card" style="border-color:rgba(96,165,250,.4);">
-        <div class="ctit"><span><span class="ci">🩺</span>Où sont les quarts de mes chauffeurs</span></div>
-        <div id="diagSyncContent"></div>
-      </div>
       <div class="card" style="border-color:rgba(255,120,120,.3);">
         <div class="ctit"><span><span class="ci">🔍</span>Vérifier les quarts</span></div>
         <div id="verifQuartsContent"></div>
@@ -1780,16 +1776,13 @@ window.txpMerge = function(local, remote, tombType){
           // D'où une TRANSACTION Firestore : les documents lus sont
           // surveillés, et si quelqu'un les modifie entre-temps, tout est
           // rejoué automatiquement sur les données fraîches.
-          var Sfinal=S, EXfinal=EX, Cfinal=C, ecrireConfig=true, sauves=0, repris=0,
-              reprisReg=0, pousses=0;
+          var Sfinal=S, EXfinal=EX, Cfinal=C, ecrireConfig=true, sauves=0, repris=0;
           var cfgRef=COL().doc('config'), sRef=COL().doc('shifts'),
               eRef=COL().doc('expenses'), auRef=COL().doc('audit'),
               delRef=COL().doc('deleted');
 
           // Ne touche à RIEN de local : une transaction peut être rejouée.
-          var clesDistS={}, clesDistE={};
           function _fusionner(dc,distS,distE){
-            clesDistS=distS||{}; clesDistE=distE||{};
             Sfinal=window.txpMerge(S,distS||{},'s');      // respecte les tombstones
             EXfinal=window.txpMerge(EX,distE||{},'e');
             sauves=Object.keys(Sfinal).length-Object.keys(S).length;
@@ -1805,36 +1798,12 @@ window.txpMerge = function(local, remote, tombType){
             var fusV=_unionParId(C&&C.vehicles,dc.vehicles);
             repris=(fusD.length-((C&&C.drivers||[]).length))
                   +(fusV.length-((C&&C.vehicles||[]).length));
-            // UNION DES REGISTRES DE QUARTS (justifications d'écart, manques
-            // réglés, manques débités). Ils vivent dans la config parce
-            // qu'ils sont classés par identifiant de quart, et la config
-            // s'écrit en UN document entier : sans union, l'appareil qui
-            // écrit efface ceux qu'il n'a pas encore reçus. C'est ainsi que
-            // la justification écrite par un chauffeur n'arrivait jamais
-            // chez le patron. On n'y retire jamais rien (voir
-            // toggleEcartRegle / debiterManque), donc l'union ne peut rien
-            // ressusciter.
-            var regs=_unionRegistres(C,dc);
-            reprisReg=regs.reprisDuCloud;
-            var cloudPlusRecent=pf(dc._cm)>pf(C&&C._cm);
-            if(cloudPlusRecent){
-              // La config du cloud est plus fraîche : on ne remplace pas ses
-              // réglages par les nôtres. Mais ce que CET appareil vient
-              // d'ajouter aux registres — la justification qu'un chauffeur
-              // écrit à l'instant — ne doit pas être jeté pour autant : il
-              // l'était en silence. On repart donc de la config du cloud,
-              // horodatage compris, en y posant nos ajouts.
-              pousses=regs.aPousser;
-              if(pousses>0||repris>0){
-                Cfinal=Object.assign({},dc,regs.registres,{drivers:fusD,vehicles:fusV});
-              }else{
-                ecrireConfig=false;
-              }
-            }else{
-              // Nos réglages sont les plus récents : on écrit les nôtres,
-              // mais sans effacer les registres venus des autres appareils.
-              Cfinal=Object.assign({},C,regs.registres,{drivers:fusD,vehicles:fusV});
-            }
+            if(repris>0)Cfinal=Object.assign({},C,{drivers:fusD,vehicles:fusV});
+            // Pour le reste de la config (pourcentages, redevance, réglages
+            // de taxes), le plus récent gagne : on ne remplace pas une
+            // config plus fraîche que la nôtre. _cm n'est tamponné que
+            // lorsque la config change vraiment (voir lSave).
+            if(pf(dc._cm)>pf(C&&C._cm))ecrireConfig=false;
           }
           // Une fois l'écriture passée : garder en local ce qui a été repris
           // du cloud, sinon cet appareil le réécraserait au tour suivant.
@@ -1847,75 +1816,37 @@ window.txpMerge = function(local, remote, tombType){
               }
               if(repris>0&&C){
                 C.drivers=Cfinal.drivers; C.vehicles=Cfinal.vehicles;
+                window._cfgEmpreinteVue=_cfgEmpreinte(C);
               }
-              // Les justifications et les manques réglés venus des autres
-              // appareils : les garder ici aussi, sinon on refait l'union
-              // à chaque sauvegarde sans jamais les afficher.
-              if(reprisReg>0&&C&&Cfinal){
-                REGISTRES_QUARTS.forEach(function(nom){
-                  if(Cfinal[nom])C[nom]=Cfinal[nom];
-                });
-              }
-              if((repris>0||reprisReg>0)&&C)window._cfgEmpreinteVue=_cfgEmpreinte(C);
               if(typeof lSaveLocal==='function')lSaveLocal();
               if(typeof _refreshAfterSync==='function')_refreshAfterSync();
             }catch(eRec){}
           }
           // Les 5 documents partent ENSEMBLE : rien n'est écrit à moitié.
-          // ═══ ÉCRITURE ADDITIVE : ON N'ENLÈVE QUE CE QU'ON A VOULU ENLEVER ═══
-          // Tous les quarts de la flotte tiennent dans UN document. Un
-          // `set` ordinaire le remplace en entier : l'appareil qui écrit
-          // impose sa liste et efface les quarts des autres qu'il n'a pas
-          // encore reçus. Avec quatre ou cinq chauffeurs qui sauvegardent
-          // en même temps en fin de soirée, c'est systématique — « il a
-          // rentré 5 quarts, j'en vois 3 ».
-          // Avec {merge:true}, on n'écrit QUE les identifiants qu'on
-          // connaît : les autres restent intacts, quoi qu'il arrive, même
-          // si la transaction a cédé et qu'on est retombé sur le lot.
-          // Les vraies suppressions deviennent explicites, via un
-          // marqueur de suppression sur l'identifiant concerné.
-          function _champsAdditifs(src,tombs,presentDansCloud){
-            var out={},id;
-            for(id in src)out[id]=src[id];
-            for(id in (tombs||{})){
-              // ne demander la suppression que de ce qui existe encore
-              if(!src[id]&&presentDansCloud&&presentDansCloud[id]){
-                out[id]=firebase.firestore.FieldValue.delete();
-              }
-            }
-            return out;
-          }
           function _ecrire(cible){
             if(ecrireConfig)cible.set(cfgRef,Cfinal);
-            cible.set(sRef,{data:_champsAdditifs(Sfinal,window.TOMB.s,clesDistS)},{merge:true});
-            cible.set(eRef,{data:_champsAdditifs(EXfinal,window.TOMB.e,clesDistE)},{merge:true});
+            cible.set(sRef,{data:Sfinal});
+            cible.set(eRef,{data:EXfinal});
             cible.set(auRef,{data:(AU||[]).slice(-1000)});
             cible.set(delRef,{s:window.TOMB.s,e:window.TOMB.e,r:window.TOMB.r||0});
           }
 
           var enTransaction=false;
-          // Plusieurs chauffeurs sauvegardent en même temps en fin de
-          // soirée : la contention sur le document des quarts est la
-          // règle, pas l'exception. On réessaie avant d'abandonner.
-          for(var essai=0;essai<3&&!enTransaction;essai++){
-            try{
-              await db.runTransaction(async function(tx){
-                // toutes les lectures AVANT toute écriture : règle des transactions
-                const lus=await Promise.all([tx.get(cfgRef),tx.get(sRef),tx.get(eRef)]);
-                _fusionner(lus[0].exists?(lus[0].data()||{}):null,
-                           lus[1].exists?(lus[1].data().data||{}):{},
-                           lus[2].exists?(lus[2].data().data||{}):{});
-                _ecrire(tx);
-              });
-              enTransaction=true;
-            }catch(eTx){
-              // Une transaction exige le réseau : hors ligne, elle échoue. On
-              // retombe alors sur l'écriture en lot, qui part dans le cache
-              // Firestore et sera rejouée au retour du réseau. Elle est sûre
-              // elle aussi depuis qu'elle est additive.
-              console.warn('Transaction impossible ('+(eTx&&eTx.code)+') — essai '+(essai+1)+'/3');
-              if(essai<2)await new Promise(function(r){setTimeout(r,250*(essai+1));});
-            }
+          try{
+            await db.runTransaction(async function(tx){
+              // toutes les lectures AVANT toute écriture : règle des transactions
+              const lus=await Promise.all([tx.get(cfgRef),tx.get(sRef),tx.get(eRef)]);
+              _fusionner(lus[0].exists?(lus[0].data()||{}):null,
+                         lus[1].exists?(lus[1].data().data||{}):{},
+                         lus[2].exists?(lus[2].data().data||{}):{});
+              _ecrire(tx);
+            });
+            enTransaction=true;
+          }catch(eTx){
+            // Une transaction exige le réseau : hors ligne, elle échoue. On
+            // retombe alors sur l'ancien chemin, qui met l'écriture en file
+            // dans le cache Firestore et partira au retour du réseau.
+            console.warn('Transaction impossible ('+(eTx&&eTx.code)+') — écriture en lot');
           }
           if(!enTransaction){
             try{
@@ -1930,16 +1861,13 @@ window.txpMerge = function(local, remote, tombType){
             _ecrire(batch);
             await batch.commit();
           }
-          if(sauves>0||repris>0||reprisReg>0||pousses>0){
-            console.warn('PROTECTION : '+sauves+' quart(s), '+repris
-              +' chauffeur(s)/voiture(s), '+reprisReg+' note(s) d\'écart du cloud conservés'
-              +(pousses>0?' · '+pousses+' note(s) de cet appareil poussées malgré une config plus récente':''));
+          if(sauves>0||repris>0){
+            console.warn('PROTECTION : '+sauves+' quart(s) et '+repris
+              +' chauffeur(s)/voiture(s) du cloud conservés à l\'écriture');
             _recuperer();
           }
           window._fbPending=false;
           window._fbLastOk=Date.now();
-          window._fbDernierEchec=null;
-          if(typeof baliseEtat==='function')setTimeout(baliseEtat,500);
           localStorage.setItem('txpro_lastSave',new Date().toISOString());
           if(typeof setSyncStatus==='function')setSyncStatus('ok');
           // Surveillance de taille (limite Firestore ~1 Mo par document)
@@ -1967,14 +1895,6 @@ window.txpMerge = function(local, remote, tombType){
         }catch(e){
           console.warn('FB save err',e);
           window._fbPending=true;
-          // GARDER LA RAISON DE L'ÉCHEC. Sans elle, l'app ne peut que
-          // dire « hors ligne » — alors qu'une écriture refusée parce que
-          // l'appareil n'est pas membre de la flotte (flotte verrouillée,
-          // identité anonyme perdue après un vidage de cache) n'a rien à
-          // voir avec le réseau. Le chauffeur voyait ses quarts chez lui
-          // et les croyait envoyés ; ils ne partaient jamais.
-          window._fbDernierEchec={code:(e&&e.code)||String((e&&e.message)||e),
-            ts:Date.now(),membre:!!window._fbMember};
           if(typeof setSyncStatus==='function')setSyncStatus('offline');
         }
       },
@@ -2111,18 +2031,7 @@ function fmQc(n){
 function pf(v){return parseFloat(v)||0;}
 function pi(v){return parseInt(v)||0;}
 function gv(id){const e=document.getElementById(id);return e?e.value:'';}
-// La date en heure LOCALE. toISOString() rend l'heure UTC : au Québec,
-// à partir de 20 h (19 h l'hiver), elle renvoie DEMAIN. Conséquences
-// mesurées : la vue « Jour » comparait les quarts d'aujourd'hui à la
-// date de demain et n'affichait plus RIEN à partir de 20 h — soit
-// exactement quand les chauffeurs de soir rentrent leur quart — et le
-// formulaire se pré-remplissait à la date du lendemain.
-// TOUTE date au format AAAA-MM-JJ doit passer par ici.
-function ymdLocal(d){
-  var x=(d===undefined||d===null)?new Date():new Date(d);
-  return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
-}
-function today(){return ymdLocal();}
+function today(){return new Date().toISOString().split('T')[0];}
 function getDrv(name){return C.drivers.find(d=>d.name===name);}
 function getArr(){return Object.values(S).sort((a,b)=>new Date(b.date+' '+(b.time||'00:00'))-new Date(a.date+' '+(a.time||'00:00')));}
 function getExpArr(){return Object.values(EX).sort((a,b)=>new Date(b.date)-new Date(a.date));}
@@ -2130,19 +2039,8 @@ function getExpArr(){return Object.values(EX).sort((a,b)=>new Date(b.date)-new D
 // ═══ PERIOD ═══
 function gwS(d){const dt=new Date(d);const day=dt.getDay();dt.setDate(dt.getDate()-day+(day===0?-6:1));dt.setHours(0,0,0,0);return dt;}
 // Parse YYYY-MM-DD as LOCAL date (avoid UTC timezone offset bug)
-// UN QUART SANS DATE NE DOIT PAS VIDER UN ÉCRAN. Dans une app d'un
-// seul fichier, une exception pendant le rendu laisse la page BLANCHE :
-// un seul quart dont la date vaut null faisait planter salairesDus(),
-// donc renderPaye(), et le patron ne voyait plus aucune paye — il ne
-// pouvait plus verser les salaires. On rend donc une date invalide
-// plutôt que de lever, et les totaux ignorent ces quarts (ils sont
-// signalés à part dans Réglages → « 🔍 Vérifier les quarts »).
-function dateValide(ds){return typeof ds==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(ds);}
-function parseLocalDate(ds){
-  if(!dateValide(ds))return new Date(NaN);
-  const[y,m,d]=ds.split('-').map(Number);return new Date(y,m-1,d);
-}
-function inDay(ds,ref){return ds===ymdLocal(ref);}
+function parseLocalDate(ds){const[y,m,d]=ds.split('-').map(Number);return new Date(y,m-1,d);}
+function inDay(ds,ref){return ds===ref.toISOString().split('T')[0];}
 function inWk(ds,ref){const d=parseLocalDate(ds),ws=gwS(ref),we=new Date(ws);we.setDate(we.getDate()+7);return d>=ws&&d<we;}
 function inMo(ds,ref){const d=parseLocalDate(ds),r=new Date(ref);return d.getMonth()===r.getMonth()&&d.getFullYear()===r.getFullYear();}
 function inYr(ds,ref){return parseLocalDate(ds).getFullYear()===new Date(ref).getFullYear();}
@@ -2249,34 +2147,22 @@ function basePaieQuart(s){
 function partPatronQuart(s){
   var net=taxNetQuart(s);
   if(isOwnerShift(s))return net;
-  var pct=pctQuart(s);
-  if(pct<=0)return 0;
-  return parseFloat((net-basePaieQuart(s)*(pct/100)).toFixed(2));
-}
-// Le pourcentage qui s'applique à ce quart.
-// Si le nom inscrit sur le quart ne correspond plus à personne dans
-// l'équipe — nom corrigé, chauffeur retiré, orthographe différente — on
-// prend le taux ENREGISTRÉ SUR LE QUART : il y est écrit au moment de la
-// saisie précisément pour ça. Auparavant on rendait 0, ce qui faisait
-// disparaître en silence le salaire du chauffeur ET la part du patron :
-// l'argent avait bel et bien été gagné et versé.
-function pctQuart(s){
   var d=getDrv(s&&s.driver);
-  if(d)return pf(d.pct);
-  return pf(s&&s.drvPct);
+  if(!d)return 0;
+  return parseFloat((net-basePaieQuart(s)*(pf(d.pct)/100)).toFixed(2));
 }
 function calcSalary(s){
   // Salaire = argent PAYÉ à un chauffeur employé.
   // Quand le patron conduit : aucun salaire versé (il ne se paie pas un salaire de chauffeur).
   if(isOwnerShift(s))return 0;
-  const pct=pctQuart(s);
-  if(pct<=0)return 0;
+  const drv=getDrv(s.driver);
+  if(!drv)return 0;
   const base=basePaieQuart(s);
   // L'essence avancée par le chauffeur N'EST PAS un salaire : c'est une
   // avance qu'on lui rembourse à part. La mêler à la paie faussait le
   // salaire affiché ET la faisait déduire deux fois du profit mensuel,
   // une fois dans les salaires et une fois dans le poste carburant.
-  return parseFloat((base*(pct/100)+pf(s.pourboire)).toFixed(2));
+  return parseFloat((base*(drv.pct/100)+pf(s.pourboire)).toFixed(2));
 }
 // Essence sortie de la poche du chauffeur, à lui rembourser
 function essenceAvancee(s){
@@ -2359,48 +2245,13 @@ function lLoadLocal(){
   }catch(err){C=JSON.parse(JSON.stringify(DEF));S={};EX={};AU=[];}
 }
 
-// SAUVEGARDE LOCALE — ET CE QUI SE PASSE QUAND LA MÉMOIRE EST PLEINE.
-// Avant, l'échec était avalé par un `catch(e){}` muet. Conséquence
-// mesurable : la mémoire du téléphone sature (deux ans de quarts, plus
-// HUIT sauvegardes hebdomadaires qui contiennent chacune une copie
-// complète), l'enregistrement des quarts échoue sans un mot, et au
-// rechargement l'app relit l'ancienne liste. Des quarts bien reçus
-// disparaissent de l'appareil — « il en a rentré 5, j'en vois 3 ».
-// On fait donc trois choses : on libère de la place en sacrifiant les
-// sauvegardes les plus vieilles, on réessaie, et si ça ne passe
-// toujours pas on le DIT au lieu de faire semblant.
-function _ecrireLocal(){
-  localStorage.setItem(SK+'_c',JSON.stringify(C));
-  localStorage.setItem(SK+'_s',JSON.stringify(S));
-  localStorage.setItem(SK+'_e',JSON.stringify(EX));
-  localStorage.setItem(SK+'_a',JSON.stringify(AU.slice(-1000)));
-}
 function lSaveLocal(){
   try{
-    _ecrireLocal();
-    window._stockagePlein=false;
-    return true;
-  }catch(e){
-    // Les sauvegardes hebdomadaires pèsent le plus lourd : on les
-    // sacrifie une par une, de la plus ancienne à la plus récente.
-    try{
-      var cles=Object.keys(localStorage).filter(function(k){
-        return k.indexOf('txpro_bkp_')===0;
-      }).sort();
-      while(cles.length){
-        localStorage.removeItem(cles.shift());
-        try{
-          _ecrireLocal();
-          window._stockagePlein=false;
-          console.warn('Mémoire pleine : une vieille sauvegarde a été supprimée pour garder les quarts');
-          return true;
-        }catch(e2){}
-      }
-    }catch(e3){}
-    window._stockagePlein=true;
-    console.error('MÉMOIRE PLEINE : les quarts ne peuvent plus être gardés sur cet appareil');
-    return false;
-  }
+    localStorage.setItem(SK+'_c',JSON.stringify(C));
+    localStorage.setItem(SK+'_s',JSON.stringify(S));
+    localStorage.setItem(SK+'_e',JSON.stringify(EX));
+    localStorage.setItem(SK+'_a',JSON.stringify(AU.slice(-1000)));
+  }catch(e){}
 }
 
 // Main save — Firebase + local backup simultaneously
@@ -2412,24 +2263,6 @@ function _unionParId(mien,distant){
   out.forEach(function(x){if(x&&x.id)vus[x.id]=1;});
   (distant||[]).forEach(function(x){if(x&&x.id&&!vus[x.id]){out.push(x);vus[x.id]=1;}});
   return out;
-}
-// Les registres classés par identifiant de quart. Ils voyagent dans la
-// config faute d'un document à eux, et on n'y retire JAMAIS une entrée :
-// on ajoute, ou on bascule une valeur. L'union est donc sûre.
-// Si une suppression franche est ajoutée un jour à l'un d'eux, il faudra
-// le sortir de cette liste ou lui donner des tombstones.
-var REGISTRES_QUARTS=['justifs','ecartsRegles','ecartsDebits'];
-function _unionRegistres(mien,distant){
-  var out={},reprisDuCloud=0,aPousser=0;
-  REGISTRES_QUARTS.forEach(function(nom){
-    var a=(mien&&mien[nom])||{}, b=(distant&&distant[nom])||{};
-    var k;
-    for(k in b){if(!Object.prototype.hasOwnProperty.call(a,k))reprisDuCloud++;}
-    for(k in a){if(!Object.prototype.hasOwnProperty.call(b,k))aPousser++;}
-    // ce que cet appareil connaît prime ; ce qu'il ignore est repris
-    out[nom]=Object.assign({},b,a);
-  });
-  return {registres:out,reprisDuCloud:reprisDuCloud,aPousser:aPousser};
 }
 // Empreinte de la config, sans son horodatage : sert à savoir si un
 // appel à lSave() correspond à un VRAI changement.
@@ -2579,7 +2412,7 @@ function doBackup(){
   const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  const dt=ymdLocal();
+  const dt=new Date().toISOString().slice(0,10);
   a.href=url;a.download='taxipro_backup_'+dt+'.json';
   document.body.appendChild(a);a.click();
   document.body.removeChild(a);URL.revokeObjectURL(url);
@@ -3631,49 +3464,6 @@ function showToastGrn(msg){
   document.body.appendChild(t);
   setTimeout(function(){t.remove();},2500);
 }
-// ── LES ÉCARTS, CÔTÉ PATRON ──
-// Le tableau de bord n'annonçait qu'un nombre : « 3 quarts avec écart
-// d'argent ». Ni qui, ni combien, ni surtout CE QUE LE CHAUFFEUR A
-// ÉCRIT pour l'expliquer — alors que lui lit « Justification envoyée,
-// en attente du patron » et attend une réponse. On montre tout, avec
-// les deux décisions possibles sous la main.
-function ecartsPatronHTML(alerts){
-  if(!alerts||!alerts.length)return '';
-  var ouvert=window._ecartsOuvert!==false;   // ouvert par défaut : c'est de l'argent
-  var tot=alerts.reduce(function(a,s){return a+Math.abs(calcEcart(s));},0);
-  var avecMot=alerts.filter(function(s){return !!(C.justifs&&C.justifs[s.id]);}).length;
-  var h='<div class="bn bn-red" onclick="window._ecartsOuvert=(window._ecartsOuvert===false);renderDash();" style="cursor:pointer;">'
-    +'⚠️ '+alerts.length+' quart'+(alerts.length>1?'s':'')+' avec écart d\'argent · '+fm(tot)
-    +(avecMot?' · '+avecMot+' explication'+(avecMot>1?'s':''):'')
-    +' '+(ouvert?'▾':'▸')+'</div>';
-  if(!ouvert)return h;
-  h+='<div class="card" style="border-color:rgba(255,58,58,.35);">';
-  alerts.slice(0,12).forEach(function(s){
-    var ec=calcEcart(s);
-    var mot=(C.justifs&&C.justifs[s.id])||'';
-    h+='<div style="border-bottom:1px solid var(--brd);padding:9px 0;">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">'
-      +'<div style="min-width:0;"><div style="font-size:12px;font-weight:800;color:var(--m3);">'+_cmpEsc(s.driver||'?')+'</div>'
-      +'<div style="font-size:10px;color:var(--m2);">'+_cmpEsc(s.date||'')+' · '+_cmpEsc(s.vehicle||'')+'</div></div>'
-      +'<div style="font-size:16px;font-weight:900;color:'+(ec>0?'var(--red)':'var(--pur)')+';flex-shrink:0;">'
-      +(ec>0?'−':'+')+fm(Math.abs(ec))+'</div></div>';
-    if(mot){
-      h+='<div style="background:rgba(245,200,0,.09);border-left:3px solid var(--gold);border-radius:0 9px 9px 0;padding:7px 9px;margin-top:6px;font-size:10px;color:var(--m3);line-height:1.5;">'
-        +'<b style="color:var(--gold);">💬 Il explique :</b><br>'+_cmpEsc(mot)+'</div>';
-    }else if(ec>0){
-      h+='<div style="font-size:10px;color:var(--m2);margin-top:5px;">Aucune explication écrite.</div>';
-    }
-    if(ec>0&&!isEcartDebite(s.id)){
-      h+='<div style="display:flex;gap:6px;margin-top:7px;">'
-        +'<button onclick="toggleEcartRegle(\''+s.id+'\');renderDash();" style="flex:1;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:9px;padding:8px;font-size:10px;font-weight:800;cursor:pointer;">✅ Accepter</button>'
-        +'<button onclick="debiterManqueCustom(\''+s.id+'\','+Math.abs(ec)+');renderDash();" style="flex:1;background:rgba(255,58,58,.15);border:1px solid rgba(255,58,58,.4);color:var(--red);border-radius:9px;padding:8px;font-size:10px;font-weight:800;cursor:pointer;">💸 Déduire</button>'
-        +'</div>';
-    }
-    h+='</div>';
-  });
-  if(alerts.length>12)h+='<div style="font-size:10px;color:var(--m2);padding-top:8px;">… et '+(alerts.length-12)+' autre(s), dans l\'historique.</div>';
-  return h+'</div>';
-}
 function toggleEcartRegle(shiftId){
   if(!C.ecartsRegles)C.ecartsRegles={};
   C.ecartsRegles[shiftId]=!C.ecartsRegles[shiftId];
@@ -3976,43 +3766,22 @@ function goPage(name){
   document.getElementById('tb-'+name).classList.add('on');
   document.getElementById('pagesEl').scrollTop=0;
   gaEvent('ecran',{ecran:name,role:(U&&U.role)||''});
-  // FILET DE SÉCURITÉ : dans une app d'un seul fichier, une exception
-  // pendant le rendu laisse la page BLANCHE. C'est arrivé pour de vrai :
-  // un quart dont la date valait null faisait planter la page Paye, et
-  // le patron ne pouvait plus verser les salaires — sans le moindre
-  // message. On dit désormais ce qui s'est passé, et où aller voir.
-  try{
-    if(name==='dash')renderDash();
-    if(name==='hist')renderHist();
-    if(name==='stats')renderStats();
-    if(name==='profit')renderProfit();
-    if(name==='analyse')renderAnalyse();
-    if(name==='paye')renderPaye();
-    if(name==='exp'){renderExp();renderFactures();}
-    if(name==='team')renderTeamWithMsgs();
-    if(name==='fleet')renderFleet();
-    if(name==='treso')renderTreso();
-    if(name==='clean'){renderClean();renderGaranties();}
-    if(name==='msg')renderMsgPage();
-    if(name==='audit2')renderAuditVisual();
-    if(name==='sched')renderSched();
-    if(name==='planveh')renderPlanVeh();
-    if(name==='set')renderSet();
-  }catch(ePage){
-    console.error('Rendu de la page '+name+' :',ePage);
-    try{
-      var pg=document.getElementById('pg-'+name);
-      if(pg&&!pg.textContent.trim()){
-        pg.innerHTML='<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.4);'
-          +'border-radius:12px;padding:14px;margin:12px;font-size:12px;color:var(--m3);line-height:1.7;">'
-          +'<div style="font-weight:900;color:var(--red);margin-bottom:6px;">⚠️ Cet écran n\'a pas pu s\'afficher</div>'
-          +'Une donnée est abîmée — le plus souvent un quart sans date. '
-          +'Va dans <b>Réglages → « 🔍 Vérifier les quarts »</b> : les quarts à problème y sont listés.'
-          +'<div style="font-size:10px;color:var(--m2);margin-top:8px;">Détail technique : '
-          +String((ePage&&ePage.message)||ePage).replace(/</g,'&lt;')+'</div></div>';
-      }
-    }catch(e2){}
-  }
+  if(name==='dash')renderDash();
+  if(name==='hist')renderHist();
+  if(name==='stats')renderStats();
+  if(name==='profit')renderProfit();
+  if(name==='analyse')renderAnalyse();
+  if(name==='paye')renderPaye();
+  if(name==='exp'){renderExp();renderFactures();}
+  if(name==='team')renderTeamWithMsgs();
+  if(name==='fleet')renderFleet();
+  if(name==='treso')renderTreso();
+  if(name==='clean'){renderClean();renderGaranties();}
+  if(name==='msg')renderMsgPage();
+  if(name==='audit2')renderAuditVisual();
+  if(name==='sched')renderSched();
+  if(name==='planveh')renderPlanVeh();
+  if(name==='set')renderSet();
 }
 function setPer(mode,el){
   perMode=mode;perOff=0;
@@ -4105,7 +3874,7 @@ function renderDash(){
       +'<span style="font-weight:700;color:var(--txt);">💰 Total recette</span>'
       +'<span style="font-weight:900;color:var(--gold);font-size:15px;">'+fm(totRec)+'</span></div>'
       +'</div>';
-    c.innerHTML=ecartsPatronHTML(alerts)
+    c.innerHTML=(alerts.length?'<div class="bn bn-red">⚠️ '+alerts.length+' quart'+(alerts.length>1?'s':'')+' avec écart d\'argent</div>':'')
       +'<div class="sg">'
       +'<div class="sb gold full"><div class="slb">💰 Recette totale</div><div class="sv cgold">'+fm(totRec)+'</div><div class="ssb">'+arr.length+' quarts · '+totCrs+' courses</div></div>'
       +'<div class="sb grn"><div class="slb">👑 Profit patron</div><div class="sv cgrn">'+fm(totProfit)+'</div></div>'
@@ -4261,25 +4030,7 @@ function renderDash(){
       +(arr.length
         ?'<div class="card"><div class="ctit"><span class="ci">📋</span>Vos quarts — Taximètre & Salaire</div>'+drvShiftRows+'</div>'
         :'<div class="empty"><div class="ei">📭</div>Aucun quart pour cette période.</div>')
-      +annualDrvSummaryHTML(U.name)
-      // SON CODE DE FLOTTE. Quand le patron ne voit pas les quarts d'un
-      // chauffeur, la première question est : travaillent-ils sur la même
-      // flotte ? Le chauffeur n'a pas accès aux Réglages, il n'avait donc
-      // aucun moyen de lire ce code et de le donner à son patron.
-      +'<div style="margin-top:12px;padding:10px;background:rgba(0,0,0,.25);border:1px solid var(--brd);border-radius:10px;font-size:10px;color:var(--m2);line-height:1.6;text-align:center;">'
-      +'Ma flotte : <b style="font-family:monospace;color:var(--m3);font-size:12px;">'
-      +_cmpEsc(window.TXP_TENANT||'taxipro')+'</b>'
-      +'<div style="margin-top:3px;">Si ton patron ne voit pas tes quarts, lis-lui ce code.</div>'
-      +'<div style="margin-top:4px;">'+Object.keys(S||{}).length+' quart(s) enregistrés sur ce téléphone</div>'
-      +'</div>'
-      // DIRE LA VÉRITÉ SUR L'ENVOI. « _fbReady » ne dit que si le SDK a
-      // démarré, pas si l'écriture a été acceptée. Un appareil qui n'est
-      // pas membre de la flotte — verrouillée, ou identité anonyme perdue
-      // après un vidage de cache — voit ses écritures REFUSÉES : le
-      // chauffeur garde ses quarts sous les yeux et les croit partis,
-      // pendant que le patron ne reçoit rien.
-      +envoiStatutHTML()
-      +renvoyerMesQuartsBoutonHTML();
+      +annualDrvSummaryHTML(U.name);
   }
 }
 
@@ -4436,21 +4187,6 @@ function _shiftCard(s, isOwner){
   if(ptags)h+='<div style="margin-bottom:6px;">'+ptags+'</div>';
   if(Math.abs(ec)>0.5&&(ec>0||isOwner)){
     h+='<div style="font-size:10px;font-weight:800;color:'+(ec>0?'var(--red)':'var(--pur)')+';margin-bottom:5px;">'+(ec>0?'⚠️ Manque: −':'💰 Surplus: +')+fm(Math.abs(ec))+'</div>';
-    // CE QUE LE CHAUFFEUR A ÉCRIT. Il le tape au moment de saisir son
-    // quart, et il lit « Justification envoyée — en attente du patron ».
-    // Elle n'était affichée nulle part côté patron : il voyait le manque
-    // sans jamais voir l'explication, et le chauffeur attendait une
-    // réponse à un message que personne ne recevait.
-    if(ec>0){
-      var _jz=(C.justifs&&C.justifs[s.id])||'';
-      if(_jz){
-        h+='<div style="background:rgba(245,200,0,.09);border-left:3px solid var(--gold);border-radius:0 9px 9px 0;padding:7px 9px;margin:0 0 6px;font-size:10px;color:var(--m3);line-height:1.5;">'
-          +'<b style="color:var(--gold);">💬 '+_cmpEsc(s.driver||'Le chauffeur')+' explique :</b><br>'
-          +_cmpEsc(_jz)+'</div>';
-      }else if(isOwner&&!isEcartRegle(s.id)&&!isEcartDebite(s.id)){
-        h+='<div style="font-size:10px;color:var(--m2);margin-bottom:6px;">Aucune explication écrite par le chauffeur.</div>';
-      }
-    }
     if(ec>0&&!isEcartRegle(s.id)&&!isEcartDebite(s.id)&&isOwner){
       h+='<div style="display:flex;gap:6px;margin-top:5px;">';
       h+='<button onclick="event.stopPropagation();toggleEcartRegle(\''+s.id+'\');renderHist();" style="flex:1;background:rgba(57,211,83,.15);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:8px;padding:7px;font-size:10px;font-weight:800;cursor:pointer;">✅ Accepter</button>';
@@ -4478,7 +4214,7 @@ function _groupByWeek(shifts){
   var byWk={};
   shifts.forEach(function(s){
     var ws=gwS(parseLocalDate(s.date));
-    var wk=ymdLocal(ws);
+    var wk=ws.toISOString().slice(0,10);
     if(!byWk[wk]){
       var we=new Date(ws);we.setDate(we.getDate()+6);
       byWk[wk]={
@@ -4504,7 +4240,7 @@ function _groupByWeek(shifts){
 function _wkBlock(wk, expandKey, isOwner, drvName){
   var isOpen=_histWkExpanded[expandKey]||false;
   // Est-ce la semaine courante ?
-  var nowWk=ymdLocal(gwS(new Date()));
+  var nowWk=gwS(new Date()).toISOString().slice(0,10);
   var isCurrent=wk.key===nowWk;
   var hasEcart=wk.ecarts>0;
   var borderCol=hasEcart?'rgba(255,58,58,.4)':isCurrent?'rgba(245,200,0,.4)':'rgba(255,255,255,.08)';
@@ -5004,13 +4740,13 @@ function renderAnalyse(){
       // Écarts détaillés + / -
       +(all.ecartCount>0?(()=>{
         // Grouper les écarts par semaine
-        const ecShifts=all.shifts.filter(s=>Math.abs(calcEcart(s))>0.5&&dateValide(s.date))
-          .sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+        const ecShifts=all.shifts.filter(s=>Math.abs(calcEcart(s))>0.5)
+          .sort((a,b)=>b.date.localeCompare(a.date));
         const byWk={};
         ecShifts.forEach(s=>{
           const d=parseLocalDate(s.date);
           const ws=gwS(d);
-          const wkey=ymdLocal(ws);
+          const wkey=ws.toISOString().slice(0,10);
           if(!byWk[wkey]){const we=new Date(ws);we.setDate(we.getDate()+6);
             byWk[wkey]={label:ws.toLocaleDateString('fr-CA',{month:'short',day:'numeric'})+' – '+we.toLocaleDateString('fr-CA',{month:'short',day:'numeric'}),moins:0,moinsAmt:0,plus:0,plusAmt:0};}
           const ec=calcEcart(s);
@@ -5066,7 +4802,7 @@ function renderAnalyse(){
 
     // Par mois pour cette voiture
     const vByMo={};
-    allArr.filter(s=>s.vehicle===vname&&dateValide(s.date)).forEach(s=>{
+    allArr.filter(s=>s.vehicle===vname).forEach(s=>{
       const mo=s.date.substring(0,7);
       if(!vByMo[mo])vByMo[mo]={rec:0,sal:0,profit:0,essence:0,n:0};
       vByMo[mo].rec+=s.recette;
@@ -6270,9 +6006,9 @@ function essPriseDansCash(wkKey,drvName){
 function payeWeekCalc(wkKey,drvName){
   var sal=0,cash=0,ess=0,tax=0,brut=0,crs=0,part=0,pour=0,n=0;
   getArr().forEach(function(s){
-    if(s.isOwner||s.driver!==drvName||!dateValide(s.date))return;
+    if(s.isOwner||s.driver!==drvName)return;
     var ws=gwS(parseLocalDate(s.date));
-    if(ymdLocal(ws)!==wkKey)return;
+    if(ws.toISOString().slice(0,10)!==wkKey)return;
     sal+=calcSalary(s);
     tax+=basePaieQuart(s);
     brut+=pf(s.taxf)-pf(s.taxd);
@@ -6286,45 +6022,6 @@ function payeWeekCalc(wkKey,drvName){
   return {sal:sal,cash:cash,ess:ess,tax:tax,brut:brut,crs:crs,part:part,pour:pour,n:n};
 }
 
-// Payer ce qu'un chauffeur a gagné APRÈS avoir déjà été payé pour la
-// semaine. Nécessaire depuis qu'on peut payer en milieu de semaine :
-// sans ça, les quarts roulés ensuite seraient avalés par le « payé ».
-// On ne touche pas au versement d'origine, on ajoute la différence.
-function payerComplement(wkKey,drvName){
-  if(!C.payes)C.payes={};
-  var k=wkKey+'|'+drvName;
-  var p=C.payes[k];
-  if(!p||!p.paid){alert('Cette semaine n\'est pas marquée payée.');return;}
-  var dd=payeWeekCalc(wkKey,drvName);
-  var deductCash=C.payes[k+'_deductCash']===true;
-  var essCash=C.payes[k+'_essCash']===true;
-  var cashNet=essCash?Math.max(0,pf(dd.cash)-pf(dd.ess)):pf(dd.cash);
-  var net=deductCash?Math.max(0,dd.sal-cashNet):dd.sal;
-  var recu=pf(p.net);
-  var reste=parseFloat((net-recu).toFixed(2));
-  if(reste<=0.005){alert('Rien de plus à verser : il a déjà reçu '+fm(recu)+'.');return;}
-  if(p.horsApp&&!confirm('Cette semaine a été SOLDÉE en bloc, pas versée par l\'app.\n\n'
-    +'Payer la différence créera une vraie sortie de trésorerie de '+fm(reste)+'.\n\n'
-    +'Si tu n\'as jamais versé cette semaine, annule plutôt le solde et paie la semaine en entier.\n\nContinuer quand même ?'))return;
-  if(!confirm('💵 Complément pour '+drvName+' — semaine du '+wkKey+'\n\n'
-    +'Déjà versé : '+fm(recu)+'\n'
-    +'Gagné depuis : '+fm(reste)+'\n'
-    +'Total de la semaine : '+fm(net)+'\n\n'
-    +'➡️ Tu verses maintenant : '+fm(reste)+'\n\n'
-    +'Sortie automatique du Compte Commercial.'))return;
-  var t=getTresoAccounts();
-  t.transactions.push({id:uid(),date:ymdLocal(),accountId:'comm',type:'out',
-    amount:reste,cat:'Salaire',
-    desc:'💼 Complément de paye '+drvName+' (sem. '+wkKey.slice(5)+')',
-    payeKey:k,auto:true});
-  p.net=parseFloat(net.toFixed(2));
-  if(!p.complements)p.complements=[];
-  p.complements.push({ts:new Date().toISOString(),montant:reste,by:U.name});
-  audit('PAYE_COMPLEMENT',drvName+'/'+wkKey+'/'+fm(reste));
-  lSave();
-  renderPaye();
-  alert('✅ Complément de '+fm(reste)+' versé à '+drvName+'.');
-}
 function payeToggle(wkKey,drvName){
   if(!C.payes)C.payes={};
   const k=wkKey+'|'+drvName;
@@ -6412,7 +6109,7 @@ function auditEssenceAvancee(){
   var byWk={};
   getArr().forEach(function(s){
     var ess=essenceAvancee(s);
-    if(ess<=0.005||isOwnerShift(s)||!dateValide(s.date))return;
+    if(ess<=0.005||isOwnerShift(s))return;
     var ws=gwS(parseLocalDate(s.date));
     var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
     var k=wk+'|'+s.driver;
@@ -6520,529 +6217,9 @@ function auditEssenceHTML(){
   return h+'</div>';
 }
 
-// ═══════════════════════════════════════════════
-// 🔎 POURQUOI CES SEMAINES SONT-ELLES ENCORE DUES ?
-//
-// Le bilan additionne toutes les semaines qui n'ont jamais été cochées
-// « payée ». Trois raisons possibles, et elles ne se soignent pas de la
-// même façon :
-//   1. la semaine a été versée AVANT que l'app ne suive les paies —
-//      il n'y a rien à sortir de la trésorerie, juste à solder ;
-//   2. elle a été cochée sous une autre orthographe du nom du chauffeur
-//      (« Dialo sarifo » et « Dialo Sarifo » font deux dossiers) ;
-//   3. elle n'est réellement pas payée.
-// Cette carte dit laquelle, au lieu de laisser deviner.
-// ═══════════════════════════════════════════════
-function _normNom(n){
-  return String(n||'').toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // sans accents
-    .replace(/\s+/g,' ').trim();
-}
-// La clé de semaine, en heure LOCALE — la même partout dans l'app
-function _wkKeyDe(dateStr){
-  var ws=gwS(parseLocalDate(dateStr));
-  return ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
-}
-function diagnosticPayes(){
-  var dus=salairesDus();
-  var existe={},noms={};
-  getArr().forEach(function(s){
-    if(!s.date||isOwnerShift(s))return;
-    existe[_wkKeyDe(s.date)+'|'+s.driver]=true;
-    var nn=_normNom(s.driver);
-    if(!noms[nn])noms[nn]={};
-    noms[nn][s.driver]=(noms[nn][s.driver]||0)+1;
-  });
-  // Les marques de paiement : combien, et lesquelles ne correspondent
-  // à aucune semaine réelle (donc rangées sous un nom qui a changé).
-  var marques=0,orphelines=[];
-  Object.keys(C.payes||{}).forEach(function(k){
-    if(/_deductCash$|_essCash$/.test(k))return;
-    var v=C.payes[k];
-    if(!v||!v.paid)return;
-    marques++;
-    if(!existe[k]){
-      var i=k.indexOf('|');
-      if(i<0)return;
-      orphelines.push({cle:k,wk:k.slice(0,i),drv:k.slice(i+1),net:pf(v.net),ts:v.ts||''});
-    }
-  });
-  // Noms qui ne diffèrent que par la casse, les accents ou les espaces
-  var variantes=Object.keys(noms).filter(function(nn){return Object.keys(noms[nn]).length>1;})
-    .map(function(nn){
-      return Object.keys(noms[nn]).map(function(raw){return {nom:raw,quarts:noms[nn][raw]};})
-        .sort(function(a,b){return b.quarts-a.quarts;});
-    });
-  // Une marque orpheline vise-t-elle une autre orthographe du même nom ?
-  var clesReelles=Object.keys(existe);
-  orphelines.forEach(function(o){
-    o.variante=null;
-    for(var i=0;i<clesReelles.length;i++){
-      var p=clesReelles[i].indexOf('|');
-      if(clesReelles[i].slice(0,p)===o.wk
-        &&_normNom(clesReelles[i].slice(p+1))===_normNom(o.drv)){
-        o.variante=clesReelles[i].slice(p+1);break;
-      }
-    }
-  });
-  // Noms portés par des quarts mais absents de l'équipe : leur taux vient
-  // désormais du quart lui-même, mais le patron doit savoir qu'ils existent.
-  var equipe={};(C.drivers||[]).forEach(function(d){equipe[d.name]=true;});
-  var inconnus=Object.keys(noms).reduce(function(acc,nn){
-    Object.keys(noms[nn]).forEach(function(raw){
-      if(!equipe[raw])acc.push({nom:raw,quarts:noms[nn][raw]});
-    });
-    return acc;
-  },[]).sort(function(a,b){return b.quarts-a.quarts;});
-  var sems=dus.detail.map(function(d){return d.wk;}).sort();
-  return {total:dus.total,n:dus.detail.length,detail:dus.detail,
-    plusVieille:sems[0]||'',plusRecente:sems[sems.length-1]||'',
-    marques:marques,orphelines:orphelines,variantes:variantes,
-    inconnus:inconnus,lots:(C.payeLots||[])};
-}
-// Solder d'un coup les semaines déjà versées hors de l'application.
-// AUCUNE sortie de trésorerie n'est créée : cet argent est parti il y a
-// longtemps, du vrai portefeuille, sans passer par l'app. Rejouer 40
-// paiements fausserait les comptes au lieu de les redresser.
-// La dernière semaine TERMINÉE : le lundi d'il y a une semaine.
-// Au-delà, on est dans la semaine en cours, qui ne peut pas avoir été
-// « déjà versée hors app » puisqu'elle n'est pas finie.
-function derniereSemaineTerminee(){
-  var d=gwS(new Date());
-  d.setDate(d.getDate()-7);
-  return ymdLocal(d);
-}
-function payerToutJusqua(){
-  var lim=gv('payeRattrapLim');
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(lim)){alert('Choisis d\'abord une date.');return;}
-  // GARDE-FOU : jamais la semaine en cours. Le rattrapage sert à solder
-  // des payes déjà versées ; une semaine qui n'est pas finie ne peut pas
-  // l'être. Sans cette borne, un seul appui marquait « payée » la paye
-  // que le patron n'avait pas encore versée — et l'app ne lui proposait
-  // plus de la verser.
-  var semEnCours=ymdLocal(gwS(new Date()));
-  var cibles=salairesDus().detail.filter(function(d){return d.wk<=lim&&d.wk<semEnCours;});
-  var ecartees=salairesDus().detail.filter(function(d){return d.wk<=lim&&d.wk>=semEnCours;}).length;
-  if(!cibles.length){
-    alert(ecartees
-      ?'Rien à solder.\n\nLa semaine en cours n\'est jamais soldée en bloc : '
-       +'elle n\'est pas finie, donc elle ne peut pas avoir déjà été versée.\n\n'
-       +'Pour la payer, utilise le bouton « 💵 Payer » de sa semaine une fois qu\'elle est terminée.'
-      :'Aucune semaine due jusqu\'au '+lim+'.');
-    return;
-  }
-  var tot=cibles.reduce(function(a,d){return a+d.net;},0);
-  var apercu=cibles.slice(0,6).map(function(d){return '• '+d.drv+' — sem. '+d.wk+' : '+fm(d.net);}).join('\n');
-  if(cibles.length>6)apercu+='\n• … et '+(cibles.length-6)+' autre(s)';
-  if(!confirm('Solder '+cibles.length+' semaine(s), de la sem. du '
-    +cibles[cibles.length-1].wk+' à celle du '+cibles[0].wk+' ?\n\n'
-    +apercu+'\n\nTOTAL RETIRÉ DU PASSIF : '+fm(tot)+'\n\n'
-    +'⚠️ À n\'utiliser que pour des payes DÉJÀ VERSÉES hors de l\'app.\n'
-    +'Aucune sortie de trésorerie ne sera créée : cet argent est déjà parti.\n'
-    +'Pour une paye que tu verses MAINTENANT, utilise plutôt le bouton « 💵 Payer » de sa semaine.\n\n'
-    +(ecartees?'La semaine en cours est laissée de côté : elle n\'est pas finie.\n\n':'')
-    +'Annulable juste après.'))return;
-  var lot=uid(), now=new Date().toISOString();
-  if(!C.payes)C.payes={};
-  cibles.forEach(function(d){
-    C.payes[d.wk+'|'+d.drv]={paid:true,ts:now,by:U.name,
-      net:parseFloat(d.net.toFixed(2)),horsApp:true,lot:lot};
-  });
-  if(!C.payeLots)C.payeLots=[];
-  C.payeLots.unshift({id:lot,ts:now,lim:lim,n:cibles.length,
-    total:parseFloat(tot.toFixed(2)),by:U.name});
-  C.payeLots=C.payeLots.slice(0,10);
-  audit('PAYE_RETRO',cibles.length+' semaines soldées jusqu\'au '+lim+' ('+fm(tot)+')');
-  lSave();
-  renderPaye();
-  alert('✅ '+cibles.length+' semaine(s) soldée(s).\n\n'
-    +fm(tot)+' retirés du passif.\n\nTa trésorerie n\'a pas bougé : cet argent était déjà sorti.');
-}
-function annulerLotPaye(lotId){
-  var lot=(C.payeLots||[]).find(function(l){return l.id===lotId;});
-  if(!lot)return;
-  if(!confirm('↩️ Annuler ce rattrapage ?\n\n'+lot.n+' semaine(s) redeviendront dues ('+fm(lot.total)+').'))return;
-  var n=0;
-  Object.keys(C.payes||{}).forEach(function(k){
-    if(C.payes[k]&&C.payes[k].lot===lotId){delete C.payes[k];n++;}
-  });
-  C.payeLots=(C.payeLots||[]).filter(function(l){return l.id!==lotId;});
-  audit('PAYE_RETRO_ANNUL',n+' semaines remises en dû');
-  lSave();renderPaye();
-  alert('↩️ '+n+' semaine(s) remises au passif.');
-}
-// Rattacher une marque de paiement rangée sous une autre orthographe
-function rattacherPayeOrpheline(cle,nomCible){
-  if(!C.payes||!C.payes[cle])return;
-  var i=cle.indexOf('|');
-  var nk=cle.slice(0,i)+'|'+nomCible;
-  if(C.payes[nk]&&C.payes[nk].paid){alert('Cette semaine est déjà marquée payée.');return;}
-  if(!confirm('Rattacher ce paiement à « '+nomCible+' » ?\n\n'
-    +'Semaine du '+cle.slice(0,i)+'\nClassé sous : '+cle.slice(i+1)+'\n→ Devient : '+nomCible))return;
-  C.payes[nk]=C.payes[cle];
-  delete C.payes[cle];
-  audit('PAYE_RATTACHEE',cle+' → '+nk);
-  lSave();renderPaye();
-}
-// ── LA BANNIÈRE QUI DÉBLOQUE ──
-// Une semaine soldée en bloc porte « Soldé », pas « Payer » : le patron
-// croit l'app cassée alors qu'elle le croit payé. Si ce solde était une
-// erreur, il faut pouvoir revenir en arrière SANS aller chercher dans
-// une carte repliée — on le met en haut de la page Paye.
-// ── EST-CE QUE MES QUARTS SONT VRAIMENT PARTIS ? ──
-// Visible par le chauffeur ET par le patron. Trois états seulement, et
-// jamais de « envoyé » complaisant : si la dernière écriture a été
-// refusée, on le dit, on dit pourquoi, et on dit quoi faire.
-function envoiStatut(){
-  // La mémoire pleine passe avant tout : si l'appareil ne peut plus
-  // garder ses quarts, le reste n'a aucune importance.
-  if(window._stockagePlein){
-    return {niveau:'refus',titre:'🚨 Mémoire pleine — des quarts peuvent se perdre',
-      detail:'Ce téléphone n\'arrive plus à enregistrer les quarts : sa mémoire est saturée. Ce qui est à l\'écran risque de disparaître au prochain rechargement.',
-      quoiFaire:'Patron : Réglages → « 🗄️ Archiver les vieux quarts (+12 mois) » pour alléger. Chauffeur : montre ce message à ton patron.'};
-  }
-  var ech=window._fbDernierEchec;
-  if(ech&&ech.code==='permission-denied'){
-    return {niveau:'refus',titre:'⛔ Tes quarts ne partent PAS',
-      detail:'Ce téléphone n\'est pas autorisé dans la flotte. Soit elle est verrouillée, soit son identité a changé après un vidage de cache.',
-      quoiFaire:'Montre ce message à ton patron : il doit aller dans Réglages → « 🔓 Déverrouiller la flotte », puis tu rouvres l\'app.'};
-  }
-  if(ech){
-    return {niveau:'refus',titre:'⛔ Dernier envoi refusé',
-      detail:'Le serveur a répondu : '+String(ech.code),
-      quoiFaire:'Tes quarts restent sur ce téléphone. Rouvre l\'app ; s\'ils ne partent toujours pas, préviens ton patron.'};
-  }
-  if(window._fbPending){
-    return {niveau:'attente',titre:'⏳ Envoi en attente',
-      detail:'Tes quarts sont enregistrés ici mais pas encore partis.',
-      quoiFaire:'Reste quelques secondes avec l\'app ouverte, le réseau fera le reste.'};
-  }
-  if(!window._fbReady){
-    return {niveau:'attente',titre:'📴 Hors ligne',
-      detail:'Pas de connexion au cloud pour l\'instant.',
-      quoiFaire:'Tes quarts sont gardés ici et partiront au retour du réseau.'};
-  }
-  return {niveau:'ok',titre:'✅ Tes quarts sont bien envoyés',
-    detail:window._fbLastOk?('Dernier envoi réussi à '+new Date(window._fbLastOk).toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})):'',
-    quoiFaire:''};
-}
-// ═══════════════════════════════════════════════
-// 📤 RENVOYER MES QUARTS — ET VÉRIFIER QU'ILS Y SONT
-//
-// Mesuré chez le patron : le cloud ne contenait qu'UN des six quarts
-// d'un chauffeur, alors que son téléphone affichait « Sync ✓ ». Ses
-// écritures ne montaient pas, et rien ne le disait. Ce bouton force le
-// renvoi PUIS relit le cloud pour compter ce qui y est vraiment —
-// aucune promesse sans vérification.
-// ═══════════════════════════════════════════════
-// ── BALISE D'ÉTAT : chaque téléphone dit où il en est ──
-// Le patron ne peut pas courir après quatre chauffeurs pour savoir
-// lequel est bloqué. Chaque appareil dépose donc une petite fiche dans
-// le document `etat` — écriture ADDITIVE, chacun sa clé, personne
-// n'écrase personne. Un appareil qui n'arrive plus à écrire ne dépose
-// rien : son silence est lui-même le signal.
-function baliseEtat(){
-  try{
-    if(!window._fbReady||!window._fbUid||!U)return;
-    var maintenant=Date.now();
-    if(window._baliseDernier&&maintenant-window._baliseDernier<120000)return;
-    window._baliseDernier=maintenant;
-    var miens=Object.keys(S||{}).filter(function(k){
-      return U.role==='owner'||(S[k]&&S[k].driver===U.name);
-    });
-    var fiche={nom:String(U.name||'?').slice(0,40),role:U.role||'',
-      version:String(typeof APP_VERSION!=='undefined'?APP_VERSION:'').slice(0,40),
-      quarts:miens.length,
-      enAttente:!!window._fbPending,
-      memoirePleine:!!window._stockagePlein,
-      erreur:String((window._fbDernierEchec&&window._fbDernierEchec.code)||'').slice(0,40),
-      ts:maintenant};
-    // La fiche va dans `members`, pas dans un document à part : les
-    // règles publiées n'autorisent que config/shifts/expenses/audit/
-    // deleted + members, et le patron ne peut pas republier les règles
-    // tant que la console Firebase lui est fermée. Écriture additive,
-    // une clé par appareil : personne n'écrase personne.
-    var payload={etats:{}}; payload.etats[window._fbUid]=fiche;
-    window._fbEnsure().then(function(){
-      return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
-        .doc('members').set(payload,{merge:true});
-    }).catch(function(){});
-  }catch(e){}
-}
-function renvoyerMesQuartsBoutonHTML(){
-  if(!U)return '';
-  return '<div style="margin-top:9px;">'
-    +'<button onclick="renvoyerMesQuarts()" style="width:100%;background:rgba(96,165,250,.18);border:1px solid rgba(96,165,250,.5);color:var(--blu);border-radius:10px;padding:12px;font-size:12px;font-weight:900;cursor:pointer;">'
-    +'📤 Renvoyer mes quarts maintenant</button>'
-    +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:5px;text-align:center;">'
-    +'À utiliser si ton patron ne voit pas ton travail. L\'app vérifiera ensuite ce qui est vraiment arrivé.</div></div>';
-}
-function renvoyerMesQuarts(){
-  var miens=Object.keys(S||{}).filter(function(k){
-    return U.role==='owner'||S[k].driver===U.name;
-  });
-  if(!miens.length){alert('Aucun quart à renvoyer sur ce téléphone.');return;}
-  if(!window._fbReady){
-    alert('📴 Pas de connexion au cloud.\n\nTes '+miens.length+' quart(s) restent ici et partiront au retour du réseau.');
-    return;
-  }
-  var av=document.activeElement;
-  if(av&&av.blur)av.blur();
-  window._fbPending=true;
-  window._fbDernierEchec=null;
-  lSave();                       // force une écriture complète
-  setTimeout(function(){
-    window._fbEnsure().then(function(){
-      return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
-        .doc('shifts').get({source:'server'});
-    }).then(function(snap){
-      var dist=snap.exists?((snap.data()||{}).data||{}):{};
-      var arrives=miens.filter(function(k){return !!dist[k];}).length;
-      var manquants=miens.length-arrives;
-      if(manquants===0){
-        alert('✅ Tes '+miens.length+' quart(s) sont bien dans le cloud.\n\n'
-          +'Ton patron les verra. S\'il ne les voit pas, c\'est de son côté : '
-          +'qu\'il ouvre sa page Paye, l\'app lui proposera de les récupérer.');
-      }else{
-        var ech=window._fbDernierEchec;
-        alert('⛔ '+manquants+' de tes '+miens.length+' quart(s) ne sont PAS montés.\n\n'
-          +(ech?('Raison donnée par le serveur : '+ech.code+'\n\n'):'')
-          +(window._stockagePlein?'La mémoire de ce téléphone est pleine.\n\n':'')
-          +'Montre ce message à ton patron.');
-      }
-      if(typeof renderDash==='function'&&document.querySelector('#pg-dash.on'))renderDash();
-    }).catch(function(e){
-      alert('⛔ Impossible de vérifier : '+((e&&e.code)||e)+'\n\nMontre ce message à ton patron.');
-    });
-  },2500);
-}
-function envoiStatutHTML(){
-  var e=envoiStatut();
-  var coul=e.niveau==='ok'?'rgba(57,211,83,':e.niveau==='attente'?'rgba(255,107,0,':'rgba(255,58,58,';
-  var txt=e.niveau==='ok'?'var(--grn)':e.niveau==='attente'?'var(--neon)':'var(--red)';
-  return '<div style="margin-top:10px;padding:11px;background:'+coul+'.1);border:'
-    +(e.niveau==='refus'?'2px':'1px')+' solid '+coul+(e.niveau==='refus'?'.55':'.35')+');border-radius:11px;">'
-    +'<div style="font-size:'+(e.niveau==='refus'?'12':'11')+'px;font-weight:900;color:'+txt+';">'+e.titre+'</div>'
-    +(e.detail?'<div style="font-size:10px;color:var(--m3);line-height:1.6;margin-top:4px;">'+_cmpEsc(e.detail)+'</div>':'')
-    +(e.quoiFaire?'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-top:5px;">'+_cmpEsc(e.quoiFaire)+'</div>':'')
-    +'</div>';
-}
-// ═══════════════════════════════════════════════
-// ⬇️ L'APP REMARQUE TOUTE SEULE CE QUI MANQUE
-//
-// Le patron ne doit pas avoir à ouvrir un diagnostic dans les Réglages
-// pour découvrir qu'il lui manque des quarts : mesuré chez lui, un
-// chauffeur avait 6 quarts et 1991,05 $ au compteur, lui n'en voyait
-// qu'un seul à 75,20 $. Dès qu'il ouvre la page Paye, on compare avec
-// le cloud en arrière-plan et on le dit, là où il travaille.
-// ═══════════════════════════════════════════════
-function verifierManquantsEnFond(){
-  if(!U||U.role!=='owner')return;
-  if(!window._fbReady)return;
-  var maintenant=Date.now();
-  if(window._verifManqDernier&&maintenant-window._verifManqDernier<60000)return;
-  window._verifManqDernier=maintenant;
-  window._fbEnsure().then(function(){
-    return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
-      .doc('shifts').get({source:'server'});
-  }).then(function(snap){
-    var dist=snap.exists?((snap.data()||{}).data||{}):{};
-    var tomb=(window.TOMB&&window.TOMB.s)||{};
-    var manq=Object.keys(dist).filter(function(k){return !S[k]&&!tomb[k];});
-    var parDrv={};
-    manq.forEach(function(k){
-      var n=(dist[k]&&dist[k].driver)||'?';
-      if(!parDrv[n])parDrv[n]={n:0,tax:0};
-      parDrv[n].n++;
-      parDrv[n].tax+=pf(dist[k].taxf)-pf(dist[k].taxd);
-    });
-    var avant=window._quartsManquants?window._quartsManquants.total:-1;
-    window._quartsManquants={total:manq.length,parDrv:parDrv,quand:Date.now()};
-    // on ne redessine que si le constat a changé, pour ne pas clignoter
-    if(avant!==manq.length){
-      var cur=document.querySelector('.pg.on');
-      if(cur&&cur.id==='pg-paye'&&typeof renderPaye==='function')renderPaye();
-    }
-  }).catch(function(e){
-    window._quartsManquants=null;
-  });
-}
-function quartsManquantsBanniereHTML(){
-  var m=window._quartsManquants;
-  if(!m||!m.total)return '';
-  var noms=Object.keys(m.parDrv).sort(function(a,b){return m.parDrv[b].n-m.parDrv[a].n;});
-  var h='<div style="background:rgba(255,58,58,.12);border:2px solid rgba(255,58,58,.55);border-radius:14px;padding:13px;margin-bottom:12px;">'
-    +'<div style="font-size:13px;font-weight:900;color:var(--red);margin-bottom:6px;">⬇️ '
-    +m.total+' quart'+(m.total>1?'s':'')+' manque'+(m.total>1?'nt':'')+' sur ce téléphone</div>'
-    +'<div style="font-size:11px;color:var(--m3);line-height:1.7;margin-bottom:9px;">'
-    +'Tes chauffeurs les ont bien envoyés — ils sont dans le cloud, mais pas encore ici. '
-    +'Tant qu\'ils manquent, leur paye est incomplète.</div>';
-  noms.slice(0,6).forEach(function(n){
-    h+='<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;border-top:1px solid var(--brd);padding:5px 0;">'
-      +'<span style="color:var(--m3);font-weight:700;">'+_cmpEsc(n)+'</span>'
-      +'<span style="color:var(--red);font-weight:800;">'+m.parDrv[n].n+' quart'+(m.parDrv[n].n>1?'s':'')
-      +' · '+fm(m.parDrv[n].tax)+'</span></div>';
-  });
-  if(noms.length>6)h+='<div style="font-size:10px;color:var(--m2);padding-top:5px;">… et '+(noms.length-6)+' autre(s) chauffeur(s).</div>';
-  h+='<button onclick="recupererQuartsDuCloud()" style="width:100%;background:rgba(57,211,83,.2);border:1px solid rgba(57,211,83,.55);color:var(--grn);border-radius:10px;padding:13px;font-size:13px;font-weight:900;cursor:pointer;margin-top:10px;">'
-    +'⬇️ Récupérer ces '+m.total+' quart'+(m.total>1?'s':'')+' maintenant</button>';
-  return h+'</div>';
-}
-function soldeEnBlocBanniereHTML(){
-  var lots=(C&&C.payeLots)||[];
-  if(!lots.length)return '';
-  var l=lots[0];
-  var quand='';
-  try{quand=new Date(l.ts).toLocaleDateString('fr-CA',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});}catch(e){}
-  return '<div style="background:rgba(255,107,0,.12);border:2px solid rgba(255,107,0,.5);border-radius:14px;padding:13px;margin-bottom:12px;">'
-    +'<div style="font-size:13px;font-weight:900;color:var(--neon);margin-bottom:6px;">🧹 '
-    +l.n+' semaine'+(l.n>1?'s':'')+' marquée'+(l.n>1?'s':'')+' « déjà versée » — pas payée par l\'app</div>'
-    +'<div style="font-size:11px;color:var(--m3);line-height:1.7;margin-bottom:10px;">'
-    +'Le '+_cmpEsc(quand)+', '+fm(l.total)+' ont été retirés du passif d\'un seul coup, '
-    +'comme des payes déjà versées en dehors de l\'application. '
-    +'<b style="color:var(--neon);">Aucun argent n\'est sorti de ta trésorerie.</b><br>'
-    +'Si en réalité tu n\'avais pas encore versé ces semaines, remets-les à payer : '
-    +'leur bouton « 💵 Payer » reviendra.</div>'
-    +'<button onclick="annulerLotPaye(\''+l.id+'\')" style="width:100%;background:rgba(57,211,83,.18);border:1px solid rgba(57,211,83,.5);color:var(--grn);border-radius:10px;padding:12px;font-size:12px;font-weight:900;cursor:pointer;">'
-    +'↩️ Remettre ces semaines à payer</button>'
-    +(lots.length>1?'<div style="font-size:9px;color:var(--m2);margin-top:7px;">'+(lots.length-1)+' autre(s) rattrapage(s) plus ancien(s) : voir la carte de vérification plus bas.</div>':'')
-    +'</div>';
-}
-function payesDiagHTML(){
-  var d=diagnosticPayes();
-  if(!d.n&&!d.orphelines.length&&!d.variantes.length&&!d.lots.length)return '';
-  var ouvert=!!window._payeDiagOpen;
-  // Quand plus rien n'est dû mais qu'un rattrapage a eu lieu, le dire
-  // dans le titre : sans ça, une semaine soldée par erreur reste
-  // invisible derrière un « à jour » rassurant.
-  var resume=d.n?fm(d.total):(d.lots.length?'soldé en bloc':'à jour');
-  var couleur=d.n?'var(--red)':(d.lots.length?'var(--blu)':'var(--grn)');
-  var h='<div class="card" style="border-color:'+(d.n?'rgba(255,58,58,.35)':(d.lots.length?'rgba(88,166,255,.3)':'var(--brd)'))+';">'
-    +'<div class="ctit" onclick="window._payeDiagOpen=!window._payeDiagOpen;renderPaye();" style="cursor:pointer;">'
-    +'<span><span class="ci">🔎</span>'+(d.n?'Pourquoi ces semaines sont dues':'Payes — vérification')+'</span>'
-    +'<span style="font-size:12px;font-weight:900;color:'+couleur+';">'
-    +resume+' '+(ouvert?'▾':'▸')+'</span></div>';
-  if(!ouvert)return h+'</div>';
-  if(d.n){
-    h+='<div style="font-size:11px;color:var(--m2);line-height:1.7;margin-bottom:10px;">'
-      +'<b style="color:var(--m3);">'+d.n+' semaine'+(d.n>1?'s':'')+'</b> jamais cochée'+(d.n>1?'s':'')+' « payée »'
-      +(d.plusVieille?', de la semaine du <b style="color:var(--m3);">'+_cmpEsc(d.plusVieille)+'</b> à celle du <b style="color:var(--m3);">'+_cmpEsc(d.plusRecente)+'</b>':'')
-      +'. Le bilan les compte comme un passif — c\'est tout ce qu\'il sait.</div>';
-  }else{
-    h+='<div style="font-size:11px;color:var(--grn);line-height:1.6;margin-bottom:10px;">✅ Aucune semaine en attente.</div>';
-  }
-  h+='<div style="font-size:10px;color:var(--m2);line-height:1.7;margin-bottom:11px;">'
-    +'Paiements enregistrés dans l\'app : <b style="color:var(--m3);">'+d.marques+'</b></div>';
-
-  // 1) Noms écrits de deux façons
-  if(d.variantes.length){
-    h+='<div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.35);border-radius:11px;padding:11px;margin-bottom:10px;">'
-      +'<div style="font-size:11px;font-weight:900;color:var(--neon);margin-bottom:6px;">⚠️ Un même chauffeur écrit de deux façons</div>'
-      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:8px;">Chaque orthographe fait un dossier séparé : une semaine payée sous l\'une reste due sous l\'autre.</div>';
-    d.variantes.forEach(function(g){
-      var cible=g[0].nom;
-      h+='<div style="border-top:1px solid var(--brd);padding-top:7px;margin-top:7px;">';
-      g.forEach(function(v,i){
-        h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px;padding:3px 0;">'
-          +'<span style="color:var(--m3);font-weight:'+(i===0?'900':'700')+';">'+_cmpEsc(v.nom)+'</span>'
-          +'<span style="color:var(--m2);font-size:10px;">'+v.quarts+' quart'+(v.quarts>1?'s':'')+'</span></div>';
-        if(i>0){
-          h+='<button onclick="if(confirm(\'Renommer &quot;'+_cmpEsc(v.nom)+'&quot; en &quot;'+_cmpEsc(cible)+'&quot; ?\\n\\nLes quarts ET les paies suivront.\')){var r=renommerChauffeur(\''+_cmpEsc(v.nom)+'\',\''+_cmpEsc(cible)+'\',false);lSave();renderPaye();alert(\'✅ \'+r.quarts+\' quart(s) et \'+r.paies+\' paie(s) regroupés sous &quot;'+_cmpEsc(cible)+'&quot;.\');}" '
-            +'style="width:100%;background:rgba(255,107,0,.16);border:1px solid rgba(255,107,0,.4);color:var(--neon);border-radius:9px;padding:7px;font-size:10px;font-weight:800;cursor:pointer;margin:4px 0 2px;">'
-            +'🔗 Regrouper sous « '+_cmpEsc(cible)+' »</button>';
-        }
-      });
-      h+='</div>';
-    });
-    h+='</div>';
-  }
-
-  // 2) Paiements rangés sous un nom qui n'existe plus
-  if(d.orphelines.length){
-    h+='<div style="background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.35);border-radius:11px;padding:11px;margin-bottom:10px;">'
-      +'<div style="font-size:11px;font-weight:900;color:var(--blu);margin-bottom:6px;">🔗 '+d.orphelines.length+' paiement'+(d.orphelines.length>1?'s':'')+' classé'+(d.orphelines.length>1?'s':'')+' sous un nom sans quart</div>'
-      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:8px;">Tu as bien payé, mais la semaine est rangée sous un nom qui ne correspond à aucun quart. Elle reste donc due.</div>';
-    d.orphelines.slice(0,12).forEach(function(o){
-      h+='<div style="border-top:1px solid var(--brd);padding-top:7px;margin-top:7px;font-size:11px;">'
-        +'<div style="color:var(--m3);font-weight:800;">'+_cmpEsc(o.drv)+' — sem. '+_cmpEsc(o.wk)+(o.net?' · '+fm(o.net):'')+'</div>';
-      if(o.variante){
-        h+='<button onclick="rattacherPayeOrpheline(\''+_cmpEsc(o.cle).replace(/'/g,"\\'")+'\',\''+_cmpEsc(o.variante)+'\')" '
-          +'style="width:100%;background:rgba(88,166,255,.16);border:1px solid rgba(88,166,255,.4);color:var(--blu);border-radius:9px;padding:7px;font-size:10px;font-weight:800;cursor:pointer;margin-top:5px;">'
-          +'🔗 Rattacher à « '+_cmpEsc(o.variante)+' »</button>';
-      }else{
-        h+='<div style="font-size:10px;color:var(--m2);margin-top:3px;">Aucun quart de cette semaine ne porte un nom approchant — ce paiement vise sans doute un chauffeur parti.</div>';
-      }
-      h+='</div>';
-    });
-    if(d.orphelines.length>12)h+='<div style="font-size:10px;color:var(--m2);margin-top:7px;">… et '+(d.orphelines.length-12)+' autre(s).</div>';
-    h+='</div>';
-  }
-
-  // 2 bis) Quarts dont le nom n'est plus dans l'équipe
-  if(d.inconnus.length){
-    h+='<div style="background:rgba(255,58,58,.07);border:1px solid rgba(255,58,58,.3);border-radius:11px;padding:11px;margin-bottom:10px;">'
-      +'<div style="font-size:11px;font-weight:900;color:var(--red);margin-bottom:6px;">👤 Des quarts portent un nom absent de l\'équipe</div>'
-      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:7px;">'
-      +'Leur paie est calculée avec le pourcentage inscrit sur le quart. Ajoute le chauffeur ou corrige le nom dans Réglages → « 🔍 Vérifier les quarts ».</div>';
-    d.inconnus.slice(0,8).forEach(function(x){
-      h+='<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;border-top:1px solid var(--brd);padding:5px 0;">'
-        +'<span style="color:var(--m3);font-weight:700;">'+_cmpEsc(x.nom)+'</span>'
-        +'<span style="color:var(--m2);font-size:10px;">'+x.quarts+' quart'+(x.quarts>1?'s':'')+'</span></div>';
-    });
-    h+='</div>';
-  }
-
-  // 3) Solder l'historique
-  if(d.n){
-    // JAMAIS la semaine la plus récente par défaut : c'est souvent celle
-    // en cours, et un seul appui marquait alors « payée » la paye pas
-    // encore versée. On propose la dernière semaine TERMINÉE, et jamais
-    // plus tard que la plus ancienne dette si tout est récent.
-    var finie=derniereSemaineTerminee();
-    var parDefaut=(d.plusVieille&&d.plusVieille>finie)?d.plusVieille:finie;
-    if(d.plusRecente&&parDefaut>d.plusRecente)parDefaut=d.plusRecente;
-    h+='<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:11px;padding:11px;margin-bottom:10px;">'
-      +'<div style="font-size:11px;font-weight:900;color:var(--m3);margin-bottom:6px;">🧹 Solder les semaines déjà versées</div>'
-      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:8px;">'
-      +'Si tu as payé ces semaines avant d\'utiliser l\'app, elles n\'ont jamais été cochées ici. '
-      +'Choisis jusqu\'où remonter : elles sortiront du passif, et <b>ta trésorerie ne bougera pas</b> — cet argent est déjà parti.</div>'
-      +'<label style="font-size:10px;color:var(--m2);display:block;margin-bottom:3px;">Tout solder jusqu\'au (inclus)</label>'
-      +'<input type="date" id="payeRattrapLim" value="'+_cmpEsc(parDefaut)+'" max="'+_cmpEsc(derniereSemaineTerminee())+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:9px;padding:9px;font-size:12px;font-weight:700;margin-bottom:8px;">'
-      +'<button onclick="payerToutJusqua()" style="width:100%;background:rgba(57,211,83,.16);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:9px;padding:10px;font-size:11px;font-weight:800;cursor:pointer;">'
-      +'✅ Marquer payées — déjà versées hors app</button>'
-      +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">'
-      +'<b style="color:var(--gold);">La semaine en cours n\'est jamais soldée ici</b> : elle n\'est pas finie, elle ne peut donc pas avoir déjà été versée. '
-      +'Pour une paye que tu verses <b>maintenant</b>, utilise le bouton « 💵 Payer » de sa semaine plus bas : lui sort l\'argent de la trésorerie.</div>'
-      +'</div>';
-  }
-
-  // 4) Annuler un rattrapage
-  if(d.lots.length){
-    h+='<div style="background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.3);border-radius:11px;padding:11px;">'
-      +'<div style="font-size:11px;font-weight:900;color:var(--blu);margin-bottom:5px;">🧹 Semaines soldées en bloc</div>'
-      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:8px;">'
-      +'Ces semaines ont été marquées payées d\'un coup, comme déjà versées hors de l\'app. '
-      +'Elles n\'ont créé aucune sortie de trésorerie. '
-      +'<b style="color:var(--m3);">Si une paye n\'avait pas encore été versée, annule le rattrapage ici</b> : '
-      +'la semaine redevient due et son bouton « 💵 Payer » revient.</div>';
-    d.lots.forEach(function(l){
-      var quand='';
-      try{quand=new Date(l.ts).toLocaleDateString('fr-CA',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){}
-      h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--brd);padding:7px 0;">'
-        +'<span style="font-size:11px;color:var(--m3);min-width:0;"><b>'+l.n+' semaine'+(l.n>1?'s':'')+'</b> jusqu\'au '+_cmpEsc(l.lim)+' · '+fm(l.total)
-        +(quand?'<div style="font-size:9px;color:var(--m2);">fait le '+_cmpEsc(quand)+'</div>':'')+'</span>'
-        +'<button onclick="annulerLotPaye(\''+l.id+'\')" style="flex-shrink:0;background:rgba(255,58,58,.16);border:1px solid rgba(255,58,58,.4);color:var(--red);border-radius:9px;padding:8px 11px;font-size:11px;font-weight:800;cursor:pointer;">↩️ Annuler</button></div>';
-    });
-    h+='</div>';
-  }
-  return h+'</div>';
-}
-
 function renderPaye(){
   const c=document.getElementById('payeContent');
-  // L'app va d'elle-même comparer avec le cloud et le dire ici.
-  verifierManquantsEnFond();
-  var _audEss=quartsManquantsBanniereHTML()+soldeEnBlocBanniereHTML()+payesDiagHTML()+auditEssenceHTML();
+  var _audEss=auditEssenceHTML();
   if(!C.payes)C.payes={};
   const allArr=getArr();
   if(!allArr.length){c.innerHTML='<div class="empty"><div class="ei">💵</div>Aucun quart enregistré.</div>';return;}
@@ -7050,10 +6227,10 @@ function renderPaye(){
   // Group shifts by week
   const byWk={};
   allArr.forEach(s=>{
-    if(s.isOwner||!dateValide(s.date))return;
+    if(s.isOwner)return;
     const d=parseLocalDate(s.date);
     const ws=gwS(d);
-    const wkey=ymdLocal(ws);
+    const wkey=ws.toISOString().slice(0,10);
     if(!byWk[wkey]){
       const we=new Date(ws);we.setDate(we.getDate()+6);
       byWk[wkey]={
@@ -7083,7 +6260,7 @@ function renderPaye(){
   // Toutes les semaines — incluant la semaine en cours
   const today=new Date();today.setHours(0,0,0,0);
   const curWkStart=gwS(today);curWkStart.setHours(0,0,0,0);
-  const curWkKey=ymdLocal(curWkStart);
+  const curWkKey=curWkStart.toISOString().slice(0,10);
 
   const wksSorted=Object.entries(byWk).sort((a,b)=>b[0].localeCompare(a[0]));
   let html='';
@@ -7135,7 +6312,7 @@ function renderPaye(){
     const totBrutWk=drvEntries.reduce((a,[,d])=>a+d.brut,0);
     const totPourWk=drvEntries.reduce((a,[,d])=>a+d.pour,0);
     const totPartWk=drvEntries.reduce((a,[,d])=>a+d.part,0);
-    const allPaid=drvEntries.every(([dn])=>{const k=wkey+'|'+dn;return C.payes[k]&&C.payes[k].paid;});
+    const allPaid=!isCurWk&&drvEntries.every(([dn])=>{const k=wkey+'|'+dn;return C.payes[k]&&C.payes[k].paid;});
 
     // Couleur bordure selon statut
     const wkBorder=isCurWk?'rgba(245,200,0,.3)':allPaid?'rgba(57,211,83,.25)':'rgba(255,58,58,.25)';
@@ -7144,14 +6321,13 @@ function renderPaye(){
     html+='<div class="paye-week" style="border-color:'+wkBorder+';background:'+wkBg+';">'
       +'<div class="paye-week-title">'
       +'<span>'+(isCurWk?'🟡':'📅')+' '+wd.short+(isCurWk?' <span style="font-size:9px;color:var(--gold);background:rgba(245,200,0,.12);padding:2px 7px;border-radius:20px;border:1px solid rgba(245,200,0,.2);">En cours</span>':'')+'</span>'
-      +(allPaid?'<span style="color:var(--grn);">✅ Tout payé</span>'
-        :isCurWk?'<span style="font-size:10px;color:var(--gold);">Solde accumulé — payable quand tu veux</span>'
-        :'<span style="color:var(--red);">🔴 En attente</span>')
+      +(isCurWk?'<span style="font-size:10px;color:var(--gold);">Solde accumulé</span>'
+        :'<span style="color:'+(allPaid?'var(--grn)':'var(--red)')+';">'+(allPaid?'✅ Tout payé':'🔴 En attente')+'</span>')
       +'</div>';
 
     drvEntries.forEach(([drvName,dd])=>{
       const k=wkey+'|'+drvName;
-      const isPaid=!!(C.payes[k]&&C.payes[k].paid);
+      const isPaid=!isCurWk&&C.payes[k]&&C.payes[k].paid;
       const paidTs=isPaid?new Date(C.payes[k].ts).toLocaleDateString('fr-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):'';
       const deductCash=C.payes[k+'_deductCash']===true;
       const essCash=C.payes[k+'_essCash']===true;
@@ -7221,38 +6397,14 @@ function renderPaye(){
             +(deductCash?'💵 '+fm(cashNet)+' cash déduit':'')
             +(deductCash&&essCash?' · ':'')
             +(essCash?'⛽ '+fm(dd.ess)+' d\'essence pris dans le cash':'')+'</div>':''))
-        +'<div class="paye-status" style="color:'+(isPaid?'var(--grn)':isCurWk?'var(--gold)':'var(--red)')+';">'
-        // Un solde de rattrapage N'EST PAS un versement : aucun argent
-        // n'est sorti de la trésorerie. Le dire, sinon une semaine
-        // soldée en bloc ressemble à une paye faite une par une.
-        +(isPaid?((C.payes[k]&&C.payes[k].horsApp)
-            ?'🧹 Soldé le '+paidTs+' — déjà versé hors app'
-            :'✅ Payé le '+paidTs)
-          :isCurWk?'🟡 '+dd.n+' quart'+(dd.n>1?'s':'')+' cette semaine'
-          :'🔴 En attente de paiement')
+        +'<div class="paye-status" style="color:'+(isCurWk?'var(--gold)':isPaid?'var(--grn)':'var(--red)')+';">'
+        +(isCurWk?'🟡 '+dd.n+' quart'+(dd.n>1?'s':'')+' cette semaine'
+          :isPaid?'✅ Payé le '+paidTs:'🔴 En attente de paiement')
         +'</div>'
-        // PAYÉ PUIS DE NOUVEAUX QUARTS. Payer en milieu de semaine est
-        // maintenant permis ; le chauffeur qui roule encore après doit
-        // être payé pour ça aussi. On compare ce qu'il a reçu avec ce
-        // qu'il a gagné depuis, et on propose le complément.
-        +(function(){
-          if(!isPaid)return '';
-          var recu=pf(C.payes[k]&&C.payes[k].net);
-          var reste=parseFloat((net-recu).toFixed(2));
-          if(reste<=0.005)return '';
-          return '<div style="margin-top:5px;background:rgba(255,107,0,.12);border:1px solid rgba(255,107,0,.4);border-radius:9px;padding:7px 9px;">'
-            +'<div style="font-size:10px;color:var(--neon);font-weight:800;">⚠️ '+fm(reste)+' gagnés depuis le paiement</div>'
-            +'<div style="font-size:9px;color:var(--m2);margin-top:2px;">Versé : '+fm(recu)+' · Dû maintenant : '+fm(net)+'</div>'
-            +'<button onclick="payerComplement(\''+wkey+'\',\''+drvName+'\')" style="width:100%;background:rgba(255,107,0,.2);border:1px solid rgba(255,107,0,.5);color:var(--neon);border-radius:8px;padding:7px;font-size:10px;font-weight:800;cursor:pointer;margin-top:6px;">'
-            +'💵 Payer la différence</button></div>';
-        })()
         +'</div>'
-        // Le patron paie quand il le décide. L'app proposait « Paye
-        // lundi prochain » SANS bouton pendant la semaine en cours : un
-        // chauffeur qui finit le mercredi ne pouvait pas être payé, et
-        // le patron se retrouvait en retard sans pouvoir rien y faire.
-        +'<button class="paye-btn '+(isPaid?'paye-btn-unpay':'paye-btn-pay')+'" onclick="payeToggle(\''+wkey+'\',\''+drvName+'\')">'
-        +(isPaid?'↩ Annuler':(isCurWk?'💵 Payer<br><span style="font-size:8px;font-weight:700;">maintenant</span>':'💵 Payer'))+'</button>'
+        +(isCurWk
+          ?'<div style="font-size:10px;color:var(--m2);text-align:right;min-width:60px;">Paye<br>lundi prochain</div>'
+          :'<button class="paye-btn '+(isPaid?'paye-btn-unpay':'paye-btn-pay')+'" onclick="payeToggle(\''+wkey+'\',\''+drvName+'\')">'+(isPaid?'↩ Annuler':'💵 Payer')+'</button>')
         +'</div>';
     });
 
@@ -7927,372 +7079,6 @@ function restaurerTousQuartsPerdus(){
   alert('✅ '+l.length+' quart(s) remis.\n\nIls repartent vers le cloud et les autres appareils.');
   renderVerifQuarts();
 }
-// ── QUARTS DATÉS DU LENDEMAIN ──
-// Jusqu'à la v119, le formulaire se pré-remplissait avec today(), qui
-// passait par toISOString() : à partir de 20 h au Québec, il proposait
-// DEMAIN. Un quart de soir saisi à 21 h était donc enregistré au
-// lendemain, sauf si le chauffeur corrigeait la date à la main.
-// La signature est nette : le quart porte une date POSTÉRIEURE au
-// moment où il a été créé, et il a été créé en soirée. On ne touche
-// jamais à un quart saisi le matin pour le lendemain — ce serait une
-// saisie d'avance, volontaire.
-function quartsDateDecalee(){
-  var out=[];
-  Object.keys(S).forEach(function(k){
-    var s=S[k];
-    if(!s||!s.date||!s.ts)return;
-    var t=new Date(s.ts);
-    if(isNaN(t))return;
-    var jourSaisie=ymdLocal(t);
-    if(s.date>jourSaisie&&t.getHours()>=19){
-      out.push({id:s.id,date:s.date,corrige:jourSaisie,driver:s.driver||'?',
-        heure:String(t.getHours()).padStart(2,'0')+'h'+String(t.getMinutes()).padStart(2,'0'),
-        montant:pf(s.taxf)-pf(s.taxd)});
-    }
-  });
-  return out.sort(function(a,b){return b.date.localeCompare(a.date);});
-}
-function corrigerDatesDecalees(){
-  var liste=quartsDateDecalee();
-  if(!liste.length){alert('Aucun quart à corriger ✅');return;}
-  var apercu=liste.slice(0,6).map(function(x){
-    return '• '+x.driver+' : '+x.date+' → '+x.corrige+' (saisi à '+x.heure+')';
-  }).join('\n');
-  if(liste.length>6)apercu+='\n• … et '+(liste.length-6)+' autre(s)';
-  if(!confirm('Corriger la date de '+liste.length+' quart'+(liste.length>1?'s':'')+' ?\n\n'
-    +apercu+'\n\nChacun avait été enregistré au LENDEMAIN de sa saisie, à cause de '
-    +'l\'ancien calcul de la date du jour. On le ramène au jour où il a été rentré.\n\n'
-    +'Les montants ne changent pas.'))return;
-  var n=0;
-  liste.forEach(function(x){
-    if(S[x.id]){S[x.id].date=x.corrige;S[x.id]._m=Date.now();n++;}
-  });
-  audit('DATES_CORRIGEES',n+' quart(s) ramenés au jour de leur saisie');
-  lSave();
-  renderVerifQuarts();
-  alert('✅ '+n+' quart(s) remis à la bonne date.');
-}
-function datesDecaleesHTML(){
-  var liste=quartsDateDecalee();
-  if(!liste.length)return '';
-  var h='<div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.4);border-radius:12px;padding:12px;margin-bottom:11px;">'
-    +'<div style="font-size:12px;font-weight:900;color:var(--neon);margin-bottom:6px;">📅 '
-    +liste.length+' quart'+(liste.length>1?'s':'')+' daté'+(liste.length>1?'s':'')+' du lendemain</div>'
-    +'<div style="font-size:10px;color:var(--m2);line-height:1.7;margin-bottom:9px;">'
-    +'Rentrés le soir, ils ont été enregistrés au jour suivant : jusqu\'à cette mise à jour, '
-    +'l\'app proposait la date de demain passé 20 h. Les montants sont bons, seule la date est à reculer d\'un jour.</div>';
-  liste.slice(0,10).forEach(function(x){
-    h+='<div style="border-top:1px solid var(--brd);padding:6px 0;font-size:11px;">'
-      +'<div style="color:var(--m3);font-weight:800;">'+_cmpEsc(x.driver)+' · '+fm(x.montant)+'</div>'
-      +'<div style="font-size:10px;color:var(--m2);">'+_cmpEsc(x.date)+' → <b style="color:var(--grn);">'+_cmpEsc(x.corrige)+'</b> (saisi à '+_cmpEsc(x.heure)+')</div></div>';
-  });
-  if(liste.length>10)h+='<div style="font-size:10px;color:var(--m2);padding-top:6px;">… et '+(liste.length-10)+' autre(s).</div>';
-  h+='<button onclick="corrigerDatesDecalees()" style="width:100%;background:rgba(255,107,0,.18);border:1px solid rgba(255,107,0,.45);color:var(--neon);border-radius:9px;padding:10px;font-size:11px;font-weight:800;cursor:pointer;margin-top:9px;">'
-    +'📅 Remettre à la bonne date</button>';
-  return h+'</div>';
-}
-// ═══════════════════════════════════════════════
-// 🩺 OÙ SONT LES QUARTS DE MES CHAUFFEURS
-//
-// « Les chauffeurs ont rentré leur quart, je le vois pas dans ma
-// session. » Trois causes possibles, et deviner ne mène nulle part :
-//   1. le quart est dans le cloud mais pas descendu sur CE téléphone ;
-//   2. le quart n'est jamais monté dans le cloud (appareil du chauffeur
-//      bloqué, hors ligne, écriture refusée) ;
-//   3. le chauffeur travaille sur une AUTRE flotte — il voit ses quarts
-//      chez lui, et ils n'arrivent jamais ici.
-// On lit donc le cloud en direct et on compare, au lieu de supposer.
-// ═══════════════════════════════════════════════
-function _quartsParSemaine(src,lundi){
-  var fin=new Date(parseLocalDate(lundi)); fin.setDate(fin.getDate()+7);
-  var finStr=ymdLocal(fin);
-  var out={total:0,parDrv:{},ids:[]};
-  Object.keys(src||{}).forEach(function(k){
-    var s=src[k];
-    if(!s||!dateValide(s.date))return;
-    if(s.date<lundi||s.date>=finStr)return;
-    out.total++;
-    out.ids.push(k);
-    var n=s.driver||'(sans nom)';
-    if(!out.parDrv[n])out.parDrv[n]={n:0,tax:0};
-    out.parDrv[n].n++;
-    out.parDrv[n].tax+=pf(s.taxf)-pf(s.taxd);
-  });
-  return out;
-}
-async function diagnosticSyncLire(semaine){
-  var out={flotte:window.TXP_TENANT||'taxipro',nom:(C&&C.companyName)||'',
-    semaine:semaine,ok:false,
-    localTotal:Object.keys(S||{}).length,
-    derniereSync:localStorage.getItem('txpro_lastSave')||'',
-    enAttente:!!window._fbPending,
-    ecouteVivante:(typeof _unlistenFb==='function')};
-  out.local=_quartsParSemaine(S,semaine);
-  try{
-    if(!window._fbReady)throw {code:'cloud-indisponible'};
-    await window._fbEnsure();
-    var snap=await firebase.firestore().collection(out.flotte).doc('shifts')
-      .get({source:'server'});
-    var dist=snap.exists?((snap.data()||{}).data||{}):{};
-    out.cloudTotal=Object.keys(dist).length;
-    out.taille=JSON.stringify(dist).length;        // limite Firestore ~1 Mo
-    // Qui a le droit d'écrire dans cette flotte ? Un chauffeur dont le
-    // téléphone n'est pas dans cette liste voit ses quarts refusés — et
-    // les garde sous les yeux en croyant les avoir envoyés.
-    try{
-      var m=await firebase.firestore().collection(out.flotte).doc('members').get({source:'server'});
-      var md=m.exists?(m.data()||{}):{};
-      out.membres=Object.keys(md.uids||{}).length;
-      out.verrouillee=md.locked===true;
-      out.jeSuisMembre=!!(md.uids&&window._fbUid&&md.uids[window._fbUid]);
-      // Les fiches d'état des téléphones voyagent dans le même document :
-      // une par appareil, on garde la plus récente par chauffeur.
-      var ed=md.etats||{}, parNom={};
-      Object.keys(ed).forEach(function(uid){
-        var f=ed[uid]; if(!f||!f.nom)return;
-        if(!parNom[f.nom]||pf(f.ts)>pf(parNom[f.nom].ts))parNom[f.nom]=f;
-      });
-      out.appareils=Object.keys(parNom).map(function(n){return parNom[n];})
-        .sort(function(a,b){return pf(b.ts)-pf(a.ts);});
-    }catch(eM){ out.membresErreur=(eM&&eM.code)||'?'; out.appareils=null; }
-    out.cloud=_quartsParSemaine(dist,semaine);
-    // PLUSIEURS SEMAINES D'UN COUP. Un quart n'est pas toujours perdu :
-    // il peut être rangé dans la semaine d'à côté. Jusqu'à la v119, le
-    // formulaire proposait la date du LENDEMAIN passé 20 h — un quart de
-    // dimanche soir atterrissait donc au lundi, dans la semaine suivante.
-    // Un téléphone pas encore mis à jour le fait toujours.
-    out.semaines=[];
-    var lundi=parseLocalDate(semaine);
-    for(var i=-2;i<=2;i++){
-      var d0=new Date(lundi); d0.setDate(d0.getDate()+i*7);
-      var k=ymdLocal(d0);
-      out.semaines.push({wk:k,
-        local:_quartsParSemaine(S,k).total,
-        cloud:_quartsParSemaine(dist,k).total,
-        choisie:(k===semaine)});
-    }
-    // ce que le cloud a et que CE téléphone n'a pas (hors suppressions)
-    var tomb=(window.TOMB&&window.TOMB.s)||{};
-    out.manquants=Object.keys(dist).filter(function(k){
-      return !S[k]&&!tomb[k];
-    });
-    out.ok=true;
-  }catch(e){
-    out.erreur=(e&&e.code)||String((e&&e.message)||e);
-  }
-  return out;
-}
-function recupererQuartsDuCloud(){
-  if(!window._fbReady){alert('Pas de connexion au cloud pour l\'instant.');return;}
-  window._fbEnsure().then(function(){
-    return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
-      .doc('shifts').get({source:'server'});
-  }).then(function(snap){
-    var dist=snap.exists?((snap.data()||{}).data||{}):{};
-    var avant=Object.keys(S).length;
-    // txpMerge respecte les tombstones : une vraie suppression ne revient pas
-    var fusion=window.txpMerge(S,dist,'s');
-    var ajoutes=Object.keys(fusion).length-avant;
-    if(!ajoutes){alert('Rien de nouveau : ton téléphone a déjà tout ce que le cloud contient.');return;}
-    for(var k in fusion){if(!S[k])S[k]=fusion[k];}
-    if(typeof window.S!=='undefined')window.S=S;
-    lSave();
-    audit('QUARTS_RECUPERES',ajoutes+' quart(s) repris du cloud');
-    // Le constat change : on le refait dire par l'app
-    window._quartsManquants=null;
-    window._verifManqDernier=0;
-    if(typeof renderDiagSync==='function')renderDiagSync();
-    var cur=document.querySelector('.pg.on');
-    if(cur&&cur.id==='pg-paye'&&typeof renderPaye==='function')renderPaye();
-    if(typeof _refreshAfterSync==='function')_refreshAfterSync();
-    // RÉCUPÉRER NE SERT À RIEN SI ÇA NE TIENT PAS. Quand la mémoire est
-    // saturée, les quarts repris ne sont pas enregistrés et repartiront
-    // au prochain rechargement : le dire tout de suite.
-    if(window._stockagePlein){
-      alert('⚠️ '+ajoutes+' quart(s) repris du cloud, MAIS la mémoire de ce téléphone est pleine.\n\n'
-        +'Ils risquent de disparaître au prochain rechargement.\n\n'
-        +'Va d\'abord dans Réglages → « 🗄️ Archiver les vieux quarts », puis récupère à nouveau.');
-      return;
-    }
-    alert('✅ '+ajoutes+' quart(s) récupérés du cloud.\n\nVa voir la page Paye : ils devraient y être.');
-  }).catch(function(e){
-    alert('Lecture du cloud impossible : '+((e&&e.code)||e)+'\n\nRéessaie quand le réseau sera revenu.');
-  });
-}
-function renderDiagSync(){
-  var el=document.getElementById('diagSyncContent');
-  if(!el)return;
-  if(!U||U.role!=='owner'){el.innerHTML='';return;}
-  var sem=window._diagSyncSem||derniereSemaineTerminee();
-  el.innerHTML=envoiStatutHTML()
-    +'<div style="font-size:11px;color:var(--m2);line-height:1.7;margin:9px 0;">'
-    +'Compare ce que <b style="color:var(--m3);">ton téléphone</b> contient avec ce que le '
-    +'<b style="color:var(--m3);">cloud</b> contient vraiment, pour une semaine donnée. '
-    +'C\'est la réponse à « mon chauffeur a travaillé mais je ne le vois pas ».</div>'
-    +'<label style="font-size:10px;color:var(--m2);display:block;margin-bottom:3px;">Semaine à vérifier (lundi)</label>'
-    +'<input type="date" id="diagSyncSem" value="'+_cmpEsc(sem)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:9px;padding:9px;font-size:12px;font-weight:700;margin-bottom:8px;">'
-    +'<button onclick="lancerDiagSync()" style="width:100%;background:rgba(96,165,250,.18);border:1px solid rgba(96,165,250,.45);color:var(--blu);border-radius:9px;padding:10px;font-size:11px;font-weight:800;cursor:pointer;">'
-    +'🩺 Vérifier maintenant</button>'
-    +'<div id="diagSyncRes" style="margin-top:10px;">'+(window._diagSyncHTML||'')+'</div>';
-}
-function lancerDiagSync(){
-  var v=gv('diagSyncSem');
-  if(!dateValide(v)){alert('Choisis une date.');return;}
-  // on se cale toujours sur le lundi de la semaine choisie
-  var lundi=ymdLocal(gwS(parseLocalDate(v)));
-  window._diagSyncSem=lundi;
-  var res=document.getElementById('diagSyncRes');
-  if(res)res.innerHTML='<div style="font-size:11px;color:var(--m2);">⏳ Lecture du cloud…</div>';
-  diagnosticSyncLire(lundi).then(function(d){
-    window._diagSyncHTML=diagSyncHTML(d);
-    renderDiagSync();
-  }).catch(function(e){
-    window._diagSyncHTML='<div style="font-size:11px;color:var(--red);">Échec : '+_cmpEsc(String(e))+'</div>';
-    renderDiagSync();
-  });
-}
-function diagSyncHTML(d){
-  var lig=function(lbl,val,coul){
-    return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;">'
-      +'<span style="color:var(--m2);">'+lbl+'</span>'
-      +'<span style="font-weight:800;color:'+(coul||'var(--m3)')+';">'+val+'</span></div>';
-  };
-  var h='<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:11px;padding:11px;">'
-    +'<div style="font-size:11px;font-weight:900;color:var(--m3);margin-bottom:7px;">Semaine du '+_cmpEsc(d.semaine)+'</div>'
-    +lig('🏢 Ma flotte','<span style="font-family:monospace;">'+_cmpEsc(d.flotte)+'</span>')
-    +lig('📱 Quarts sur ce téléphone',String(d.local.total))
-    +(d.ok?lig('☁️ Quarts dans le cloud',String(d.cloud.total),
-        d.cloud.total>d.local.total?'var(--red)':'var(--grn)')
-      :lig('☁️ Cloud','illisible : '+_cmpEsc(d.erreur||'?'),'var(--red)'));
-
-  if(d.ok){
-    // Le verdict, en une phrase
-    if(d.cloud.total>d.local.total){
-      h+='<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.4);border-radius:10px;padding:10px;margin-top:9px;font-size:11px;color:var(--m3);line-height:1.6;">'
-        +'<b style="color:var(--red);">Le cloud a '+(d.cloud.total-d.local.total)+' quart(s) de plus que ton téléphone.</b><br>'
-        +'Les chauffeurs ont bien envoyé leur travail : c\'est la descente vers cet appareil qui n\'a pas suivi.</div>'
-        +'<button onclick="recupererQuartsDuCloud()" style="width:100%;background:rgba(57,211,83,.18);border:1px solid rgba(57,211,83,.45);color:var(--grn);border-radius:9px;padding:11px;font-size:12px;font-weight:900;cursor:pointer;margin-top:9px;">'
-        +'⬇️ Récupérer ces quarts maintenant</button>';
-    }else if(d.cloud.total===0&&d.local.total===0){
-      h+='<div style="background:rgba(255,107,0,.1);border:1px solid rgba(255,107,0,.4);border-radius:10px;padding:10px;margin-top:9px;font-size:11px;color:var(--m3);line-height:1.6;">'
-        +'<b style="color:var(--neon);">Aucun quart cette semaine, ni ici ni dans le cloud.</b><br>'
-        +'Si tes chauffeurs ont bien travaillé et voient leurs quarts sur LEUR téléphone, '
-        +'c\'est qu\'ils ne sont pas sur la même flotte que toi. Demande à chacun d\'ouvrir '
-        +'Réglages et de te lire le code de flotte : il doit être <b style="font-family:monospace;">'
-        +_cmpEsc(d.flotte)+'</b>. S\'il est différent, il travaille à côté et il faut le faire rejoindre ta flotte.</div>';
-    }else{
-      h+='<div style="background:rgba(57,211,83,.1);border:1px solid rgba(57,211,83,.35);border-radius:10px;padding:10px;margin-top:9px;font-size:11px;color:var(--m3);line-height:1.6;">'
-        +'<b style="color:var(--grn);">Ton téléphone a tout ce que le cloud contient.</b><br>'
-        +'Si un quart manque quand même, il n\'a jamais été envoyé : regarde du côté du téléphone du chauffeur.</div>';
-    }
-    // Le détail par chauffeur, les deux côtés face à face
-    var noms={};
-    Object.keys(d.local.parDrv).forEach(function(n){noms[n]=1;});
-    Object.keys(d.cloud.parDrv).forEach(function(n){noms[n]=1;});
-    var liste=Object.keys(noms).sort();
-    if(liste.length){
-      h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;">'
-        +'<div style="font-size:10px;color:var(--m2);font-weight:800;margin-bottom:5px;">Par chauffeur — ici / dans le cloud</div>';
-      liste.forEach(function(n){
-        var a=d.local.parDrv[n]||{n:0,tax:0}, b=d.cloud.parDrv[n]||{n:0,tax:0};
-        var manque=b.n>a.n;
-        h+='<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;">'
-          +'<span style="color:var(--m3);">'+_cmpEsc(n)+'</span>'
-          +'<span style="font-weight:800;color:'+(manque?'var(--red)':'var(--m3)')+';">'
-          +a.n+' / '+b.n+' quart'+(b.n>1?'s':'')+(manque?' ⚠️':'')+'</span></div>';
-      });
-      h+='</div>';
-    }
-  }
-  // LES SEMAINES VOISINES. Si des quarts semblent manquer ici mais
-  // apparaissent la semaine d'à côté, ils ne sont pas perdus : ils sont
-  // mal datés. C'est ce que fait un téléphone pas encore à jour.
-  if(d.ok&&d.semaines&&d.semaines.length){
-    h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;">'
-      +'<div style="font-size:10px;color:var(--m2);font-weight:800;margin-bottom:6px;">Semaines voisines — ici / dans le cloud</div>';
-    d.semaines.forEach(function(x){
-      var ecart=x.cloud-x.local;
-      h+='<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;'
-        +(x.choisie?'background:rgba(245,200,0,.07);border-radius:6px;padding-left:6px;padding-right:6px;':'')+'">'
-        +'<span style="color:'+(x.choisie?'var(--gold)':'var(--m2)')+';">'+(x.choisie?'▸ ':'')+_cmpEsc(x.wk)+'</span>'
-        +'<span style="font-weight:800;color:'+(ecart>0?'var(--red)':'var(--m3)')+';">'
-        +x.local+' / '+x.cloud+(ecart>0?' ⚠️':'')+'</span></div>';
-    });
-    h+='<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:6px;">'
-      +'Si des quarts apparaissent dans la semaine voisine, ils ne sont pas perdus : ils ont été '
-      +'enregistrés au mauvais jour par un téléphone pas encore à jour. Fais-lui faire '
-      +'« 🔄 Forcer la mise à jour », puis corrige les dates dans « 🔍 Vérifier les quarts ».</div>'
-      +'</div>';
-  }
-  // CE QUE CHAQUE TÉLÉPHONE DIT DE LUI-MÊME. Le silence d'un appareil
-  // est aussi parlant que son message : s'il n'arrive plus à écrire, il
-  // ne dépose plus rien et sa dernière nouvelle vieillit.
-  if(d.ok&&d.appareils&&d.appareils.length){
-    h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;">'
-      +'<div style="font-size:10px;color:var(--m2);font-weight:800;margin-bottom:6px;">Téléphones de l\'équipe</div>';
-    d.appareils.forEach(function(a){
-      var age=Date.now()-pf(a.ts);
-      var h24=24*3600*1000;
-      var vieux=age>h24;
-      var quand='';
-      try{quand=new Date(pf(a.ts)).toLocaleString('fr-CA',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){}
-      var souci=a.memoirePleine||a.erreur||a.enAttente||vieux;
-      h+='<div style="border-top:1px solid var(--brd);padding:6px 0;font-size:11px;">'
-        +'<div style="display:flex;justify-content:space-between;gap:8px;">'
-        +'<span style="color:var(--m3);font-weight:800;">'+_cmpEsc(a.nom)+'</span>'
-        +'<span style="color:'+(souci?'var(--red)':'var(--grn)')+';font-weight:800;">'
-        +(a.quarts||0)+' quart'+((a.quarts||0)>1?'s':'')+'</span></div>'
-        +'<div style="font-size:9px;color:var(--m2);margin-top:2px;">'
-        +'dernière nouvelle : '+_cmpEsc(quand||'?')
-        +(vieux?' <b style="color:var(--red);">— plus de 24 h !</b>':'')
-        +(a.version?' · '+_cmpEsc(String(a.version).slice(0,24)):'')
-        +'</div>'
-        +(a.memoirePleine?'<div style="font-size:10px;color:var(--red);font-weight:800;">🚨 mémoire pleine</div>':'')
-        +(a.erreur?'<div style="font-size:10px;color:var(--red);font-weight:800;">⛔ dernier envoi refusé : '+_cmpEsc(a.erreur)+'</div>':'')
-        +(a.enAttente&&!a.erreur?'<div style="font-size:10px;color:var(--neon);font-weight:800;">⏳ envoi en attente</div>':'')
-        +'</div>';
-    });
-    h+='<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">'
-      +'Un chauffeur absent de cette liste, ou dont la dernière nouvelle est vieille, n\'arrive plus à écrire : '
-      +'fais-lui ouvrir l\'app et appuyer sur « 📤 Renvoyer mes quarts ».</div>'
-      +'</div>';
-  }
-  // LE VERROU ET LES APPAREILS AUTORISÉS. C'est la cause la plus
-  // sournoise : la flotte verrouillée refuse les nouveaux téléphones,
-  // leurs écritures sont rejetées, et le chauffeur n'en sait rien.
-  if(d.ok&&d.membres!==undefined){
-    h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;">'
-      +lig('📱 Appareils autorisés',String(d.membres))
-      +lig('🔒 Flotte verrouillée',d.verrouillee?'OUI':'non',d.verrouillee?'var(--red)':'var(--grn)')
-      +(d.taille?lig('📦 Taille des quarts',Math.round(d.taille/1024)+' Ko / ~1000 Ko',
-          d.taille>750000?'var(--red)':d.taille>500000?'var(--neon)':'var(--grn)'):'');
-    if(d.verrouillee){
-      h+='<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.45);border-radius:10px;padding:10px;margin-top:8px;font-size:11px;color:var(--m3);line-height:1.7;">'
-        +'<b style="color:var(--red);">La flotte est verrouillée.</b> Tout téléphone qui n\'était pas déjà autorisé '
-        +'voit ses écritures REFUSÉES : le chauffeur rentre ses quarts, les voit chez lui, et ils n\'arrivent jamais ici. '
-        +'Un simple « Forcer la mise à jour » peut suffire à faire perdre son autorisation à un téléphone.'
-        +'<div style="margin-top:6px;">Déverrouille dans <b>Réglages → Multi-propriétaire → 🔓</b>, '
-        +'fais rouvrir l\'app à chaque chauffeur, puis reverrouille si tu veux.</div></div>';
-    }
-    if(d.taille>750000){
-      h+='<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.45);border-radius:10px;padding:10px;margin-top:8px;font-size:11px;color:var(--m3);line-height:1.7;">'
-        +'<b style="color:var(--red);">Le document des quarts approche la limite de 1 Mo.</b> '
-        +'Au-delà, Firestore refuse TOUTES les écritures : plus aucun quart n\'arrive. '
-        +'Va dans <b>Réglages → « 🗄️ Archiver les vieux quarts »</b>.</div>';
-    }
-    h+='</div>';
-  }
-  // L'état de la liaison, utile quand rien ne descend
-  h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;font-size:10px;color:var(--m2);line-height:1.7;">'
-    +'Écoute temps réel : <b style="color:'+(d.ecouteVivante?'var(--grn)':'var(--red)')+';">'
-    +(d.ecouteVivante?'branchée':'coupée')+'</b>'
-    +(d.enAttente?' · <b style="color:var(--neon);">écriture en attente</b>':'')
-    +(d.derniereSync?'<br>Dernière sauvegarde : '+_cmpEsc(new Date(d.derniereSync).toLocaleString('fr-CA')):'')
-    +'<br>Quarts au total sur ce téléphone : '+d.localTotal
-    +(d.ok?' · dans le cloud : '+d.cloudTotal:'')
-    +'</div>';
-  return h+'</div>';
-}
 function quartsPerdusHTML(){
   var l=quartsPerdus();
   var nbSauv=_bkpCles().length;
@@ -8329,7 +7115,6 @@ function diagnosticQuartsHTML(){
     +'Si un chauffeur ne retrouve plus ses quarts, la réponse est ici : '
     +'soit le quart a disparu de l\'app, soit il est rangé sous un nom qui n\'existe plus.</div>';
   h+=quartsPerdusHTML();
-  h+=datesDecaleesHTML();
   h+='<div style="background:'+(pb?'rgba(255,58,58,.08)':'rgba(57,211,83,.08)')+';border:1px solid '+(pb?'rgba(255,58,58,.3)':'rgba(57,211,83,.3)')+';border-radius:11px;padding:11px;margin-bottom:11px;">'
     +'<div style="font-size:12px;font-weight:900;color:'+(pb?'var(--red)':'var(--grn)')+';">'
     +(pb?'⚠️ '+pb+' anomalie'+(pb>1?'s':'')+' trouvée'+(pb>1?'s':''):'✅ Rien d\'anormal')+'</div>'
@@ -8942,7 +7727,6 @@ function renderSet(){
   renderGiftCardDrvSel();
   // Multi-flotte
   renderFleetInfo();
-  renderDiagSync();
   renderVerifQuarts();
   renderMesure();
   renderAnnuaire();
@@ -9872,7 +8656,7 @@ async function loginJoinFleet(){
 function archiveOldShifts(){
   if(!U||U.role!=='owner'){alert('Réservé au patron.');return;}
   var lim=new Date();lim.setMonth(lim.getMonth()-12);
-  var limStr=ymdLocal(lim);
+  var limStr=lim.toISOString().split('T')[0];
   var olds=Object.values(S).filter(function(s){return s.date&&s.date<limStr;});
   if(!olds.length){alert('Aucun quart de plus de 12 mois. Rien à archiver ✅');return;}
   if(!confirm('🗄️ ARCHIVAGE\n\n'+olds.length+' quarts datés avant '+limStr+' seront :\n\n1️⃣ Téléchargés en fichier d\'archive (garde-le pour la comptabilité/impôts !)\n2️⃣ Retirés de l\'application pour l\'alléger\n\nContinuer ?'))return;
@@ -11329,7 +10113,7 @@ function renderSoldeBar(){
     const lastMonday=new Date(now);
     lastMonday.setDate(now.getDate()-((now.getDay()+6)%7)-7);
     lastMonday.setHours(0,0,0,0);
-    const prevWkKey=ymdLocal(lastMonday);
+    const prevWkKey=lastMonday.toISOString().slice(0,10);
     const prevWkEnd=new Date(lastMonday);prevWkEnd.setDate(prevWkEnd.getDate()+6);
     const prevWkArr=getArr().filter(s=>s.driver===U.name&&inWk(s.date,new Date(lastMonday.getTime()+1)));
     const prevSal=prevWkArr.reduce((a,s)=>a+calcSalary(s),0);
@@ -11377,7 +10161,7 @@ function renderSoldeBar(){
     // ── Cartes cadeaux disponibles ──
     const myTaxNet=myShifts.reduce(function(a,s){return a+(taxNetQuart(s));},0);
     const myDrvObj=C.drivers.find(function(d){return d.name===U.name;});
-    const curWkKey2=ymdLocal(gwS(now));
+    const curWkKey2=gwS(now).toISOString().slice(0,10);
     const cards=getDriverGiftCardsThisWeek(myDrvObj,curWkKey2);
     if(cards.length){
       var gcHTML='<div style="margin-top:10px;">';
@@ -12437,7 +11221,7 @@ function openTresoTx(type){
 function salairesDus(){
   var byWk={};
   getArr().forEach(function(s){
-    if(isOwnerShift(s)||!dateValide(s.date))return;
+    if(isOwnerShift(s))return;
     var ws=gwS(parseLocalDate(s.date));
     var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
     var k=wk+'|'+s.driver;
@@ -12470,7 +11254,7 @@ function essenceDue(){
   var byWk={};
   getArr().forEach(function(s){
     var ess=essenceAvancee(s);
-    if(ess<=0.005||isOwnerShift(s)||!dateValide(s.date))return;
+    if(ess<=0.005||isOwnerShift(s))return;
     var ws=gwS(parseLocalDate(s.date));
     var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
     var k=wk+'|'+s.driver;
@@ -12782,7 +11566,7 @@ function taxeEcheance(k,mode){
 }
 function _dateLongue(d){
   try{return d.toLocaleDateString('fr-CA',{day:'numeric',month:'long',year:'numeric'});}
-  catch(e){return ymdLocal(d);}
+  catch(e){return d.toISOString().slice(0,10);}
 }
 // Le détail d'une période : d'où viennent les crédits, ligne par ligne
 function feuilleCreditsData(key){
@@ -13278,7 +12062,7 @@ function hebdoHTML(){
 
 // Résultat sur une période libre. Les coûts fixes sont mensuels : on n'en
 // compte que la part écoulée, sinon un mois entamé paraît catastrophique.
-function _ymdLoc(d){return ymdLocal(d);}   // une seule mise en forme pour toute l'app
+function _ymdLoc(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function resultatPeriode(du,au){
   var a=_ymdLoc(du), b=_ymdLoc(au);
   var sh=getArr().filter(function(s){return s.date&&s.date>=a&&s.date<=b;});
@@ -13549,19 +12333,6 @@ function bilanHTML(){
     +'<span style="font-size:24px;font-weight:900;color:'+(nette>=0?'var(--gold)':'var(--red)')+';">'+fm(nette)+'</span></div>';
   h+='<button onclick="C.treso._voirBilan=!C.treso._voirBilan;renderTreso();" style="width:100%;margin-top:8px;background:none;border:none;color:var(--m2);font-size:10px;font-weight:700;cursor:pointer;padding:6px;text-align:left;">'
     +(C.treso._voirBilan?'▾ Masquer le détail':'▸ Voir le détail ligne par ligne')+'</button>';
-  // Le passif le plus souvent mal compris : des semaines réellement
-  // versées, mais jamais cochées « payée » dans l'app.
-  try{
-    var _sd=salairesDus();
-    if(_sd.total>0.005){
-      h+='<div style="background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.3);border-radius:10px;padding:10px;margin-bottom:9px;">'
-        +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:7px;">'
-        +'💼 Les <b style="color:var(--m3);">'+fm(_sd.total)+'</b> de salaires comptés ici sont les semaines <b>jamais cochées « payée »</b> dans l\'app — '
-        +_sd.detail.length+' au total. Si tu les as déjà versées, elles se soldent d\'un coup.</div>'
-        +'<button onclick="window._payeDiagOpen=true;goPage(\'paye\');" style="width:100%;background:rgba(88,166,255,.16);border:1px solid rgba(88,166,255,.42);color:var(--blu);border-radius:9px;padding:9px;font-size:11px;font-weight:800;cursor:pointer;">'
-        +'🔎 Voir pourquoi, et solder</button></div>';
-    }
-  }catch(e){}
   h+='<div style="font-size:9px;color:var(--m2);line-height:1.5;border-top:1px solid var(--brd);padding-top:7px;">ℹ️ Les valeurs des biens sont celles que tu saisis (aucun amortissement automatique). Pour un bilan comptable officiel, réfère-toi à ton comptable.</div>';
   return h+'</div>';
 }
@@ -14520,41 +13291,14 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-28-v126-SEMAINES-VOISINES-ET-RECHARGE-SANS-PERTE';
-// RECHARGER SANS RIEN PERDRE.
-// Règle du projet : jamais de location.reload() avant la fin des
-// écritures Firebase. Ce bouton rechargeait 300 ms après l'appui, quoi
-// qu'il arrive — y compris avec un quart qui n'était pas encore parti.
-// On attend donc que l'envoi soit terminé, et on prévient si on
-// s'apprête à recharger alors qu'il reste quelque chose en attente.
+var APP_VERSION = '2026-10-28-RETOUR-ARRIERE-v116-DU-6-OCTOBRE';
 function forceMiseAJour(){
-  var vider=function(){
-    if('caches' in window){
-      return caches.keys().then(function(names){
-        return Promise.all(names.map(function(n){return caches.delete(n);}));
-      }).catch(function(){});
-    }
-    return Promise.resolve();
-  };
-  var attendreEnvoi=function(){
-    return new Promise(function(res){
-      var debut=Date.now();
-      (function boucle(){
-        if(!window._fbPending||Date.now()-debut>8000)return res(!window._fbPending);
-        setTimeout(boucle,300);
-      })();
+  if('caches' in window){
+    caches.keys().then(function(names){
+      names.forEach(function(name){caches.delete(name);});
     });
-  };
-  attendreEnvoi().then(function(tousPartis){
-    if(!tousPartis){
-      if(!confirm('⚠️ Des quarts ne sont pas encore partis vers le cloud.\n\n'
-        +'Si tu recharges maintenant, ils resteront sur ce téléphone.\n\n'
-        +'Recharger quand même ?'))return;
-    }
-    return vider().then(function(){
-      setTimeout(function(){ window.location.reload(true); }, 300);
-    });
-  });
+  }
+  setTimeout(function(){ window.location.reload(true); }, 300);
 }
 </script>
 </body>
