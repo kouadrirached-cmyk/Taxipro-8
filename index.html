@@ -8056,6 +8056,21 @@ async function diagnosticSyncLire(semaine){
         .sort(function(a,b){return pf(b.ts)-pf(a.ts);});
     }catch(eM){ out.membresErreur=(eM&&eM.code)||'?'; out.appareils=null; }
     out.cloud=_quartsParSemaine(dist,semaine);
+    // PLUSIEURS SEMAINES D'UN COUP. Un quart n'est pas toujours perdu :
+    // il peut être rangé dans la semaine d'à côté. Jusqu'à la v119, le
+    // formulaire proposait la date du LENDEMAIN passé 20 h — un quart de
+    // dimanche soir atterrissait donc au lundi, dans la semaine suivante.
+    // Un téléphone pas encore mis à jour le fait toujours.
+    out.semaines=[];
+    var lundi=parseLocalDate(semaine);
+    for(var i=-2;i<=2;i++){
+      var d0=new Date(lundi); d0.setDate(d0.getDate()+i*7);
+      var k=ymdLocal(d0);
+      out.semaines.push({wk:k,
+        local:_quartsParSemaine(S,k).total,
+        cloud:_quartsParSemaine(dist,k).total,
+        choisie:(k===semaine)});
+    }
     // ce que le cloud a et que CE téléphone n'a pas (hors suppressions)
     var tomb=(window.TOMB&&window.TOMB.s)||{};
     out.manquants=Object.keys(dist).filter(function(k){
@@ -8188,6 +8203,26 @@ function diagSyncHTML(d){
       });
       h+='</div>';
     }
+  }
+  // LES SEMAINES VOISINES. Si des quarts semblent manquer ici mais
+  // apparaissent la semaine d'à côté, ils ne sont pas perdus : ils sont
+  // mal datés. C'est ce que fait un téléphone pas encore à jour.
+  if(d.ok&&d.semaines&&d.semaines.length){
+    h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;">'
+      +'<div style="font-size:10px;color:var(--m2);font-weight:800;margin-bottom:6px;">Semaines voisines — ici / dans le cloud</div>';
+    d.semaines.forEach(function(x){
+      var ecart=x.cloud-x.local;
+      h+='<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;'
+        +(x.choisie?'background:rgba(245,200,0,.07);border-radius:6px;padding-left:6px;padding-right:6px;':'')+'">'
+        +'<span style="color:'+(x.choisie?'var(--gold)':'var(--m2)')+';">'+(x.choisie?'▸ ':'')+_cmpEsc(x.wk)+'</span>'
+        +'<span style="font-weight:800;color:'+(ecart>0?'var(--red)':'var(--m3)')+';">'
+        +x.local+' / '+x.cloud+(ecart>0?' ⚠️':'')+'</span></div>';
+    });
+    h+='<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:6px;">'
+      +'Si des quarts apparaissent dans la semaine voisine, ils ne sont pas perdus : ils ont été '
+      +'enregistrés au mauvais jour par un téléphone pas encore à jour. Fais-lui faire '
+      +'« 🔄 Forcer la mise à jour », puis corrige les dates dans « 🔍 Vérifier les quarts ».</div>'
+      +'</div>';
   }
   // CE QUE CHAQUE TÉLÉPHONE DIT DE LUI-MÊME. Le silence d'un appareil
   // est aussi parlant que son message : s'il n'arrive plus à écrire, il
@@ -14485,14 +14520,41 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-28-v125-RENVOYER-MES-QUARTS-ET-ETAT-DES-TELEPHONES';
+var APP_VERSION = '2026-10-28-v126-SEMAINES-VOISINES-ET-RECHARGE-SANS-PERTE';
+// RECHARGER SANS RIEN PERDRE.
+// Règle du projet : jamais de location.reload() avant la fin des
+// écritures Firebase. Ce bouton rechargeait 300 ms après l'appui, quoi
+// qu'il arrive — y compris avec un quart qui n'était pas encore parti.
+// On attend donc que l'envoi soit terminé, et on prévient si on
+// s'apprête à recharger alors qu'il reste quelque chose en attente.
 function forceMiseAJour(){
-  if('caches' in window){
-    caches.keys().then(function(names){
-      names.forEach(function(name){caches.delete(name);});
+  var vider=function(){
+    if('caches' in window){
+      return caches.keys().then(function(names){
+        return Promise.all(names.map(function(n){return caches.delete(n);}));
+      }).catch(function(){});
+    }
+    return Promise.resolve();
+  };
+  var attendreEnvoi=function(){
+    return new Promise(function(res){
+      var debut=Date.now();
+      (function boucle(){
+        if(!window._fbPending||Date.now()-debut>8000)return res(!window._fbPending);
+        setTimeout(boucle,300);
+      })();
     });
-  }
-  setTimeout(function(){ window.location.reload(true); }, 300);
+  };
+  attendreEnvoi().then(function(tousPartis){
+    if(!tousPartis){
+      if(!confirm('⚠️ Des quarts ne sont pas encore partis vers le cloud.\n\n'
+        +'Si tu recharges maintenant, ils resteront sur ce téléphone.\n\n'
+        +'Recharger quand même ?'))return;
+    }
+    return vider().then(function(){
+      setTimeout(function(){ window.location.reload(true); }, 300);
+    });
+  });
 }
 </script>
 </body>

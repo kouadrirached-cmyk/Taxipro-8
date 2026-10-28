@@ -74,6 +74,11 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 - **`baliseEtat()`** : chaque appareil dépose sa fiche (nom, version, nb de quarts, envoi en attente, mémoire pleine, dernière erreur, horodatage) **dans `members.etats[uid]`**, écriture additive. Le patron la voit dans son diagnostic sous « Téléphones de l'équipe », avec « dernière nouvelle ». Un appareil qui n'arrive plus à écrire ne dépose rien : **son silence est le signal**.
 - **POURQUOI DANS `members` ET PAS DANS UN DOCUMENT À PART** : `firestore.rules` n'autorise que `config`, `shifts`, `expenses`, `audit`, `deleted` (`isDataDoc()`) plus `members`. Un nouveau document serait refusé, et le patron ne peut pas republier les règles tant que la console Firebase lui est fermée (vérification en deux étapes jamais terminée). **Ne jamais ajouter un document Firestore sans vérifier `isDataDoc()` d'abord.**
 
+## « Pourquoi ça a arrêté d'un seul coup ? » (v126)
+- L'app a tourné quatre mois sans incident. Ce qui a changé la semaine du 19-25, ce sont **les mises à jour v116→v119**. Quand le patron dit « avant ça marchait », partir de là et non d'une cause extérieure.
+- **Un quart « manquant » peut être simplement MAL RANGÉ.** La v119 a corrigé la date proposée par le formulaire ; un téléphone pas encore à jour inscrit toujours le LENDEMAIN passé 20 h, et les quarts de dimanche soir atterrissent dans la semaine suivante. Le diagnostic affiche donc les **cinq semaines autour** de celle demandée (`out.semaines`), avec « ici / dans le cloud » : un écart qui se reporte sur la semaine voisine n'est pas une perte. Corriger ensuite via `corrigerDatesDecalees()`.
+- **`forceMiseAJour()` attend la fin des envois** (jusqu'à 8 s) et demande confirmation s'il reste quelque chose en attente. Il rechargeait 300 ms après l'appui, ce qui violait la règle « jamais de `location.reload()` avant la fin des écritures Firebase » inscrite plus haut dans ce fichier — et ce bouton est pressé par les chauffeurs après chaque mise à jour.
+
 ## Pièges connus
 - **Cache PWA** : les mises à jour ne s'affichent pas sans invalidation du cache / bouton de forçage. Toujours vérifier le service worker après modification.
 - **Erreurs de syntaxe JS = crash silencieux** : un seul fichier signifie qu'une erreur casse toute l'app. Toujours valider la syntaxe avant de pousser.
