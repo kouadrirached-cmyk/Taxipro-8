@@ -1,5 +1,27 @@
 # TaxiPro — Contexte du projet
 
+> ## ⏪ RETOUR EN ARRIÈRE EN COURS — à lire avant toute modification
+> **`index.html` a été ramené à la v116 (6 octobre) le 28 octobre, à la demande d'Amin.**
+> Raison : l'app a fonctionné quatre mois sans incident, puis des quarts de chauffeurs ont cessé
+> d'arriver chez le patron pendant la semaine du 19 au 25 octobre — la semaine où les v117, v118
+> et v119 ont été poussées. Le but est d'éliminer le code comme cause : si le problème persiste
+> sur la v116, il vient de Firebase ou de la configuration du cloud, pas des dernières versions.
+>
+> **Les sections ci-dessous décrivent les v117 à v126, qui ne sont PLUS dans `index.html`.**
+> Elles sont conservées intactes : chaque correctif y est documenté avec sa mesure, et il faudra
+> les réintroduire une fois la cause établie. Les versions concernées sont dans l'historique git
+> (v126 = commit `f6763ef`).
+>
+> **Ce qu'Amin a accepté de perdre pendant le test**, et qu'il faudra remettre en premier :
+> détection de la mémoire pleine (v123), écriture additive des quarts (v123), garde-fous contre
+> l'écran blanc (v120), date locale du formulaire (v119) — **les quarts saisis après 20 h sont de
+> nouveau datés du lendemain**, protection du rattrapage de paie (v120), et tous les outils de
+> diagnostic (v121 à v126).
+>
+> Vérifié avant la bascule : le calcul de la paie est **identique** entre v116 et v126
+> (taximètre net 329,75 · salaire 162,00 · part patron 197,85 sur le quart de référence).
+> Aucune donnée Firestore n'est touchée par ce retour en arrière.
+
 ## Vue d'ensemble
 TaxiPro est une application de gestion de flotte de taxis pour petits propriétaires-opérateurs au Québec. Développée par Amin, propriétaire de 3 Toyota Prius (véhicules 707, 718, 732) chez Taxis Unis de Chicoutimi (9420-1001 Québec Inc.).
 
