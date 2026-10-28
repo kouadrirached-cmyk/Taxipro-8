@@ -2084,7 +2084,18 @@ function getExpArr(){return Object.values(EX).sort((a,b)=>new Date(b.date)-new D
 // ═══ PERIOD ═══
 function gwS(d){const dt=new Date(d);const day=dt.getDay();dt.setDate(dt.getDate()-day+(day===0?-6:1));dt.setHours(0,0,0,0);return dt;}
 // Parse YYYY-MM-DD as LOCAL date (avoid UTC timezone offset bug)
-function parseLocalDate(ds){const[y,m,d]=ds.split('-').map(Number);return new Date(y,m-1,d);}
+// UN QUART SANS DATE NE DOIT PAS VIDER UN ÉCRAN. Dans une app d'un
+// seul fichier, une exception pendant le rendu laisse la page BLANCHE :
+// un seul quart dont la date vaut null faisait planter salairesDus(),
+// donc renderPaye(), et le patron ne voyait plus aucune paye — il ne
+// pouvait plus verser les salaires. On rend donc une date invalide
+// plutôt que de lever, et les totaux ignorent ces quarts (ils sont
+// signalés à part dans Réglages → « 🔍 Vérifier les quarts »).
+function dateValide(ds){return typeof ds==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(ds);}
+function parseLocalDate(ds){
+  if(!dateValide(ds))return new Date(NaN);
+  const[y,m,d]=ds.split('-').map(Number);return new Date(y,m-1,d);
+}
 function inDay(ds,ref){return ds===ymdLocal(ref);}
 function inWk(ds,ref){const d=parseLocalDate(ds),ws=gwS(ref),we=new Date(ws);we.setDate(we.getDate()+7);return d>=ws&&d<we;}
 function inMo(ds,ref){const d=parseLocalDate(ds),r=new Date(ref);return d.getMonth()===r.getMonth()&&d.getFullYear()===r.getFullYear();}
@@ -3884,22 +3895,43 @@ function goPage(name){
   document.getElementById('tb-'+name).classList.add('on');
   document.getElementById('pagesEl').scrollTop=0;
   gaEvent('ecran',{ecran:name,role:(U&&U.role)||''});
-  if(name==='dash')renderDash();
-  if(name==='hist')renderHist();
-  if(name==='stats')renderStats();
-  if(name==='profit')renderProfit();
-  if(name==='analyse')renderAnalyse();
-  if(name==='paye')renderPaye();
-  if(name==='exp'){renderExp();renderFactures();}
-  if(name==='team')renderTeamWithMsgs();
-  if(name==='fleet')renderFleet();
-  if(name==='treso')renderTreso();
-  if(name==='clean'){renderClean();renderGaranties();}
-  if(name==='msg')renderMsgPage();
-  if(name==='audit2')renderAuditVisual();
-  if(name==='sched')renderSched();
-  if(name==='planveh')renderPlanVeh();
-  if(name==='set')renderSet();
+  // FILET DE SÉCURITÉ : dans une app d'un seul fichier, une exception
+  // pendant le rendu laisse la page BLANCHE. C'est arrivé pour de vrai :
+  // un quart dont la date valait null faisait planter la page Paye, et
+  // le patron ne pouvait plus verser les salaires — sans le moindre
+  // message. On dit désormais ce qui s'est passé, et où aller voir.
+  try{
+    if(name==='dash')renderDash();
+    if(name==='hist')renderHist();
+    if(name==='stats')renderStats();
+    if(name==='profit')renderProfit();
+    if(name==='analyse')renderAnalyse();
+    if(name==='paye')renderPaye();
+    if(name==='exp'){renderExp();renderFactures();}
+    if(name==='team')renderTeamWithMsgs();
+    if(name==='fleet')renderFleet();
+    if(name==='treso')renderTreso();
+    if(name==='clean'){renderClean();renderGaranties();}
+    if(name==='msg')renderMsgPage();
+    if(name==='audit2')renderAuditVisual();
+    if(name==='sched')renderSched();
+    if(name==='planveh')renderPlanVeh();
+    if(name==='set')renderSet();
+  }catch(ePage){
+    console.error('Rendu de la page '+name+' :',ePage);
+    try{
+      var pg=document.getElementById('pg-'+name);
+      if(pg&&!pg.textContent.trim()){
+        pg.innerHTML='<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.4);'
+          +'border-radius:12px;padding:14px;margin:12px;font-size:12px;color:var(--m3);line-height:1.7;">'
+          +'<div style="font-weight:900;color:var(--red);margin-bottom:6px;">⚠️ Cet écran n\'a pas pu s\'afficher</div>'
+          +'Une donnée est abîmée — le plus souvent un quart sans date. '
+          +'Va dans <b>Réglages → « 🔍 Vérifier les quarts »</b> : les quarts à problème y sont listés.'
+          +'<div style="font-size:10px;color:var(--m2);margin-top:8px;">Détail technique : '
+          +String((ePage&&ePage.message)||ePage).replace(/</g,'&lt;')+'</div></div>';
+      }
+    }catch(e2){}
+  }
 }
 function setPer(mode,el){
   perMode=mode;perOff=0;
@@ -4873,8 +4905,8 @@ function renderAnalyse(){
       // Écarts détaillés + / -
       +(all.ecartCount>0?(()=>{
         // Grouper les écarts par semaine
-        const ecShifts=all.shifts.filter(s=>Math.abs(calcEcart(s))>0.5)
-          .sort((a,b)=>b.date.localeCompare(a.date));
+        const ecShifts=all.shifts.filter(s=>Math.abs(calcEcart(s))>0.5&&dateValide(s.date))
+          .sort((a,b)=>String(b.date).localeCompare(String(a.date)));
         const byWk={};
         ecShifts.forEach(s=>{
           const d=parseLocalDate(s.date);
@@ -4935,7 +4967,7 @@ function renderAnalyse(){
 
     // Par mois pour cette voiture
     const vByMo={};
-    allArr.filter(s=>s.vehicle===vname).forEach(s=>{
+    allArr.filter(s=>s.vehicle===vname&&dateValide(s.date)).forEach(s=>{
       const mo=s.date.substring(0,7);
       if(!vByMo[mo])vByMo[mo]={rec:0,sal:0,profit:0,essence:0,n:0};
       vByMo[mo].rec+=s.recette;
@@ -6139,7 +6171,7 @@ function essPriseDansCash(wkKey,drvName){
 function payeWeekCalc(wkKey,drvName){
   var sal=0,cash=0,ess=0,tax=0,brut=0,crs=0,part=0,pour=0,n=0;
   getArr().forEach(function(s){
-    if(s.isOwner||s.driver!==drvName)return;
+    if(s.isOwner||s.driver!==drvName||!dateValide(s.date))return;
     var ws=gwS(parseLocalDate(s.date));
     if(ymdLocal(ws)!==wkKey)return;
     sal+=calcSalary(s);
@@ -6242,7 +6274,7 @@ function auditEssenceAvancee(){
   var byWk={};
   getArr().forEach(function(s){
     var ess=essenceAvancee(s);
-    if(ess<=0.005||isOwnerShift(s))return;
+    if(ess<=0.005||isOwnerShift(s)||!dateValide(s.date))return;
     var ws=gwS(parseLocalDate(s.date));
     var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
     var k=wk+'|'+s.driver;
@@ -6434,19 +6466,43 @@ function diagnosticPayes(){
 // AUCUNE sortie de trésorerie n'est créée : cet argent est parti il y a
 // longtemps, du vrai portefeuille, sans passer par l'app. Rejouer 40
 // paiements fausserait les comptes au lieu de les redresser.
+// La dernière semaine TERMINÉE : le lundi d'il y a une semaine.
+// Au-delà, on est dans la semaine en cours, qui ne peut pas avoir été
+// « déjà versée hors app » puisqu'elle n'est pas finie.
+function derniereSemaineTerminee(){
+  var d=gwS(new Date());
+  d.setDate(d.getDate()-7);
+  return ymdLocal(d);
+}
 function payerToutJusqua(){
   var lim=gv('payeRattrapLim');
   if(!/^\d{4}-\d{2}-\d{2}$/.test(lim)){alert('Choisis d\'abord une date.');return;}
-  var cibles=salairesDus().detail.filter(function(d){return d.wk<=lim;});
-  if(!cibles.length){alert('Aucune semaine due jusqu\'au '+lim+'.');return;}
+  // GARDE-FOU : jamais la semaine en cours. Le rattrapage sert à solder
+  // des payes déjà versées ; une semaine qui n'est pas finie ne peut pas
+  // l'être. Sans cette borne, un seul appui marquait « payée » la paye
+  // que le patron n'avait pas encore versée — et l'app ne lui proposait
+  // plus de la verser.
+  var semEnCours=ymdLocal(gwS(new Date()));
+  var cibles=salairesDus().detail.filter(function(d){return d.wk<=lim&&d.wk<semEnCours;});
+  var ecartees=salairesDus().detail.filter(function(d){return d.wk<=lim&&d.wk>=semEnCours;}).length;
+  if(!cibles.length){
+    alert(ecartees
+      ?'Rien à solder.\n\nLa semaine en cours n\'est jamais soldée en bloc : '
+       +'elle n\'est pas finie, donc elle ne peut pas avoir déjà été versée.\n\n'
+       +'Pour la payer, utilise le bouton « 💵 Payer » de sa semaine une fois qu\'elle est terminée.'
+      :'Aucune semaine due jusqu\'au '+lim+'.');
+    return;
+  }
   var tot=cibles.reduce(function(a,d){return a+d.net;},0);
   var apercu=cibles.slice(0,6).map(function(d){return '• '+d.drv+' — sem. '+d.wk+' : '+fm(d.net);}).join('\n');
   if(cibles.length>6)apercu+='\n• … et '+(cibles.length-6)+' autre(s)';
-  if(!confirm('Solder '+cibles.length+' semaine(s) jusqu\'au '+lim+' ?\n\n'
+  if(!confirm('Solder '+cibles.length+' semaine(s), de la sem. du '
+    +cibles[cibles.length-1].wk+' à celle du '+cibles[0].wk+' ?\n\n'
     +apercu+'\n\nTOTAL RETIRÉ DU PASSIF : '+fm(tot)+'\n\n'
     +'⚠️ À n\'utiliser que pour des payes DÉJÀ VERSÉES hors de l\'app.\n'
     +'Aucune sortie de trésorerie ne sera créée : cet argent est déjà parti.\n'
-    +'Pour une paye que tu verses MAINTENANT, utilise plutôt le bouton de sa semaine.\n\n'
+    +'Pour une paye que tu verses MAINTENANT, utilise plutôt le bouton « 💵 Payer » de sa semaine.\n\n'
+    +(ecartees?'La semaine en cours est laissée de côté : elle n\'est pas finie.\n\n':'')
     +'Annulable juste après.'))return;
   var lot=uid(), now=new Date().toISOString();
   if(!C.payes)C.payes={};
@@ -6494,11 +6550,16 @@ function payesDiagHTML(){
   var d=diagnosticPayes();
   if(!d.n&&!d.orphelines.length&&!d.variantes.length&&!d.lots.length)return '';
   var ouvert=!!window._payeDiagOpen;
-  var h='<div class="card" style="border-color:'+(d.n?'rgba(255,58,58,.35)':'var(--brd)')+';">'
+  // Quand plus rien n'est dû mais qu'un rattrapage a eu lieu, le dire
+  // dans le titre : sans ça, une semaine soldée par erreur reste
+  // invisible derrière un « à jour » rassurant.
+  var resume=d.n?fm(d.total):(d.lots.length?'soldé en bloc':'à jour');
+  var couleur=d.n?'var(--red)':(d.lots.length?'var(--blu)':'var(--grn)');
+  var h='<div class="card" style="border-color:'+(d.n?'rgba(255,58,58,.35)':(d.lots.length?'rgba(88,166,255,.3)':'var(--brd)'))+';">'
     +'<div class="ctit" onclick="window._payeDiagOpen=!window._payeDiagOpen;renderPaye();" style="cursor:pointer;">'
-    +'<span><span class="ci">🔎</span>Pourquoi ces semaines sont dues</span>'
-    +'<span style="font-size:12px;font-weight:900;color:'+(d.n?'var(--red)':'var(--grn)')+';">'
-    +(d.n?fm(d.total):'à jour')+' '+(ouvert?'▾':'▸')+'</span></div>';
+    +'<span><span class="ci">🔎</span>'+(d.n?'Pourquoi ces semaines sont dues':'Payes — vérification')+'</span>'
+    +'<span style="font-size:12px;font-weight:900;color:'+couleur+';">'
+    +resume+' '+(ouvert?'▾':'▸')+'</span></div>';
   if(!ouvert)return h+'</div>';
   if(d.n){
     h+='<div style="font-size:11px;color:var(--m2);line-height:1.7;margin-bottom:10px;">'
@@ -6571,27 +6632,44 @@ function payesDiagHTML(){
 
   // 3) Solder l'historique
   if(d.n){
-    var parDefaut=d.plusRecente;
+    // JAMAIS la semaine la plus récente par défaut : c'est souvent celle
+    // en cours, et un seul appui marquait alors « payée » la paye pas
+    // encore versée. On propose la dernière semaine TERMINÉE, et jamais
+    // plus tard que la plus ancienne dette si tout est récent.
+    var finie=derniereSemaineTerminee();
+    var parDefaut=(d.plusVieille&&d.plusVieille>finie)?d.plusVieille:finie;
+    if(d.plusRecente&&parDefaut>d.plusRecente)parDefaut=d.plusRecente;
     h+='<div style="background:rgba(0,0,0,.3);border:1px solid var(--brd2);border-radius:11px;padding:11px;margin-bottom:10px;">'
       +'<div style="font-size:11px;font-weight:900;color:var(--m3);margin-bottom:6px;">🧹 Solder les semaines déjà versées</div>'
       +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:8px;">'
       +'Si tu as payé ces semaines avant d\'utiliser l\'app, elles n\'ont jamais été cochées ici. '
       +'Choisis jusqu\'où remonter : elles sortiront du passif, et <b>ta trésorerie ne bougera pas</b> — cet argent est déjà parti.</div>'
       +'<label style="font-size:10px;color:var(--m2);display:block;margin-bottom:3px;">Tout solder jusqu\'au (inclus)</label>'
-      +'<input type="date" id="payeRattrapLim" value="'+_cmpEsc(parDefaut)+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:9px;padding:9px;font-size:12px;font-weight:700;margin-bottom:8px;">'
+      +'<input type="date" id="payeRattrapLim" value="'+_cmpEsc(parDefaut)+'" max="'+_cmpEsc(derniereSemaineTerminee())+'" style="width:100%;background:rgba(0,0,0,.4);border:1px solid var(--brd2);color:var(--txt);border-radius:9px;padding:9px;font-size:12px;font-weight:700;margin-bottom:8px;">'
       +'<button onclick="payerToutJusqua()" style="width:100%;background:rgba(57,211,83,.16);border:1px solid rgba(57,211,83,.4);color:var(--grn);border-radius:9px;padding:10px;font-size:11px;font-weight:800;cursor:pointer;">'
       +'✅ Marquer payées — déjà versées hors app</button>'
-      +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">Pour une paye que tu verses <b>maintenant</b>, utilise le bouton de sa semaine plus bas : lui sort l\'argent de la trésorerie.</div>'
+      +'<div style="font-size:9px;color:var(--m2);line-height:1.6;margin-top:7px;">'
+      +'<b style="color:var(--gold);">La semaine en cours n\'est jamais soldée ici</b> : elle n\'est pas finie, elle ne peut donc pas avoir déjà été versée. '
+      +'Pour une paye que tu verses <b>maintenant</b>, utilise le bouton « 💵 Payer » de sa semaine plus bas : lui sort l\'argent de la trésorerie.</div>'
       +'</div>';
   }
 
   // 4) Annuler un rattrapage
   if(d.lots.length){
-    h+='<div style="font-size:10px;color:var(--m2);line-height:1.7;">Rattrapages faits :';
+    h+='<div style="background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.3);border-radius:11px;padding:11px;">'
+      +'<div style="font-size:11px;font-weight:900;color:var(--blu);margin-bottom:5px;">🧹 Semaines soldées en bloc</div>'
+      +'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-bottom:8px;">'
+      +'Ces semaines ont été marquées payées d\'un coup, comme déjà versées hors de l\'app. '
+      +'Elles n\'ont créé aucune sortie de trésorerie. '
+      +'<b style="color:var(--m3);">Si une paye n\'avait pas encore été versée, annule le rattrapage ici</b> : '
+      +'la semaine redevient due et son bouton « 💵 Payer » revient.</div>';
     d.lots.forEach(function(l){
-      h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--brd);padding:6px 0;">'
-        +'<span>'+l.n+' sem. jusqu\'au '+_cmpEsc(l.lim)+' · '+fm(l.total)+'</span>'
-        +'<button onclick="annulerLotPaye(\''+l.id+'\')" style="flex-shrink:0;background:rgba(255,58,58,.14);border:1px solid rgba(255,58,58,.35);color:var(--red);border-radius:8px;padding:5px 9px;font-size:10px;font-weight:800;cursor:pointer;">↩️ Annuler</button></div>';
+      var quand='';
+      try{quand=new Date(l.ts).toLocaleDateString('fr-CA',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});}catch(e){}
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px solid var(--brd);padding:7px 0;">'
+        +'<span style="font-size:11px;color:var(--m3);min-width:0;"><b>'+l.n+' semaine'+(l.n>1?'s':'')+'</b> jusqu\'au '+_cmpEsc(l.lim)+' · '+fm(l.total)
+        +(quand?'<div style="font-size:9px;color:var(--m2);">fait le '+_cmpEsc(quand)+'</div>':'')+'</span>'
+        +'<button onclick="annulerLotPaye(\''+l.id+'\')" style="flex-shrink:0;background:rgba(255,58,58,.16);border:1px solid rgba(255,58,58,.4);color:var(--red);border-radius:9px;padding:8px 11px;font-size:11px;font-weight:800;cursor:pointer;">↩️ Annuler</button></div>';
     });
     h+='</div>';
   }
@@ -6608,7 +6686,7 @@ function renderPaye(){
   // Group shifts by week
   const byWk={};
   allArr.forEach(s=>{
-    if(s.isOwner)return;
+    if(s.isOwner||!dateValide(s.date))return;
     const d=parseLocalDate(s.date);
     const ws=gwS(d);
     const wkey=ymdLocal(ws);
@@ -6780,7 +6858,13 @@ function renderPaye(){
             +(essCash?'⛽ '+fm(dd.ess)+' d\'essence pris dans le cash':'')+'</div>':''))
         +'<div class="paye-status" style="color:'+(isCurWk?'var(--gold)':isPaid?'var(--grn)':'var(--red)')+';">'
         +(isCurWk?'🟡 '+dd.n+' quart'+(dd.n>1?'s':'')+' cette semaine'
-          :isPaid?'✅ Payé le '+paidTs:'🔴 En attente de paiement')
+          // Un solde de rattrapage N'EST PAS un versement : aucun argent
+          // n'est sorti de la trésorerie. Le dire, sinon une semaine
+          // soldée en bloc ressemble à une paye faite une par une.
+          :isPaid?((C.payes[k]&&C.payes[k].horsApp)
+            ?'🧹 Soldé le '+paidTs+' — déjà versé hors app'
+            :'✅ Payé le '+paidTs)
+          :'🔴 En attente de paiement')
         +'</div>'
         +'</div>'
         +(isCurWk
@@ -11667,7 +11751,7 @@ function openTresoTx(type){
 function salairesDus(){
   var byWk={};
   getArr().forEach(function(s){
-    if(isOwnerShift(s))return;
+    if(isOwnerShift(s)||!dateValide(s.date))return;
     var ws=gwS(parseLocalDate(s.date));
     var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
     var k=wk+'|'+s.driver;
@@ -11700,7 +11784,7 @@ function essenceDue(){
   var byWk={};
   getArr().forEach(function(s){
     var ess=essenceAvancee(s);
-    if(ess<=0.005||isOwnerShift(s))return;
+    if(ess<=0.005||isOwnerShift(s)||!dateValide(s.date))return;
     var ws=gwS(parseLocalDate(s.date));
     var wk=ws.getFullYear()+'-'+String(ws.getMonth()+1).padStart(2,'0')+'-'+String(ws.getDate()).padStart(2,'0');
     var k=wk+'|'+s.driver;
@@ -13750,7 +13834,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-25-v119-DATE-LOCALE-QUARTS-DU-SOIR';
+var APP_VERSION = '2026-10-28-v120-PAYE-VISIBLE-ET-SEMAINE-EN-COURS-PROTEGEE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){

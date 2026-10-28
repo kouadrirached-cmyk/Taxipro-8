@@ -23,6 +23,8 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 - Clé : `"AAAA-MM-JJ|Nom du chauffeur"`, où la date est le **lundi** de la semaine, en heure LOCALE (`_wkKeyDe`). Ne pas fabriquer cette clé avec `toISOString()` : au Québec les deux coïncident, mais pas dans un fuseau à l'est de Greenwich — ce qui compte pour la revente du produit.
 - La clé contient le NOM : renommer un chauffeur doit passer par `renommerChauffeur()`, qui déplace aussi les clés `C.payes` (et les suffixes `_deductCash` / `_essCash`).
 - Cocher une semaine « payée » crée de **vraies sorties de trésorerie** (`payeKey` sur la transaction). Un rattrapage en masse ne doit donc JAMAIS rejouer ces paiements : `payerToutJusqua()` ne fait que solder le passif (`horsApp:true`), sans toucher à la trésorerie, et consigne un lot annulable dans `C.payeLots`.
+- **Le rattrapage ne touche JAMAIS la semaine en cours (v120)** — une semaine qui n'est pas finie ne peut pas avoir « déjà été versée hors app ». La v117 pré-remplissait la date avec la semaine la PLUS RÉCENTE : un seul appui marquait payée la paye pas encore versée, le bouton « 💵 Payer » disparaissait et le patron ne pouvait plus payer ses chauffeurs. Le défaut par défaut est désormais `derniereSemaineTerminee()`, le champ porte un `max`, et `payerToutJusqua()` filtre `d.wk < semaine en cours` même si la date est forcée.
+- **Un solde de rattrapage s'affiche « 🧹 Soldé … — déjà versé hors app »**, jamais « ✅ Payé le » : sinon il se confond avec un vrai versement. Et quand plus rien n'est dû mais qu'un lot existe, le titre de la carte dit « soldé en bloc » au lieu d'un « à jour » rassurant.
 
 ## Mécanismes de synchronisation (fragiles — manipuler avec précaution)
 - **Tombstones** : les suppressions sont marquées (tombstones) et non effacées, pour éviter qu'un appareil hors ligne ressuscite des données supprimées.
@@ -50,6 +52,7 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 ## Pièges connus
 - **Cache PWA** : les mises à jour ne s'affichent pas sans invalidation du cache / bouton de forçage. Toujours vérifier le service worker après modification.
 - **Erreurs de syntaxe JS = crash silencieux** : un seul fichier signifie qu'une erreur casse toute l'app. Toujours valider la syntaxe avant de pousser.
+- **UNE DONNÉE ABÎMÉE NE DOIT PAS VIDER UN ÉCRAN (v120)** : une exception pendant le rendu laisse la page **blanche**, sans message. C'est arrivé pour de vrai — un quart dont `date` valait `null` faisait planter `parseLocalDate` → `salairesDus()` → `renderPaye()`, et le patron ne voyait plus aucune paye ni aucun bouton « Payer ». Trois garde-fous : `parseLocalDate` rend une date invalide au lieu de lever (`dateValide(ds)` teste le format), les agrégations de paie ignorent les quarts sans date valide, et `goPage()` enveloppe le rendu dans un `try/catch` qui affiche « ⚠️ Cet écran n'a pas pu s'afficher » avec le renvoi vers « 🔍 Vérifier les quarts ». **Ce filet est un dernier recours, pas une excuse** : si un test voit le message de panne au lieu des données, c'est un échec.
 - **Tester la logique de sync** avant de pousser : simuler deux appareils si possible.
 
 ## Conventions
