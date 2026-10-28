@@ -68,6 +68,12 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 - **Pourquoi là et pas dans les Réglages** : le patron ne doit pas avoir à lancer un diagnostic pour découvrir qu'il lui manque des quarts. Mesuré chez lui : un chauffeur avait 6 quarts et 1 991,05 $ au compteur, le patron n'en voyait qu'un à 75,20 $ / 7 courses.
 - **Récupérer ne sert à rien si ça ne tient pas** : après `lSave()`, si `_stockagePlein` est vrai, la récupération le DIT et renvoie vers l'archivage au lieu d'annoncer un succès qui disparaîtra au prochain rechargement.
 
+## Localiser le téléphone qui n'envoie pas (v125)
+- **Mesuré** : diagnostic du patron, semaine du 19-25 → Lamine **1 / 1**. Le cloud ne contenait qu'UN de ses quarts alors que son téléphone en affichait six avec « Sync ✓ ». Le blocage était à la MONTÉE, pas à la descente. Toujours lire la colonne « ici / dans le cloud » avant de conclure.
+- **`renvoyerMesQuarts()`** (bouton sur le tableau de bord du chauffeur) : force une écriture complète, puis RELIT le cloud pour compter ce qui y est vraiment. Jamais d'annonce de succès sans vérification — c'est précisément ce mensonge qui a coûté une semaine. En cas d'échec, il affiche le code du serveur et « montre ce message à ton patron ».
+- **`baliseEtat()`** : chaque appareil dépose sa fiche (nom, version, nb de quarts, envoi en attente, mémoire pleine, dernière erreur, horodatage) **dans `members.etats[uid]`**, écriture additive. Le patron la voit dans son diagnostic sous « Téléphones de l'équipe », avec « dernière nouvelle ». Un appareil qui n'arrive plus à écrire ne dépose rien : **son silence est le signal**.
+- **POURQUOI DANS `members` ET PAS DANS UN DOCUMENT À PART** : `firestore.rules` n'autorise que `config`, `shifts`, `expenses`, `audit`, `deleted` (`isDataDoc()`) plus `members`. Un nouveau document serait refusé, et le patron ne peut pas republier les règles tant que la console Firebase lui est fermée (vérification en deux étapes jamais terminée). **Ne jamais ajouter un document Firestore sans vérifier `isDataDoc()` d'abord.**
+
 ## Pièges connus
 - **Cache PWA** : les mises à jour ne s'affichent pas sans invalidation du cache / bouton de forçage. Toujours vérifier le service worker après modification.
 - **Erreurs de syntaxe JS = crash silencieux** : un seul fichier signifie qu'une erreur casse toute l'app. Toujours valider la syntaxe avant de pousser.
