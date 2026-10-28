@@ -6735,6 +6735,67 @@ function envoiStatutHTML(){
     +(e.quoiFaire?'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-top:5px;">'+_cmpEsc(e.quoiFaire)+'</div>':'')
     +'</div>';
 }
+// ═══════════════════════════════════════════════
+// ⬇️ L'APP REMARQUE TOUTE SEULE CE QUI MANQUE
+//
+// Le patron ne doit pas avoir à ouvrir un diagnostic dans les Réglages
+// pour découvrir qu'il lui manque des quarts : mesuré chez lui, un
+// chauffeur avait 6 quarts et 1991,05 $ au compteur, lui n'en voyait
+// qu'un seul à 75,20 $. Dès qu'il ouvre la page Paye, on compare avec
+// le cloud en arrière-plan et on le dit, là où il travaille.
+// ═══════════════════════════════════════════════
+function verifierManquantsEnFond(){
+  if(!U||U.role!=='owner')return;
+  if(!window._fbReady)return;
+  var maintenant=Date.now();
+  if(window._verifManqDernier&&maintenant-window._verifManqDernier<60000)return;
+  window._verifManqDernier=maintenant;
+  window._fbEnsure().then(function(){
+    return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
+      .doc('shifts').get({source:'server'});
+  }).then(function(snap){
+    var dist=snap.exists?((snap.data()||{}).data||{}):{};
+    var tomb=(window.TOMB&&window.TOMB.s)||{};
+    var manq=Object.keys(dist).filter(function(k){return !S[k]&&!tomb[k];});
+    var parDrv={};
+    manq.forEach(function(k){
+      var n=(dist[k]&&dist[k].driver)||'?';
+      if(!parDrv[n])parDrv[n]={n:0,tax:0};
+      parDrv[n].n++;
+      parDrv[n].tax+=pf(dist[k].taxf)-pf(dist[k].taxd);
+    });
+    var avant=window._quartsManquants?window._quartsManquants.total:-1;
+    window._quartsManquants={total:manq.length,parDrv:parDrv,quand:Date.now()};
+    // on ne redessine que si le constat a changé, pour ne pas clignoter
+    if(avant!==manq.length){
+      var cur=document.querySelector('.pg.on');
+      if(cur&&cur.id==='pg-paye'&&typeof renderPaye==='function')renderPaye();
+    }
+  }).catch(function(e){
+    window._quartsManquants=null;
+  });
+}
+function quartsManquantsBanniereHTML(){
+  var m=window._quartsManquants;
+  if(!m||!m.total)return '';
+  var noms=Object.keys(m.parDrv).sort(function(a,b){return m.parDrv[b].n-m.parDrv[a].n;});
+  var h='<div style="background:rgba(255,58,58,.12);border:2px solid rgba(255,58,58,.55);border-radius:14px;padding:13px;margin-bottom:12px;">'
+    +'<div style="font-size:13px;font-weight:900;color:var(--red);margin-bottom:6px;">⬇️ '
+    +m.total+' quart'+(m.total>1?'s':'')+' manque'+(m.total>1?'nt':'')+' sur ce téléphone</div>'
+    +'<div style="font-size:11px;color:var(--m3);line-height:1.7;margin-bottom:9px;">'
+    +'Tes chauffeurs les ont bien envoyés — ils sont dans le cloud, mais pas encore ici. '
+    +'Tant qu\'ils manquent, leur paye est incomplète.</div>';
+  noms.slice(0,6).forEach(function(n){
+    h+='<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;border-top:1px solid var(--brd);padding:5px 0;">'
+      +'<span style="color:var(--m3);font-weight:700;">'+_cmpEsc(n)+'</span>'
+      +'<span style="color:var(--red);font-weight:800;">'+m.parDrv[n].n+' quart'+(m.parDrv[n].n>1?'s':'')
+      +' · '+fm(m.parDrv[n].tax)+'</span></div>';
+  });
+  if(noms.length>6)h+='<div style="font-size:10px;color:var(--m2);padding-top:5px;">… et '+(noms.length-6)+' autre(s) chauffeur(s).</div>';
+  h+='<button onclick="recupererQuartsDuCloud()" style="width:100%;background:rgba(57,211,83,.2);border:1px solid rgba(57,211,83,.55);color:var(--grn);border-radius:10px;padding:13px;font-size:13px;font-weight:900;cursor:pointer;margin-top:10px;">'
+    +'⬇️ Récupérer ces '+m.total+' quart'+(m.total>1?'s':'')+' maintenant</button>';
+  return h+'</div>';
+}
 function soldeEnBlocBanniereHTML(){
   var lots=(C&&C.payeLots)||[];
   if(!lots.length)return '';
@@ -6887,7 +6948,9 @@ function payesDiagHTML(){
 
 function renderPaye(){
   const c=document.getElementById('payeContent');
-  var _audEss=soldeEnBlocBanniereHTML()+payesDiagHTML()+auditEssenceHTML();
+  // L'app va d'elle-même comparer avec le cloud et le dire ici.
+  verifierManquantsEnFond();
+  var _audEss=quartsManquantsBanniereHTML()+soldeEnBlocBanniereHTML()+payesDiagHTML()+auditEssenceHTML();
   if(!C.payes)C.payes={};
   const allArr=getArr();
   if(!allArr.length){c.innerHTML='<div class="empty"><div class="ei">💵</div>Aucun quart enregistré.</div>';return;}
@@ -7919,8 +7982,22 @@ function recupererQuartsDuCloud(){
     if(typeof window.S!=='undefined')window.S=S;
     lSave();
     audit('QUARTS_RECUPERES',ajoutes+' quart(s) repris du cloud');
-    renderDiagSync();
+    // Le constat change : on le refait dire par l'app
+    window._quartsManquants=null;
+    window._verifManqDernier=0;
+    if(typeof renderDiagSync==='function')renderDiagSync();
+    var cur=document.querySelector('.pg.on');
+    if(cur&&cur.id==='pg-paye'&&typeof renderPaye==='function')renderPaye();
     if(typeof _refreshAfterSync==='function')_refreshAfterSync();
+    // RÉCUPÉRER NE SERT À RIEN SI ÇA NE TIENT PAS. Quand la mémoire est
+    // saturée, les quarts repris ne sont pas enregistrés et repartiront
+    // au prochain rechargement : le dire tout de suite.
+    if(window._stockagePlein){
+      alert('⚠️ '+ajoutes+' quart(s) repris du cloud, MAIS la mémoire de ce téléphone est pleine.\n\n'
+        +'Ils risquent de disparaître au prochain rechargement.\n\n'
+        +'Va d\'abord dans Réglages → « 🗄️ Archiver les vieux quarts », puis récupère à nouveau.');
+      return;
+    }
     alert('✅ '+ajoutes+' quart(s) récupérés du cloud.\n\nVa voir la page Paye : ils devraient y être.');
   }).catch(function(e){
     alert('Lecture du cloud impossible : '+((e&&e.code)||e)+'\n\nRéessaie quand le réseau sera revenu.');
@@ -14274,7 +14351,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-28-v123-MEMOIRE-PLEINE-ET-ECRITURE-ADDITIVE';
+var APP_VERSION = '2026-10-28-v124-LAPP-VOIT-ELLE-MEME-CE-QUI-MANQUE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){

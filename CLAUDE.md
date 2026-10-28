@@ -63,6 +63,11 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 - **`envoiStatut()` dit la vérité sur l'envoi.** `_fbReady` ne signifie que « le SDK a démarré » : la ligne du chauffeur annonçait « envoyés » alors que Firestore refusait ses écritures (appareil non membre, flotte verrouillée, identité anonyme perdue après un vidage de cache). `_fb.save()` retient maintenant `window._fbDernierEchec={code,ts}`, et le statut affiche « ⛔ Tes quarts ne partent PAS » avec la raison et la marche à suivre. Priorité : mémoire pleine > refus > attente > hors ligne > ok.
 - Le diagnostic du patron affiche en plus : **appareils autorisés**, **flotte verrouillée O/N**, **taille du document des quarts** (limite Firestore ~1 Mo). Une flotte verrouillée refuse tout nouveau téléphone — et « 🔄 Forcer la mise à jour » peut suffire à faire perdre son autorisation à un appareil.
 
+## L'app signale elle-même les quarts manquants (v124)
+- `verifierManquantsEnFond()` part à l'ouverture de la page **Paye** (patron seulement, au plus une fois par minute) : lecture serveur du document `shifts`, comparaison avec `S`, tombstones exclus. S'il manque quelque chose, `quartsManquantsBanniereHTML()` l'affiche EN HAUT de la page avec le détail par chauffeur et un bouton « ⬇️ Récupérer ces N quarts maintenant ».
+- **Pourquoi là et pas dans les Réglages** : le patron ne doit pas avoir à lancer un diagnostic pour découvrir qu'il lui manque des quarts. Mesuré chez lui : un chauffeur avait 6 quarts et 1 991,05 $ au compteur, le patron n'en voyait qu'un à 75,20 $ / 7 courses.
+- **Récupérer ne sert à rien si ça ne tient pas** : après `lSave()`, si `_stockagePlein` est vrai, la récupération le DIT et renvoie vers l'archivage au lieu d'annoncer un succès qui disparaîtra au prochain rechargement.
+
 ## Pièges connus
 - **Cache PWA** : les mises à jour ne s'affichent pas sans invalidation du cache / bouton de forçage. Toujours vérifier le service worker après modification.
 - **Erreurs de syntaxe JS = crash silencieux** : un seul fichier signifie qu'une erreur casse toute l'app. Toujours valider la syntaxe avant de pousser.
