@@ -49,6 +49,11 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 - Architecture multi-tenant en mode démo
 - Bouton « 🔄 Forcer la mise à jour » pour contourner le cache PWA
 
+## Diagnostic de synchronisation (v121)
+- **Réglages → « 🩺 Où sont les quarts de mes chauffeurs »** : lit le document `shifts` du cloud **en direct** (`{source:'server'}`) et le compare à `S` pour une semaine choisie, chauffeur par chauffeur. Il tranche entre les trois causes de « mon chauffeur a travaillé mais je ne le vois pas » : pas descendu ici (bouton `recupererQuartsDuCloud()`), jamais monté, ou chauffeur sur une autre flotte. Ne jamais remplacer cette lecture serveur par un `get()` ordinaire : le cache local renverrait l'état de l'appareil et le diagnostic s'auto-confirmerait.
+- `recupererQuartsDuCloud()` passe par `txpMerge` : une suppression volontaire (tombstone) ne peut pas ressusciter.
+- **Le chauffeur voit son code de flotte** au bas de son tableau de bord, avec le nombre de quarts sur son téléphone et s'ils sont partis. Il n'a pas accès aux Réglages : sans cette ligne, il n'avait aucun moyen de donner ce code à son patron. Ne rien ajouter d'autre là : pas de montants globaux, pas de données des autres chauffeurs.
+
 ## Pièges connus
 - **Cache PWA** : les mises à jour ne s'affichent pas sans invalidation du cache / bouton de forçage. Toujours vérifier le service worker après modification.
 - **Erreurs de syntaxe JS = crash silencieux** : un seul fichier signifie qu'une erreur casse toute l'app. Toujours valider la syntaxe avant de pousser.
