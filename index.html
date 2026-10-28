@@ -1787,7 +1787,9 @@ window.txpMerge = function(local, remote, tombType){
               delRef=COL().doc('deleted');
 
           // Ne touche à RIEN de local : une transaction peut être rejouée.
+          var clesDistS={}, clesDistE={};
           function _fusionner(dc,distS,distE){
+            clesDistS=distS||{}; clesDistE=distE||{};
             Sfinal=window.txpMerge(S,distS||{},'s');      // respecte les tombstones
             EXfinal=window.txpMerge(EX,distE||{},'e');
             sauves=Object.keys(Sfinal).length-Object.keys(S).length;
@@ -1860,30 +1862,60 @@ window.txpMerge = function(local, remote, tombType){
             }catch(eRec){}
           }
           // Les 5 documents partent ENSEMBLE : rien n'est écrit à moitié.
+          // ═══ ÉCRITURE ADDITIVE : ON N'ENLÈVE QUE CE QU'ON A VOULU ENLEVER ═══
+          // Tous les quarts de la flotte tiennent dans UN document. Un
+          // `set` ordinaire le remplace en entier : l'appareil qui écrit
+          // impose sa liste et efface les quarts des autres qu'il n'a pas
+          // encore reçus. Avec quatre ou cinq chauffeurs qui sauvegardent
+          // en même temps en fin de soirée, c'est systématique — « il a
+          // rentré 5 quarts, j'en vois 3 ».
+          // Avec {merge:true}, on n'écrit QUE les identifiants qu'on
+          // connaît : les autres restent intacts, quoi qu'il arrive, même
+          // si la transaction a cédé et qu'on est retombé sur le lot.
+          // Les vraies suppressions deviennent explicites, via un
+          // marqueur de suppression sur l'identifiant concerné.
+          function _champsAdditifs(src,tombs,presentDansCloud){
+            var out={},id;
+            for(id in src)out[id]=src[id];
+            for(id in (tombs||{})){
+              // ne demander la suppression que de ce qui existe encore
+              if(!src[id]&&presentDansCloud&&presentDansCloud[id]){
+                out[id]=firebase.firestore.FieldValue.delete();
+              }
+            }
+            return out;
+          }
           function _ecrire(cible){
             if(ecrireConfig)cible.set(cfgRef,Cfinal);
-            cible.set(sRef,{data:Sfinal});
-            cible.set(eRef,{data:EXfinal});
+            cible.set(sRef,{data:_champsAdditifs(Sfinal,window.TOMB.s,clesDistS)},{merge:true});
+            cible.set(eRef,{data:_champsAdditifs(EXfinal,window.TOMB.e,clesDistE)},{merge:true});
             cible.set(auRef,{data:(AU||[]).slice(-1000)});
             cible.set(delRef,{s:window.TOMB.s,e:window.TOMB.e,r:window.TOMB.r||0});
           }
 
           var enTransaction=false;
-          try{
-            await db.runTransaction(async function(tx){
-              // toutes les lectures AVANT toute écriture : règle des transactions
-              const lus=await Promise.all([tx.get(cfgRef),tx.get(sRef),tx.get(eRef)]);
-              _fusionner(lus[0].exists?(lus[0].data()||{}):null,
-                         lus[1].exists?(lus[1].data().data||{}):{},
-                         lus[2].exists?(lus[2].data().data||{}):{});
-              _ecrire(tx);
-            });
-            enTransaction=true;
-          }catch(eTx){
-            // Une transaction exige le réseau : hors ligne, elle échoue. On
-            // retombe alors sur l'ancien chemin, qui met l'écriture en file
-            // dans le cache Firestore et partira au retour du réseau.
-            console.warn('Transaction impossible ('+(eTx&&eTx.code)+') — écriture en lot');
+          // Plusieurs chauffeurs sauvegardent en même temps en fin de
+          // soirée : la contention sur le document des quarts est la
+          // règle, pas l'exception. On réessaie avant d'abandonner.
+          for(var essai=0;essai<3&&!enTransaction;essai++){
+            try{
+              await db.runTransaction(async function(tx){
+                // toutes les lectures AVANT toute écriture : règle des transactions
+                const lus=await Promise.all([tx.get(cfgRef),tx.get(sRef),tx.get(eRef)]);
+                _fusionner(lus[0].exists?(lus[0].data()||{}):null,
+                           lus[1].exists?(lus[1].data().data||{}):{},
+                           lus[2].exists?(lus[2].data().data||{}):{});
+                _ecrire(tx);
+              });
+              enTransaction=true;
+            }catch(eTx){
+              // Une transaction exige le réseau : hors ligne, elle échoue. On
+              // retombe alors sur l'écriture en lot, qui part dans le cache
+              // Firestore et sera rejouée au retour du réseau. Elle est sûre
+              // elle aussi depuis qu'elle est additive.
+              console.warn('Transaction impossible ('+(eTx&&eTx.code)+') — essai '+(essai+1)+'/3');
+              if(essai<2)await new Promise(function(r){setTimeout(r,250*(essai+1));});
+            }
           }
           if(!enTransaction){
             try{
@@ -1906,6 +1938,7 @@ window.txpMerge = function(local, remote, tombType){
           }
           window._fbPending=false;
           window._fbLastOk=Date.now();
+          window._fbDernierEchec=null;
           localStorage.setItem('txpro_lastSave',new Date().toISOString());
           if(typeof setSyncStatus==='function')setSyncStatus('ok');
           // Surveillance de taille (limite Firestore ~1 Mo par document)
@@ -1933,6 +1966,14 @@ window.txpMerge = function(local, remote, tombType){
         }catch(e){
           console.warn('FB save err',e);
           window._fbPending=true;
+          // GARDER LA RAISON DE L'ÉCHEC. Sans elle, l'app ne peut que
+          // dire « hors ligne » — alors qu'une écriture refusée parce que
+          // l'appareil n'est pas membre de la flotte (flotte verrouillée,
+          // identité anonyme perdue après un vidage de cache) n'a rien à
+          // voir avec le réseau. Le chauffeur voyait ses quarts chez lui
+          // et les croyait envoyés ; ils ne partaient jamais.
+          window._fbDernierEchec={code:(e&&e.code)||String((e&&e.message)||e),
+            ts:Date.now(),membre:!!window._fbMember};
           if(typeof setSyncStatus==='function')setSyncStatus('offline');
         }
       },
@@ -2317,13 +2358,48 @@ function lLoadLocal(){
   }catch(err){C=JSON.parse(JSON.stringify(DEF));S={};EX={};AU=[];}
 }
 
+// SAUVEGARDE LOCALE — ET CE QUI SE PASSE QUAND LA MÉMOIRE EST PLEINE.
+// Avant, l'échec était avalé par un `catch(e){}` muet. Conséquence
+// mesurable : la mémoire du téléphone sature (deux ans de quarts, plus
+// HUIT sauvegardes hebdomadaires qui contiennent chacune une copie
+// complète), l'enregistrement des quarts échoue sans un mot, et au
+// rechargement l'app relit l'ancienne liste. Des quarts bien reçus
+// disparaissent de l'appareil — « il en a rentré 5, j'en vois 3 ».
+// On fait donc trois choses : on libère de la place en sacrifiant les
+// sauvegardes les plus vieilles, on réessaie, et si ça ne passe
+// toujours pas on le DIT au lieu de faire semblant.
+function _ecrireLocal(){
+  localStorage.setItem(SK+'_c',JSON.stringify(C));
+  localStorage.setItem(SK+'_s',JSON.stringify(S));
+  localStorage.setItem(SK+'_e',JSON.stringify(EX));
+  localStorage.setItem(SK+'_a',JSON.stringify(AU.slice(-1000)));
+}
 function lSaveLocal(){
   try{
-    localStorage.setItem(SK+'_c',JSON.stringify(C));
-    localStorage.setItem(SK+'_s',JSON.stringify(S));
-    localStorage.setItem(SK+'_e',JSON.stringify(EX));
-    localStorage.setItem(SK+'_a',JSON.stringify(AU.slice(-1000)));
-  }catch(e){}
+    _ecrireLocal();
+    window._stockagePlein=false;
+    return true;
+  }catch(e){
+    // Les sauvegardes hebdomadaires pèsent le plus lourd : on les
+    // sacrifie une par une, de la plus ancienne à la plus récente.
+    try{
+      var cles=Object.keys(localStorage).filter(function(k){
+        return k.indexOf('txpro_bkp_')===0;
+      }).sort();
+      while(cles.length){
+        localStorage.removeItem(cles.shift());
+        try{
+          _ecrireLocal();
+          window._stockagePlein=false;
+          console.warn('Mémoire pleine : une vieille sauvegarde a été supprimée pour garder les quarts');
+          return true;
+        }catch(e2){}
+      }
+    }catch(e3){}
+    window._stockagePlein=true;
+    console.error('MÉMOIRE PLEINE : les quarts ne peuvent plus être gardés sur cet appareil');
+    return false;
+  }
 }
 
 // Main save — Firebase + local backup simultaneously
@@ -4193,10 +4269,15 @@ function renderDash(){
       +'Ma flotte : <b style="font-family:monospace;color:var(--m3);font-size:12px;">'
       +_cmpEsc(window.TXP_TENANT||'taxipro')+'</b>'
       +'<div style="margin-top:3px;">Si ton patron ne voit pas tes quarts, lis-lui ce code.</div>'
-      +'<div style="margin-top:4px;">'+Object.keys(S||{}).length+' quart(s) enregistrés sur ce téléphone'
-      +(window._fbPending?' · <b style="color:var(--neon);">envoi en attente</b>'
-        :(window._fbReady?' · <b style="color:var(--grn);">envoyés</b>':' · <b style="color:var(--red);">hors ligne</b>'))
-      +'</div></div>';
+      +'<div style="margin-top:4px;">'+Object.keys(S||{}).length+' quart(s) enregistrés sur ce téléphone</div>'
+      +'</div>'
+      // DIRE LA VÉRITÉ SUR L'ENVOI. « _fbReady » ne dit que si le SDK a
+      // démarré, pas si l'écriture a été acceptée. Un appareil qui n'est
+      // pas membre de la flotte — verrouillée, ou identité anonyme perdue
+      // après un vidage de cache — voit ses écritures REFUSÉES : le
+      // chauffeur garde ses quarts sous les yeux et les croit partis,
+      // pendant que le patron ne reçoit rien.
+      +envoiStatutHTML();
   }
 }
 
@@ -6606,6 +6687,54 @@ function rattacherPayeOrpheline(cle,nomCible){
 // croit l'app cassée alors qu'elle le croit payé. Si ce solde était une
 // erreur, il faut pouvoir revenir en arrière SANS aller chercher dans
 // une carte repliée — on le met en haut de la page Paye.
+// ── EST-CE QUE MES QUARTS SONT VRAIMENT PARTIS ? ──
+// Visible par le chauffeur ET par le patron. Trois états seulement, et
+// jamais de « envoyé » complaisant : si la dernière écriture a été
+// refusée, on le dit, on dit pourquoi, et on dit quoi faire.
+function envoiStatut(){
+  // La mémoire pleine passe avant tout : si l'appareil ne peut plus
+  // garder ses quarts, le reste n'a aucune importance.
+  if(window._stockagePlein){
+    return {niveau:'refus',titre:'🚨 Mémoire pleine — des quarts peuvent se perdre',
+      detail:'Ce téléphone n\'arrive plus à enregistrer les quarts : sa mémoire est saturée. Ce qui est à l\'écran risque de disparaître au prochain rechargement.',
+      quoiFaire:'Patron : Réglages → « 🗄️ Archiver les vieux quarts (+12 mois) » pour alléger. Chauffeur : montre ce message à ton patron.'};
+  }
+  var ech=window._fbDernierEchec;
+  if(ech&&ech.code==='permission-denied'){
+    return {niveau:'refus',titre:'⛔ Tes quarts ne partent PAS',
+      detail:'Ce téléphone n\'est pas autorisé dans la flotte. Soit elle est verrouillée, soit son identité a changé après un vidage de cache.',
+      quoiFaire:'Montre ce message à ton patron : il doit aller dans Réglages → « 🔓 Déverrouiller la flotte », puis tu rouvres l\'app.'};
+  }
+  if(ech){
+    return {niveau:'refus',titre:'⛔ Dernier envoi refusé',
+      detail:'Le serveur a répondu : '+String(ech.code),
+      quoiFaire:'Tes quarts restent sur ce téléphone. Rouvre l\'app ; s\'ils ne partent toujours pas, préviens ton patron.'};
+  }
+  if(window._fbPending){
+    return {niveau:'attente',titre:'⏳ Envoi en attente',
+      detail:'Tes quarts sont enregistrés ici mais pas encore partis.',
+      quoiFaire:'Reste quelques secondes avec l\'app ouverte, le réseau fera le reste.'};
+  }
+  if(!window._fbReady){
+    return {niveau:'attente',titre:'📴 Hors ligne',
+      detail:'Pas de connexion au cloud pour l\'instant.',
+      quoiFaire:'Tes quarts sont gardés ici et partiront au retour du réseau.'};
+  }
+  return {niveau:'ok',titre:'✅ Tes quarts sont bien envoyés',
+    detail:window._fbLastOk?('Dernier envoi réussi à '+new Date(window._fbLastOk).toLocaleTimeString('fr-CA',{hour:'2-digit',minute:'2-digit'})):'',
+    quoiFaire:''};
+}
+function envoiStatutHTML(){
+  var e=envoiStatut();
+  var coul=e.niveau==='ok'?'rgba(57,211,83,':e.niveau==='attente'?'rgba(255,107,0,':'rgba(255,58,58,';
+  var txt=e.niveau==='ok'?'var(--grn)':e.niveau==='attente'?'var(--neon)':'var(--red)';
+  return '<div style="margin-top:10px;padding:11px;background:'+coul+'.1);border:'
+    +(e.niveau==='refus'?'2px':'1px')+' solid '+coul+(e.niveau==='refus'?'.55':'.35')+');border-radius:11px;">'
+    +'<div style="font-size:'+(e.niveau==='refus'?'12':'11')+'px;font-weight:900;color:'+txt+';">'+e.titre+'</div>'
+    +(e.detail?'<div style="font-size:10px;color:var(--m3);line-height:1.6;margin-top:4px;">'+_cmpEsc(e.detail)+'</div>':'')
+    +(e.quoiFaire?'<div style="font-size:10px;color:var(--m2);line-height:1.6;margin-top:5px;">'+_cmpEsc(e.quoiFaire)+'</div>':'')
+    +'</div>';
+}
 function soldeEnBlocBanniereHTML(){
   var lots=(C&&C.payeLots)||[];
   if(!lots.length)return '';
@@ -7751,6 +7880,17 @@ async function diagnosticSyncLire(semaine){
       .get({source:'server'});
     var dist=snap.exists?((snap.data()||{}).data||{}):{};
     out.cloudTotal=Object.keys(dist).length;
+    out.taille=JSON.stringify(dist).length;        // limite Firestore ~1 Mo
+    // Qui a le droit d'écrire dans cette flotte ? Un chauffeur dont le
+    // téléphone n'est pas dans cette liste voit ses quarts refusés — et
+    // les garde sous les yeux en croyant les avoir envoyés.
+    try{
+      var m=await firebase.firestore().collection(out.flotte).doc('members').get({source:'server'});
+      var md=m.exists?(m.data()||{}):{};
+      out.membres=Object.keys(md.uids||{}).length;
+      out.verrouillee=md.locked===true;
+      out.jeSuisMembre=!!(md.uids&&window._fbUid&&md.uids[window._fbUid]);
+    }catch(eM){ out.membresErreur=(eM&&eM.code)||'?'; }
     out.cloud=_quartsParSemaine(dist,semaine);
     // ce que le cloud a et que CE téléphone n'a pas (hors suppressions)
     var tomb=(window.TOMB&&window.TOMB.s)||{};
@@ -7791,7 +7931,8 @@ function renderDiagSync(){
   if(!el)return;
   if(!U||U.role!=='owner'){el.innerHTML='';return;}
   var sem=window._diagSyncSem||derniereSemaineTerminee();
-  el.innerHTML='<div style="font-size:11px;color:var(--m2);line-height:1.7;margin-bottom:9px;">'
+  el.innerHTML=envoiStatutHTML()
+    +'<div style="font-size:11px;color:var(--m2);line-height:1.7;margin:9px 0;">'
     +'Compare ce que <b style="color:var(--m3);">ton téléphone</b> contient avec ce que le '
     +'<b style="color:var(--m3);">cloud</b> contient vraiment, pour une semaine donnée. '
     +'C\'est la réponse à « mon chauffeur a travaillé mais je ne le vois pas ».</div>'
@@ -7869,6 +8010,31 @@ function diagSyncHTML(d){
       });
       h+='</div>';
     }
+  }
+  // LE VERROU ET LES APPAREILS AUTORISÉS. C'est la cause la plus
+  // sournoise : la flotte verrouillée refuse les nouveaux téléphones,
+  // leurs écritures sont rejetées, et le chauffeur n'en sait rien.
+  if(d.ok&&d.membres!==undefined){
+    h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;">'
+      +lig('📱 Appareils autorisés',String(d.membres))
+      +lig('🔒 Flotte verrouillée',d.verrouillee?'OUI':'non',d.verrouillee?'var(--red)':'var(--grn)')
+      +(d.taille?lig('📦 Taille des quarts',Math.round(d.taille/1024)+' Ko / ~1000 Ko',
+          d.taille>750000?'var(--red)':d.taille>500000?'var(--neon)':'var(--grn)'):'');
+    if(d.verrouillee){
+      h+='<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.45);border-radius:10px;padding:10px;margin-top:8px;font-size:11px;color:var(--m3);line-height:1.7;">'
+        +'<b style="color:var(--red);">La flotte est verrouillée.</b> Tout téléphone qui n\'était pas déjà autorisé '
+        +'voit ses écritures REFUSÉES : le chauffeur rentre ses quarts, les voit chez lui, et ils n\'arrivent jamais ici. '
+        +'Un simple « Forcer la mise à jour » peut suffire à faire perdre son autorisation à un téléphone.'
+        +'<div style="margin-top:6px;">Déverrouille dans <b>Réglages → Multi-propriétaire → 🔓</b>, '
+        +'fais rouvrir l\'app à chaque chauffeur, puis reverrouille si tu veux.</div></div>';
+    }
+    if(d.taille>750000){
+      h+='<div style="background:rgba(255,58,58,.1);border:1px solid rgba(255,58,58,.45);border-radius:10px;padding:10px;margin-top:8px;font-size:11px;color:var(--m3);line-height:1.7;">'
+        +'<b style="color:var(--red);">Le document des quarts approche la limite de 1 Mo.</b> '
+        +'Au-delà, Firestore refuse TOUTES les écritures : plus aucun quart n\'arrive. '
+        +'Va dans <b>Réglages → « 🗄️ Archiver les vieux quarts »</b>.</div>';
+    }
+    h+='</div>';
   }
   // L'état de la liaison, utile quand rien ne descend
   h+='<div style="margin-top:11px;border-top:1px solid var(--brd);padding-top:8px;font-size:10px;color:var(--m2);line-height:1.7;">'
@@ -14108,7 +14274,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-28-v122-PAYER-QUAND-JE-VEUX';
+var APP_VERSION = '2026-10-28-v123-MEMOIRE-PLEINE-ET-ECRITURE-ADDITIVE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
