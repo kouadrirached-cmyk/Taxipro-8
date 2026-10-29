@@ -3031,7 +3031,10 @@ async function doLogin(){
   // Fiche de la flotte déposée dans l'annuaire : c'est ce qui permet de
   // savoir qui utilise l'app. Sans blocage si le réseau ou les règles
   // refusent — l'app fonctionne exactement pareil.
-  if(U.role==='owner'&&typeof annuaireBattement==='function'){
+  // Le dépôt de la fiche d'annuaire ne part que si le multi-propriétaire
+  // est actif : une écriture réseau de moins à chaque ouverture.
+  if(typeof MULTI_PROPRIETAIRE!=='undefined'&&MULTI_PROPRIETAIRE
+    &&U.role==='owner'&&typeof annuaireBattement==='function'){
     setTimeout(function(){ annuaireBattement(); },4000);
   }
   // Une flotte suspendue coupe les chauffeurs sans que le patron gardien
@@ -9530,8 +9533,19 @@ function rendreAlerteCloud(){
         cause+='<b>Message du serveur :</b> <span style="word-break:break-word;">'
           +String(ech.msg).replace(/</g,'&lt;')+'</span><br>';
       }
-      try{ cause+=verdictEcriture(); }
-      catch(x){ cause+='La mesure a échoué : '+String((x&&x.message)||x); }
+      // LA MESURE EST CHÈRE — on ne la refait PAS à chaque rendu.
+      // verdictEcriture() sérialise les 5 charges et parcourt chaque champ
+      // de chaque quart. Mesuré à 655 quarts : ~100 ms sur un ordinateur,
+      // donc près d'une seconde sur un téléphone. Or ce bandeau est rendu
+      // depuis le `catch` de la sauvegarde, et la relance part toutes les
+      // 30 s : l'app figeait par à-coups. On garde le résultat 5 minutes.
+      var V=window._verdictEcr;
+      if(!V||(Date.now()-V.ts)>300000){
+        try{ V={ts:Date.now(),txt:verdictEcriture()}; }
+        catch(x){ V={ts:Date.now(),txt:'La mesure a échoué : '+String((x&&x.message)||x)}; }
+        window._verdictEcr=V;
+      }
+      cause+=V.txt;
       var bstyle='width:100%;background:rgba(245,200,0,.14);border:1px solid rgba(245,200,0,.45);'
         +'color:var(--gold);border-radius:9px;padding:9px;font-size:11px;font-weight:900;'
         +'cursor:pointer;margin-top:9px;';
@@ -9899,11 +9913,24 @@ function flotteStatut(f){
 }
 
 // ── La console de l'annuaire, dans Réglages, flotte principale seulement ──
+//
+// MULTI-PROPRIÉTAIRE COUPÉ, à la demande d'Amin le 29 octobre : il ne veut
+// que sa propre flotte. Ce réglage cache la console « Qui utilise
+// l'application » et arrête le dépôt de la fiche d'annuaire à chaque
+// ouverture. Le code reste en place, intact : remettre `true` suffit à
+// tout réactiver pour la revente en SaaS (feuille de route, point 3).
+//
+// ATTENTION — ne JAMAIS confondre avec le cloisonnement par flotte.
+// `window.TXP_TENANT` nomme la collection Firestore où vivent SES données
+// et préfixe ses clés localStorage : y toucher le couperait de tous ses
+// quarts. On ne retire que l'annuaire, pas le multi-flotte.
+var MULTI_PROPRIETAIRE=false;
 var _annuCache=null;
 function renderAnnuaire(){
   var card=document.getElementById('cardAnnuaire');
   var el=document.getElementById('annuContent');
   if(!card||!el)return;
+  if(!MULTI_PROPRIETAIRE){card.style.display='none';return;}
   var estPrincipale=(window.TXP_TENANT||'taxipro')==='taxipro';
   if(!estPrincipale||!U||U.role!=='owner'){card.style.display='none';return;}
   card.style.display='';
@@ -15033,7 +15060,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-29-v132-REDEVANCE-FIGEE-SUR-LE-QUART';
+var APP_VERSION = '2026-10-29-v133-PLUS-FLUIDE-SANS-MULTI-PROPRIETAIRE';
 // RECHARGER SANS RIEN PERDRE.
 // Règle du projet : jamais de location.reload() avant la fin des
 // écritures Firebase. Ce bouton rechargeait 300 ms après l'appui, quoi
