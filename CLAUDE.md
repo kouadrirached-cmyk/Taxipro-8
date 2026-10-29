@@ -221,6 +221,28 @@
 > 18 contrôles sur la forme texte (`test-quarts-en-texte.js`), dont la synchronisation entre deux
 > appareils, une suppression, la relecture d'un document à l'ancienne forme et sa réécriture.
 >
+> ### POURQUOI LA MIGRATION NE SE FAIT PAS TOUTE SEULE (v131)
+> Après la v130, Amin a répondu « rien monté ». **L'écriture normale fusionne** (`{merge:true}`) :
+> les quarts que l'appareil n'a pas en mémoire **restent dans le cloud sous leur ancienne forme**,
+> à ~50 entrées d'index chacun. Tant qu'il en reste assez, le document dépasse toujours les
+> 40 000 entrées et toute écriture est refusée. **Le serpent se mord la queue : il faut écrire
+> pour réparer, et on ne peut pas écrire.**
+>
+> `reparerDocumentQuarts()` casse le cercle : lecture **serveur** du document, réunion avec le
+> local par `txpMerge` (tombstones respectés), puis **réécriture COMPLÈTE en texte avec un `set`
+> sans merge**. Le remplacement total est volontaire et c'est le seul moyen de faire disparaître
+> les anciens champs. Il est sûr ici parce que la lecture serveur vient d'avoir lieu et que,
+> le document étant bloqué, aucun autre appareil ne peut écrire. **Ne pas généraliser ce `set`
+> complet au chemin d'écriture normal** — c'est exactement le bug que la v123 a corrigé.
+>
+> Le bouton est dans le bandeau d'alerte (patron seulement) ET dans ⚙️ Réglages → 🧰 Outils
+> professionnels, à côté de « 🔬 Tester les 5 documents », pour rester accessible une fois le
+> bandeau disparu.
+>
+> 20 contrôles (`test-reparer-quarts.js`) sur le cas réel — cloud à l'ancienne forme dont
+> l'appareil n'a qu'une partie, écoute coupée : 1 000 entrées → 44, les 19 quarts du cloud et les
+> 3 de l'appareil réunis, le quart supprimé non ressuscité, et l'envoi normal qui repart.
+>
 > ### « 197 appareils connectés pour 10 chauffeurs » — Amin, 29 octobre
 > Ce ne sont pas d'autres propriétaires : `members.uids` accumule une entrée par **identité
 > anonyme Firebase**, et chaque « 🔄 Forcer la mise à jour » ou vidage de cache en crée une
