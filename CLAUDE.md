@@ -5,6 +5,14 @@
 > Deuxième étape de son test : la v116 (6 octobre) avait d'abord été remise, le problème a
 > persisté, donc on recule avant la réécriture du chemin d'écriture (transactions Firestore).
 >
+> **Le 29 octobre, un bandeau d'alerte a été ajouté PAR-DESSUS cette v115** (version
+> `2026-10-29-v115+ALERTE-FLOTTE-SUSPENDUE`) : `verifierSuspension()`, `rendreAlerteCloud()`,
+> `reactiverMaFlotte()`, le relevé de `window._fbDernierEchec` dans le `catch` de `_fb.save()`, et
+> l'avertissement renforcé de `basculerSuspension()` sur sa propre flotte. **Le chemin d'écriture
+> n'est pas touché** (ajout en lecture seule + affichage), donc le test du retour en arrière reste
+> valide. Vérifié : 31 contrôles sur le bandeau, 24 de non-régression v115 — dont le quart de
+> référence inchangé et les huit écrans du patron rendus sans panne.
+>
 > Raison : l'app a fonctionné quatre mois sans incident, puis des quarts de chauffeurs ont cessé
 > d'arriver chez le patron. Mesure certaine : le cloud ne contient qu'UN des six quarts d'un
 > chauffeur pour la semaine du 19 au 25, alors que son téléphone les affiche tous avec « Sync ✓ ».
@@ -13,6 +21,115 @@
 > **Résultat acquis : le problème persiste sur la v116.** Les v117 à v126 sont donc écartées.
 > Tentative de prouver que la v116 est coupable (un appareil à liste incomplète qui écraserait
 > les autres) : **NON reproduite** en émulateur. Ne pas l'affirmer sans preuve.
+>
+> ### Ce qui a été mesuré sur la v115 le 28 octobre — le code est écarté
+> Amin a proposé sa propre piste : « parfois vert, parfois nuageux, parfois rouge », donc le
+> réseau qui va et vient. Sondes en émulateur sur la v115 **en service** :
+>
+> | Scénario | Le quart monte-t-il ? |
+> |---|---|
+> | Coupure, le réseau revient, app ouverte | ✅ oui |
+> | Coupure, il ferme l'app, le réseau revient plus tard | ✅ oui |
+> | Idem avec `enablePersistence` en échec (iPhone à mémoire saturée) | ✅ oui |
+> | Envoi accroché qui n'aboutit ni n'échoue | ❌ **non** |
+>
+> **Aucune perte par le code n'a pu être reproduite**, ni sur la v115 ni sur la v116 : écoute
+> temps réel morte, téléphone hors réseau au moment d'écrire, écriture tronquée mise en file qui
+> part plus tard, persistance en panne, app fermée. GARDE 3 relit le cloud (ou son cache, qui
+> garde les quarts des autres) et réécrit l'union à chaque fois. **Ne pas accuser le code sans
+> une nouvelle mesure.**
+>
+> **UNE VRAIE FAIBLESSE TROUVÉE, à corriger quelle que soit la cause** : `setSyncStatus('saving')`
+> est posé AVANT `await batch.commit()`, et `window._fbPending` ne passe à `true` que dans le
+> `catch`. Un envoi qui reste accroché sans lever d'erreur laisse donc le badge nuageux, le
+> drapeau à `false`, et **la relance de 30 s ne part jamais** — vérifié sur 40 s. Il n'y a ni
+> délai d'attente ni signal. Même trou dans GARDE 1 (`shiftsCount===0 && prevShiftsCount>5`) et
+> GARDE 2 (`!hasDrivers`) : elles sortent par `return` sans marquer `_fbPending`, donc ce qui est
+> bloqué là ne sera jamais réessayé.
+>
+> **Piste écartée, à ne pas relancer** : le plafond de 20 accès de documents des règles Firestore
+> (`isMember()` + `estSuspendue()` = 4 accès × 5 documents du lot). Testé avec les vraies
+> `firestore.rules` et la fiche d'annuaire présente : **le lot passe**. Réserve : l'émulateur
+> peut être plus permissif que la production sur ce plafond.
+>
+> **Conséquence** : la cause est hors du code, côté Firebase (refus d'écriture, appareil qui perd
+> son autorisation). Or **la v115 est aveugle** — `window._fbDernierEchec`, `envoiStatut()`,
+> `renvoyerMesQuarts()` et `baliseEtat()` datent des v123 à v125 et ont été retirés par le retour
+> en arrière. Remonter à la v126 a été **recommandé à Amin** pour capter le code d'erreur du
+> serveur sur le téléphone du chauffeur ; en attente de sa décision, ne pas basculer sans elle.
+>
+> ### « Le problème commence le 20 » — Amin, 28 octobre
+> Sa mesure : avant le 20 tout passait, après le 20 plus rien. **Rien n'a été déployé le 20** :
+> la v116 tournait sans changement du 6 au 21 octobre (v117 = `4a63df5`, 21 oct 14 h 33). La
+> bascule n'est donc pas une mise à jour.
+>
+> Son seul geste de configuration, dans ses mots : « parfois je monte pour un chauffeur le
+> pourcentage à 41, juste ça ». **Testé, deux appareils, v115 : le 41 % tient et les 6 quarts du
+> chauffeur montent tous.** Piste écartée, ne pas la relancer sans nouvelle mesure.
+>
+> **CE QUI EST MESURÉ, ET QUI COLLE À LA DATE** : la v115 date les quarts avec
+> `today()` = `toISOString()` (ligne 1968), posé dans le formulaire ligne 2768. En octobre au
+> Québec (UTC−4), **les sept quarts de soir sur sept sont enregistrés au lendemain** ; un quart de
+> jour saisi à 14 h est correct. Un quart roulé **le lundi 19 au soir est inscrit au 20** — d'où
+> « ça commence le 20 » du point de vue du patron. Et le quart du **dimanche 25 au soir atterrit
+> dans la semaine du 26**. Si un chauffeur rentre toute sa semaine d'un coup un dimanche soir,
+> TOUS ses quarts quittent la semaine.
+>
+> **Donc « Lamine 1 / 1 » ne prouve pas une perte** : le diagnostic n'a interrogé que la semaine
+> du 19 au 25. Les cinq autres quarts peuvent être dans le cloud, rangés sous la semaine du 26.
+> Amin a été invité à regarder les semaines du 12 et du 26 dans son app. **Ne pas conclure à une
+> perte de quarts avant cette vérification.**
+>
+> C'est la **v119** (25 oct) qui a corrigé ce défaut de date, et le retour en arrière l'a remis en
+> service : depuis le 28 octobre au soir, les quarts de soir sont de nouveau mal datés. Le
+> diagnostic des cinq semaines voisines (`out.semaines`, v126) et la réparation
+> `corrigerDatesDecalees()` (v119) sont eux aussi hors service — ce sont précisément les outils
+> qui trancheraient. Argument supplémentaire pour remonter à la v126.
+>
+> ### 🎯 CAUSE LA PLUS PROBABLE : la flotte est SUSPENDUE dans l'annuaire
+> Fait décisif donné par Amin le 28 octobre : **« même pour cette semaine, aucune paye rentrée,
+> aucune notification »**. La semaine du 26 est vide aussi — donc les quarts ne sont pas mal
+> rangés, **rien n'arrive du tout**, et l'absence de notification confirme qu'aucun quart neuf
+> n'atteint son téléphone.
+>
+> `firestore.rules` : `allow read, write: if estFlotte() && isDataDoc() && isMember() &&
+> !estSuspendue();` — une flotte suspendue perd lecture ET écriture. **MAIS la règle suivante**,
+> `allow read, write: if estFlotte() && isDataDoc() && isAdmin();`, rend son accès complet à un
+> **gardien de l'annuaire**. Amin a été invité à revendiquer cette place, et la console « Qui
+> utilise l'application » (v104) pose le bouton `⏸️ Suspendre` (`basculerSuspension`,
+> `flotteSuspendre` à la ligne 8057) sur **chaque** carte de flotte, la sienne comprise, juste à
+> côté de `🗑️ Supprimer`.
+>
+> **Sonde `sonde-flotte-suspendue.js` : TOUS les symptômes reproduits d'un coup.**
+>
+> | Symptôme rapporté | Mesure |
+> |---|---|
+> | Les quarts des chauffeurs n'arrivent plus | ⛔ `permission-denied` sur leur téléphone |
+> | Le patron travaille normalement | ✅ il lit **et** écrit sans rien remarquer |
+> | « Flotte non verrouillée » au diagnostic | ✅ `locked` et `suspendu` sont deux drapeaux DIFFÉRENTS |
+> | Aucune notification | ✅ rien n'arrive, `notifEntrants` n'a rien à annoncer |
+> | Reculer le code deux fois n'a rien changé | ✅ c'est de la donnée cloud, insensible au code |
+> | Bascule un 20, sans déploiement | ✅ un seul appui, à n'importe quel moment |
+> | Le chauffeur voyait « ☁️ Sync ✓ » | ✅ badge vert mesuré PENDANT le refus |
+>
+> **La réactivation fait repartir les envois immédiatement** : les 3 quarts en attente sont montés
+> seuls. Les quarts ne sont donc pas perdus, ils attendent sur les téléphones — il suffit que
+> chaque chauffeur rouvre l'app (le renvoi du démarrage, `Object.keys(S).length >
+> Object.keys(remoteS).length`, s'en charge).
+>
+> Réserve : la console Firebase d'Amin étant fermée, cet état n'a pas pu être lu directement. Il
+> lui a été demandé de regarder l'étiquette de sa propre carte dans ⚙️ Réglages → « 📇 Qui utilise
+> l'application » (« ⏸️ Suspendue » en rouge, puis « ▶️ Réactiver »). **Ne pas l'affirmer comme
+> établi avant sa réponse.**
+>
+> **À CORRIGER QUELLE QUE SOIT L'ISSUE** — ce piège doit devenir impossible :
+> 1. `estSuspendue()` doit apparaître dans le diagnostic du patron, à côté de « flotte
+>    verrouillée » : les deux drapeaux sont distincts et seul `locked` était affiché.
+> 2. `basculerSuspension()` doit **refuser ou avertir fortement** quand la cible est la flotte de
+>    l'appareil lui-même — un gardien ne voit aucun effet sur son propre écran, donc rien ne le
+>    prévient qu'il vient de couper ses chauffeurs.
+> 3. Le chauffeur refusé doit le SAVOIR : c'est ce que fait `envoiStatut()` (v123) avec
+>    `window._fbDernierEchec`, retiré par le retour en arrière. Argument de plus pour la v126.
 >
 > **Les sections ci-dessous décrivent les v116 à v126, qui ne sont PLUS dans `index.html`.**
 > Elles sont conservées : chaque correctif y est documenté avec sa mesure, et il faudra les
@@ -28,6 +145,16 @@
 > Vérifié avant chaque bascule : le calcul de la paie est **identique** (taximètre net 329,75 ·
 > salaire 162,00 · part patron 197,85 · essence avancée 40,00 sur le quart de référence).
 > Aucune donnée Firestore n'est touchée par ces retours en arrière.
+>
+> **Pour payer pendant le test** : les quarts manquants ne sont pas dans le cloud, donc aucune
+> récupération ne peut les ramener — les chiffres n'existent que sur les téléphones des
+> chauffeurs. Une page de calcul autonome a été remise à Amin le 28 octobre
+> (<https://claude.ai/artifact/14nNzEXG1oGSdf623dsWxz>, privée) : il y recopie le compteur, les
+> courses et les pourboires affichés par chaque chauffeur, et elle applique les mêmes formules
+> que l'app (redevance CTQ retirée d'abord, puis le pourcentage, pourboires par-dessus, essence
+> avancée remboursée à part). Vérifiée sur le quart de référence. Elle ne touche ni à `C`, `S`,
+> `EX` ni à Firestore : la semaine devra être cochée « payée » dans l'app une fois les quarts
+> remontés, sinon la trésorerie restera fausse.
 
 ## Vue d'ensemble
 TaxiPro est une application de gestion de flotte de taxis pour petits propriétaires-opérateurs au Québec. Développée par Amin, propriétaire de 3 Toyota Prius (véhicules 707, 718, 732) chez Taxis Unis de Chicoutimi (9420-1001 Québec Inc.).
