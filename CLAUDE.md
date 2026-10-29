@@ -296,6 +296,18 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
 4. **Mots de passe** : hachés en SHA-256, jamais en clair.
 5. **Un quart ne doit JAMAIS valoir zéro parce que le nom a changé (v117)** : `calcSalary` et `partPatronQuart` rendaient 0 dès que `getDrv(s.driver)` ne trouvait personne — nom corrigé, chauffeur retiré, orthographe différente. Le salaire du chauffeur ET la part du patron disparaissaient en silence alors que l'argent avait été gagné et versé. `pctQuart(s)` prend le taux de l'équipe si le chauffeur existe, sinon le `drvPct` **enregistré sur le quart** (écrit à la saisie pour ça). Ne jamais revenir à un retour 0 silencieux.
 
+6. **La redevance par course est FIGÉE SUR LE QUART (v132)** — même piège que le point 5, resté
+   ouvert. `redevanceQuart(s)` relisait `C.redevance` dans les réglages de **l'appareil qui
+   regarde** : deux téléphones aux réglages différents calculaient deux paies différentes pour le
+   **même** quart. Mesuré chez Amin le 29 octobre : 40 courses, **exactement 40 $ d'écart** entre
+   sa session et celle de son chauffeur sur le taximètre net (16 $ sur le salaire, soit 40 % de
+   40). `doSaveShift` écrit donc `rdvParCourse` — le montant en vigueur à la saisie, ou 0 si la
+   déduction est coupée — et `redevanceQuart(s)` l'utilise en priorité. Changer le tarif
+   aujourd'hui ne réécrit plus la paie d'il y a un mois, ce qui serait faux comptablement.
+   **Les quarts saisis avant la v132 n'ont pas ce champ et suivent toujours le réglage** : rien
+   n'est rétroactif. Pour eux, la seule façon d'aligner les deux sessions est que `C.redevance`
+   soit identique partout — donc synchronisé.
+
 ### Les paies versées (`C.payes`)
 - Clé : `"AAAA-MM-JJ|Nom du chauffeur"`, où la date est le **lundi** de la semaine, en heure LOCALE (`_wkKeyDe`). Ne pas fabriquer cette clé avec `toISOString()` : au Québec les deux coïncident, mais pas dans un fuseau à l'est de Greenwich — ce qui compte pour la revente du produit.
 - La clé contient le NOM : renommer un chauffeur doit passer par `renommerChauffeur()`, qui déplace aussi les clés `C.payes` (et les suffixes `_deductCash` / `_essCash`).
