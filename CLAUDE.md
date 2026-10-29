@@ -183,8 +183,43 @@
 > compris. Corrigé au passage : `navigator.clipboard.writeText` rend une promesse, dont le rejet
 > n'était pas attrapé.
 >
-> **PROCHAINE ÉTAPE** : lire le message du serveur chez Amin, ou le résultat de la sonde par
-> document. C'est lui qui nomme la cause — ne plus avancer d'hypothèse avant de l'avoir.
+> ## 🎯 LA CAUSE, DITE PAR LE SERVEUR (29 octobre, v129)
+> ```
+> Code du serveur    : invalid-argument
+> Message du serveur : too many index entries for entity /taxipro/shifts
+> ```
+> **Firestore limite un document à 40 000 ENTRÉES D'INDEX.** C'est une limite **distincte de la
+> taille** et elle ne se voit pas en kilo-octets : le document d'Amin ne pesait que **307 Ko**.
+> Firestore indexe **chaque champ de chaque quart** — ~25 champs × 2 index = **~50 entrées par
+> quart** — donc le mur tombe vers **800 quarts**. Quatre mois de travail, puis un jour précis.
+>
+> Voilà pourquoi rien d'autre ne collait : taille normale, aucune valeur interdite, aucune
+> permission en cause, aucun déploiement ce jour-là, et deux retours en arrière sans effet.
+>
+> ### La correction (v130) : les quarts sont rangés EN TEXTE
+> `_champsAdditifs()` écrit `window.txpQuartEnTexte(quart)` — le JSON du quart — au lieu de
+> l'objet. **Une valeur texte ne compte que pour une entrée au lieu de vingt-cinq.**
+> Mesuré : **12 quarts = 600 entrées avant, 24 après** (facteur 25). Pour 800 quarts : ~40 000 →
+> ~1 600, avec de la marge jusqu'à ~20 000 quarts.
+>
+> **Ce qui ne change pas** : c'est toujours UN champ par identifiant de quart, donc l'écriture
+> additive (`{merge:true}`) et les marqueurs de suppression `FieldValue.delete()` fonctionnent
+> exactement pareil. Aucune protection n'est perdue.
+>
+> **La lecture accepte les deux formes.** `window.txpDecQ()` décode : texte → `JSON.parse`,
+> objet → tel quel. **Les 12 points de lecture** du document passent par lui (transaction,
+> `load()`, les deux `onSnapshot`, et les 4 lectures serveur des diagnostics). **Si un nouveau
+> point de lecture est ajouté, il DOIT passer par `txpDecQ`.** La migration se fait toute seule :
+> la première sauvegarde réussie réécrit tous les quarts en texte.
+>
+> **Surveillance ajoutée** : `estimerEntreesIndex()` compte les champs élémentaires (2 entrées
+> chacun) et le rapport affiche, pour chaque document, « poids · entrées d'index ». Le verdict
+> alerte dès 80 % des 40 000. **Toute mesure de document doit désormais regarder les DEUX
+> limites.** À surveiller ensuite : `C.treso` et `C.payes` dans la config, qui grossissent sans
+> fin et comptent, eux, en objets.
+>
+> 18 contrôles sur la forme texte (`test-quarts-en-texte.js`), dont la synchronisation entre deux
+> appareils, une suppression, la relecture d'un document à l'ancienne forme et sa réécriture.
 >
 > ### « 197 appareils connectés pour 10 chauffeurs » — Amin, 29 octobre
 > Ce ne sont pas d'autres propriétaires : `members.uids` accumule une entrée par **identité

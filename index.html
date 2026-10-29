@@ -1644,6 +1644,36 @@ window.txpMTime = function(o){
 // FUSION INTELLIGENTE local + cloud :
 // union des deux, le plus recent gagne en cas de conflit,
 // les suppressions sont respectees. AUCUNE donnee n'est jamais ecrasee en bloc.
+// ═══════════════════════════════════════════════════════════════
+// LES QUARTS SONT RANGÉS EN TEXTE — « too many index entries »
+// ═══════════════════════════════════════════════════════════════
+// Firestore limite un document à 40 000 ENTRÉES D'INDEX. C'est une
+// limite DISTINCTE de la taille, et elle ne se voit pas en kilo-octets.
+// Il indexe chaque champ de chaque quart : avec ~25 champs par quart,
+// le plafond tombe vers 800 quarts. Mesuré chez le patron le 29 octobre,
+// message du serveur : « too many index entries for entity
+// /taxipro/shifts » — alors que le document ne pesait que 307 Ko.
+//
+// Chaque quart est donc rangé en TEXTE (son JSON) : une valeur texte ne
+// compte que pour une entrée au lieu de vingt-cinq. La fusion par quart
+// ne change pas — c'est toujours UN champ par identifiant, donc
+// l'écriture additive et les marqueurs de suppression tiennent toujours.
+//
+// La lecture accepte les DEUX formes : les documents écrits avant cette
+// version contiennent encore des objets.
+window.txpQuartEnTexte=function(o){
+  try{ return JSON.stringify(o); }catch(e){ return null; }
+};
+window.txpDecQ=function(m){
+  var out={},k,v;
+  for(k in (m||{})){
+    v=m[k];
+    if(typeof v==='string'){ try{ out[k]=JSON.parse(v); }catch(e){} }
+    else if(v&&typeof v==='object')out[k]=v;   // ancienne forme : objet
+  }
+  return out;
+};
+
 window.txpMerge = function(local, remote, tombType){
   var tomb = window.TOMB[tombType]||{};
   var out = {}, id;
@@ -1881,7 +1911,7 @@ window.txpMerge = function(local, remote, tombType){
           // marqueur de suppression sur l'identifiant concerné.
           function _champsAdditifs(src,tombs,presentDansCloud){
             var out={},id;
-            for(id in src)out[id]=src[id];
+            for(id in src)out[id]=window.txpQuartEnTexte(src[id]);
             for(id in (tombs||{})){
               // ne demander la suppression que de ce qui existe encore
               if(!src[id]&&presentDansCloud&&presentDansCloud[id]){
@@ -1908,8 +1938,8 @@ window.txpMerge = function(local, remote, tombType){
                 // toutes les lectures AVANT toute écriture : règle des transactions
                 const lus=await Promise.all([tx.get(cfgRef),tx.get(sRef),tx.get(eRef)]);
                 _fusionner(lus[0].exists?(lus[0].data()||{}):null,
-                           lus[1].exists?(lus[1].data().data||{}):{},
-                           lus[2].exists?(lus[2].data().data||{}):{});
+                           lus[1].exists?window.txpDecQ(lus[1].data().data):{},
+                           lus[2].exists?window.txpDecQ(lus[2].data().data):{});
                 _ecrire(tx);
               });
               enTransaction=true;
@@ -1926,8 +1956,8 @@ window.txpMerge = function(local, remote, tombType){
             try{
               const lus2=await Promise.all([cfgRef.get(),sRef.get(),eRef.get()]);
               _fusionner(lus2[0].exists?(lus2[0].data()||{}):null,
-                         lus2[1].exists?(lus2[1].data().data||{}):{},
-                         lus2[2].exists?(lus2[2].data().data||{}):{});
+                         lus2[1].exists?window.txpDecQ(lus2[1].data().data):{},
+                         lus2[2].exists?window.txpDecQ(lus2[2].data().data):{});
             }catch(eRead){
               console.warn('Relecture avant écriture impossible :',eRead&&eRead.code);
             }
@@ -2031,8 +2061,8 @@ window.txpMerge = function(local, remote, tombType){
           }
           return {
             C:c.exists?c.data():null,
-            S:s.exists?(s.data().data||{}):{},
-            EX:e.exists?(e.data().data||{}):{},
+            S:s.exists?window.txpDecQ(s.data().data):{},
+            EX:e.exists?window.txpDecQ(e.data().data):{},
             AU:a.exists?(a.data().data||[]):[],
           };
         }catch(e){console.warn('FB load err',e);return null;}
@@ -2043,7 +2073,7 @@ window.txpMerge = function(local, remote, tombType){
         const u1=COL().doc('shifts').onSnapshot(snap=>{
           if(!snap.exists)return;
           if(snap.metadata && snap.metadata.hasPendingWrites)return; // ignorer nos propres ecritures
-          onUpdate('shifts',snap.data().data||{});
+          onUpdate('shifts',window.txpDecQ(snap.data().data));
         },onErr);
         const u2=COL().doc('config').onSnapshot(snap=>{
           if(!snap.exists)return;
@@ -2055,7 +2085,7 @@ window.txpMerge = function(local, remote, tombType){
         const u3=COL().doc('expenses').onSnapshot(snap=>{
           if(!snap.exists)return;
           if(snap.metadata && snap.metadata.hasPendingWrites)return;
-          onUpdate('expenses',snap.data().data||{});
+          onUpdate('expenses',window.txpDecQ(snap.data().data));
         },onErr);
         const u4=COL().doc('deleted').onSnapshot(snap=>{
           if(!snap.exists)return;
@@ -6822,7 +6852,7 @@ function renvoyerMesQuarts(){
       return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
         .doc('shifts').get({source:'server'});
     }).then(function(snap){
-      var dist=snap.exists?((snap.data()||{}).data||{}):{};
+      var dist=snap.exists?window.txpDecQ((snap.data()||{}).data):{};
       var arrives=miens.filter(function(k){return !!dist[k];}).length;
       var manquants=miens.length-arrives;
       if(manquants===0){
@@ -6872,7 +6902,7 @@ function verifierManquantsEnFond(){
     return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
       .doc('shifts').get({source:'server'});
   }).then(function(snap){
-    var dist=snap.exists?((snap.data()||{}).data||{}):{};
+    var dist=snap.exists?window.txpDecQ((snap.data()||{}).data):{};
     var tomb=(window.TOMB&&window.TOMB.s)||{};
     var manq=Object.keys(dist).filter(function(k){return !S[k]&&!tomb[k];});
     var parDrv={};
@@ -8059,7 +8089,7 @@ async function diagnosticSyncLire(semaine){
     await window._fbEnsure();
     var snap=await firebase.firestore().collection(out.flotte).doc('shifts')
       .get({source:'server'});
-    var dist=snap.exists?((snap.data()||{}).data||{}):{};
+    var dist=snap.exists?window.txpDecQ((snap.data()||{}).data):{};
     out.cloudTotal=Object.keys(dist).length;
     out.taille=JSON.stringify(dist).length;        // limite Firestore ~1 Mo
     // Qui a le droit d'écrire dans cette flotte ? Un chauffeur dont le
@@ -8114,7 +8144,7 @@ function recupererQuartsDuCloud(){
     return firebase.firestore().collection(window.TXP_TENANT||'taxipro')
       .doc('shifts').get({source:'server'});
   }).then(function(snap){
-    var dist=snap.exists?((snap.data()||{}).data||{}):{};
+    var dist=snap.exists?window.txpDecQ((snap.data()||{}).data):{};
     var avant=Object.keys(S).length;
     // txpMerge respecte les tombstones : une vraie suppression ne revient pas
     var fusion=window.txpMerge(S,dist,'s');
@@ -9614,6 +9644,34 @@ async function lancerSondeEcriture(){
   }
 }
 
+// LES ENTRÉES D'INDEX — la limite invisible, et celle qui a mordu.
+// Firestore en accepte 40 000 par document et en crée environ DEUX par
+// champ élémentaire (un index croissant, un décroissant). Un document de
+// 307 Ko peut donc être refusé alors qu'il est vingt fois sous la limite
+// de taille : c'est exactement ce qui est arrivé le 20 octobre.
+var LIMITE_INDEX=40000;
+function estimerEntreesIndex(v,prof){
+  prof=prof||0;
+  if(prof>24)return 2;
+  if(v===null||v===undefined)return 2;
+  if(typeof v!=='object')return 2;        // un texte, un nombre, un booléen
+  var n=0,k;
+  if(Array.isArray(v)){
+    for(k=0;k<v.length;k++)n+=estimerEntreesIndex(v[k],prof+1);
+    return n;
+  }
+  for(k in v){
+    if(!Object.prototype.hasOwnProperty.call(v,k))continue;
+    n+=estimerEntreesIndex(v[k],prof+1);
+  }
+  return n;
+}
+
+function _quartsEnTexte(m){
+  var out={},k;
+  for(k in (m||{}))out[k]=window.txpQuartEnTexte(m[k]);
+  return out;
+}
 function diagnosticEcriture(){
   var docs=[
     {nom:'config',   octets:_poidsOctets(C)},
@@ -9623,7 +9681,15 @@ function diagnosticEcriture(){
     {nom:'deleted',  octets:_poidsOctets({s:(window.TOMB||{}).s,e:(window.TOMB||{}).e,
                                           r:(window.TOMB||{}).r||0})}
   ];
+  // La charge RÉELLEMENT écrite pour les quarts et les dépenses : des
+  // textes, pas des objets. C'est ce qui compte pour l'index.
+  docs[1].idx=estimerEntreesIndex({data:_quartsEnTexte(S)});
+  docs[2].idx=estimerEntreesIndex({data:_quartsEnTexte(EX)});
+  docs[0].idx=estimerEntreesIndex(C);
+  docs[3].idx=estimerEntreesIndex({data:(typeof AU!=='undefined'&&AU?AU:[]).slice(-1000)});
+  docs[4].idx=estimerEntreesIndex({s:(window.TOMB||{}).s,e:(window.TOMB||{}).e,r:0});
   docs.sort(function(a,b){return b.octets-a.octets;});
+  var tropIdx=docs.filter(function(d){return d.idx>LIMITE_INDEX*0.8;});
   // À 95 % de la limite on considère que c'est la cause : la taille que
   // Firestore calcule (noms de champs et types compris) dépasse toujours
   // un peu celle du JSON.
@@ -9644,12 +9710,19 @@ function diagnosticEcriture(){
     .concat(valeursRefusees(EX,'expenses'))
     .concat(valeursRefusees((typeof AU!=='undefined'&&AU?AU:[]).slice(-1000),'audit'))
     .concat(valeursRefusees({s:(window.TOMB||{}).s,e:(window.TOMB||{}).e},'deleted'));
-  return {docs:docs,trop:trop,postes:postes.slice(0,6),mauvais:mauvais.slice(0,8)};
+  return {docs:docs,trop:trop,tropIdx:tropIdx,postes:postes.slice(0,6),mauvais:mauvais.slice(0,8)};
 }
 
 // Une phrase courte pour le bandeau : la cause, pas un rapport.
 function verdictEcriture(){
   var d=diagnosticEcriture();
+  if(d.tropIdx.length){
+    var ti=d.tropIdx[0];
+    return 'Le document <b>« '+ti.nom+' »</b> approche la limite des <b>entrées d\'index</b> : '
+      +'environ <b>'+ti.idx.toLocaleString('fr-CA')+'</b> sur 40 000 autorisées. '
+      +'C\'est une limite DIFFÉRENTE de la taille — le document peut être petit et refusé quand même. '
+      +'Allège-le avec « Archiver les vieux quarts ».';
+  }
   if(d.trop.length){
     var t=d.trop[0];
     var g=d.postes.filter(function(p){return p.octets>20480;})
@@ -9679,7 +9752,9 @@ function montrerDiagnosticEcriture(){
   if(e&&e.code)l.push('');
   l.push('TAILLE DES 5 DOCUMENTS (limite : 1024 Ko chacun)');
   d.docs.forEach(function(x){
-    l.push('  '+(x.octets>LIMITE_DOC*0.95?'⛔':'  ')+' '+x.nom+' — '+_ko(x.octets));
+    l.push('  '+(x.octets>LIMITE_DOC*0.95?'⛔':'  ')+' '+x.nom+' — '+_ko(x.octets)
+      +'   ·   '+(x.idx||0).toLocaleString('fr-CA')+' entrées d\'index'
+      +(x.idx>LIMITE_INDEX*0.8?'  ⛔ (limite 40 000)':''));
   });
   l.push('');
   l.push('LES PLUS GROS POSTES DE LA CONFIG');
@@ -14877,7 +14952,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-29-v129-LE-MESSAGE-DU-SERVEUR';
+var APP_VERSION = '2026-10-29-v130-QUARTS-EN-TEXTE-INDEX-FIRESTORE';
 // RECHARGER SANS RIEN PERDRE.
 // Règle du projet : jamais de location.reload() avant la fin des
 // écritures Firebase. Ce bouton rechargeait 300 ms après l'appui, quoi
