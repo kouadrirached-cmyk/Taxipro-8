@@ -9457,17 +9457,154 @@ function rendreAlerteCloud(){
   // Pas de suspension : reste-t-il un refus d'écriture récent ?
   var ech=window._fbDernierEchec;
   if(ech&&ech.code&&(Date.now()-ech.ts)<36e5){
-    var cause=(ech.code==='permission-denied')
-      ? 'Le serveur refuse les écritures de cet appareil. Causes possibles : flotte verrouillée, '
-        +'appareil plus autorisé (ça arrive après « 🔄 Forcer la mise à jour »), ou flotte suspendue.'
-      : 'Code du serveur : <b>'+String(ech.code)+'</b>';
+    var cause,bouton='';
+    if(ech.code==='permission-denied'){
+      cause='Le serveur refuse les écritures de cet appareil. Causes possibles : flotte verrouillée, '
+        +'appareil plus autorisé (ça arrive après « 🔄 Forcer la mise à jour »), ou flotte suspendue.';
+    }else if(ech.code==='invalid-argument'){
+      // Ce code ne vient pas des permissions : Firestore rejette le CONTENU.
+      // On mesure et on NOMME la cause au lieu de laisser deviner.
+      cause='Code du serveur : <b>invalid-argument</b> — ce n\'est pas un problème de permission, '
+        +'Firestore refuse le contenu.<br>';
+      try{ cause+=verdictEcriture(); }
+      catch(x){ cause+='La mesure a échoué : '+String((x&&x.message)||x); }
+      bouton='<button onclick="montrerDiagnosticEcriture()" style="width:100%;'
+        +'background:rgba(245,200,0,.14);border:1px solid rgba(245,200,0,.45);color:var(--gold);'
+        +'border-radius:9px;padding:9px;font-size:11px;font-weight:900;cursor:pointer;'
+        +'margin-top:9px;">🔍 Voir le détail et le copier</button>';
+    }else{
+      cause='Code du serveur : <b>'+String(ech.code)+'</b>';
+    }
     el.innerHTML=boite('var(--gold)',
       patron?'⚠️ Cet appareil n\'arrive pas à écrire dans le cloud'
             :'⛔ Tes quarts ne partent PAS',
-      cause+(patron?'':'<br><b>Montre ce message à ton patron.</b>'));
+      cause+(patron?'':'<br><b>Montre ce message à ton patron.</b>'),bouton);
     return;
   }
   el.innerHTML='';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// POURQUOI FIRESTORE REFUSE L'ÉCRITURE — la mesure, pas l'hypothèse
+// ═══════════════════════════════════════════════════════════════════
+// `invalid-argument` ne vient JAMAIS des permissions : ce n'est ni la
+// flotte verrouillée, ni la suspension, ni un appareil non autorisé.
+// Firestore rejette le CONTENU. Deux causes réelles :
+//   · un document dépasse 1 Mo (la limite dure, par document) ;
+//   · une valeur interdite s'y est glissée (undefined, fonction, NaN,
+//     imbrication de plus de 20 niveaux, nom de champ vide).
+//
+// Et comme les 5 documents partent dans UN SEUL lot atomique, un seul
+// document fautif bloque TOUT — les quarts compris. C'est ainsi qu'un
+// appareil peut ne plus rien envoyer en ayant l'air parfaitement normal.
+//
+// Le diagnostic v123 ne montrait que la taille du document des QUARTS :
+// une config trop grosse passait donc inaperçue. Ici on les mesure tous.
+var LIMITE_DOC=1048576;   // 1 Mio
+function _poidsOctets(o){
+  try{ return new Blob([JSON.stringify(o===undefined?null:o)]).size; }
+  catch(e){ try{ return JSON.stringify(o).length; }catch(e2){ return 0; } }
+}
+function _ko(n){ return Math.round(n/1024)+' Ko'; }
+
+// Les valeurs que Firestore refuse, avec leur chemin exact.
+function valeursRefusees(racine,nom){
+  var trouve=[];
+  (function marcher(v,chemin,prof){
+    if(trouve.length>=12)return;
+    if(prof>20){ trouve.push({chemin:chemin,quoi:'imbriqué sur plus de 20 niveaux'}); return; }
+    if(v===undefined){ trouve.push({chemin:chemin,quoi:'undefined'}); return; }
+    if(typeof v==='function'){ trouve.push({chemin:chemin,quoi:'fonction'}); return; }
+    if(typeof v==='number'&&!isFinite(v)){
+      trouve.push({chemin:chemin,quoi:(isNaN(v)?'NaN':'Infini')}); return; }
+    if(v===null||typeof v!=='object')return;
+    if(Array.isArray(v)){
+      for(var i=0;i<v.length;i++)marcher(v[i],chemin+'['+i+']',prof+1);
+      return;
+    }
+    for(var k in v){
+      if(!Object.prototype.hasOwnProperty.call(v,k))continue;
+      if(k===''){ trouve.push({chemin:chemin,quoi:'nom de champ vide'}); continue; }
+      marcher(v[k],chemin?chemin+'.'+k:k,prof+1);
+    }
+  })(racine,nom||'',0);
+  return trouve;
+}
+
+function diagnosticEcriture(){
+  var docs=[
+    {nom:'config',   octets:_poidsOctets(C)},
+    {nom:'shifts',   octets:_poidsOctets({data:S})},
+    {nom:'expenses', octets:_poidsOctets({data:EX})},
+    {nom:'audit',    octets:_poidsOctets({data:(typeof AU!=='undefined'&&AU?AU:[]).slice(-1000)})},
+    {nom:'deleted',  octets:_poidsOctets({s:(window.TOMB||{}).s,e:(window.TOMB||{}).e,
+                                          r:(window.TOMB||{}).r||0})}
+  ];
+  docs.sort(function(a,b){return b.octets-a.octets;});
+  // À 95 % de la limite on considère que c'est la cause : la taille que
+  // Firestore calcule (noms de champs et types compris) dépasse toujours
+  // un peu celle du JSON.
+  var trop=docs.filter(function(d){return d.octets>LIMITE_DOC*0.95;});
+  var postes=[];
+  try{
+    for(var k in C){
+      if(!Object.prototype.hasOwnProperty.call(C,k))continue;
+      if(k.charAt(0)==='_')continue;
+      postes.push({champ:k,octets:_poidsOctets(C[k])});
+    }
+  }catch(e){}
+  postes.sort(function(a,b){return b.octets-a.octets;});
+  var mauvais=valeursRefusees(C,'config')
+    .concat(valeursRefusees(S,'shifts'))
+    .concat(valeursRefusees(EX,'expenses'));
+  return {docs:docs,trop:trop,postes:postes.slice(0,6),mauvais:mauvais.slice(0,8)};
+}
+
+// Une phrase courte pour le bandeau : la cause, pas un rapport.
+function verdictEcriture(){
+  var d=diagnosticEcriture();
+  if(d.trop.length){
+    var t=d.trop[0];
+    var g=d.postes.filter(function(p){return p.octets>20480;})
+      .slice(0,3).map(function(p){return p.champ+' '+_ko(p.octets);}).join(' · ');
+    return 'Le document <b>« '+t.nom+' »</b> pèse <b>'+_ko(t.octets)
+      +'</b> — la limite de Firestore est 1024 Ko, par document. Tant qu\'il dépasse, '
+      +'<b>aucune écriture ne passe</b>, les quarts compris : les 5 documents partent ensemble.'
+      +(t.nom==='config'&&g?'<br>Les plus gros postes : '+g+'.':'');
+  }
+  if(d.mauvais.length){
+    var m=d.mauvais[0];
+    return 'Une valeur refusée par Firestore : <b>'+m.chemin+'</b> ('+m.quoi+'). '
+      +'Tant qu\'elle est là, aucune écriture ne passe.';
+  }
+  return 'Taille des documents : '
+    +d.docs.map(function(x){return x.nom+' '+_ko(x.octets);}).join(' · ')
+    +'. Aucun ne dépasse la limite et aucune valeur interdite n\'a été trouvée.';
+}
+
+// Le rapport complet, pour l'envoyer tel quel.
+function montrerDiagnosticEcriture(){
+  var d=diagnosticEcriture();
+  var l=['🔍 POURQUOI LES ÉCRITURES SONT REFUSÉES',''];
+  var e=window._fbDernierEchec;
+  if(e&&e.code)l.push('Code du serveur : '+e.code,'');
+  l.push('TAILLE DES 5 DOCUMENTS (limite : 1024 Ko chacun)');
+  d.docs.forEach(function(x){
+    l.push('  '+(x.octets>LIMITE_DOC*0.95?'⛔':'  ')+' '+x.nom+' — '+_ko(x.octets));
+  });
+  l.push('');
+  l.push('LES PLUS GROS POSTES DE LA CONFIG');
+  d.postes.forEach(function(p){ l.push('  · '+p.champ+' — '+_ko(p.octets)); });
+  if(d.mauvais.length){
+    l.push('','VALEURS REFUSÉES PAR FIRESTORE');
+    d.mauvais.forEach(function(m){ l.push('  ⛔ '+m.chemin+' : '+m.quoi); });
+  }else{
+    l.push('','Aucune valeur interdite trouvée (undefined, NaN, fonction).');
+  }
+  l.push('','Les 5 documents partent dans UN SEUL lot : un seul fautif bloque tout.');
+  var txt=l.join('\n');
+  try{ navigator.clipboard.writeText(txt); }catch(x){}
+  alert(txt+'\n\n(copié dans le presse-papier)');
 }
 
 // Réactiver : réservé à un gardien de l'annuaire (les règles l'exigent).
@@ -14650,7 +14787,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-29-v127-DIAGNOSTICS-ET-FLOTTE-SUSPENDUE';
+var APP_VERSION = '2026-10-29-v128-POURQUOI-LECRITURE-EST-REFUSEE';
 // RECHARGER SANS RIEN PERDRE.
 // Règle du projet : jamais de location.reload() avant la fin des
 // écritures Firebase. Ce bouton rechargeait 300 ms après l'appui, quoi

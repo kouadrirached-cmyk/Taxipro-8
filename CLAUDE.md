@@ -132,6 +132,42 @@
 > 3. Le chauffeur refusé doit le SAVOIR : c'est ce que fait `envoiStatut()` (v123) avec
 >    `window._fbDernierEchec`, retiré par le retour en arrière. Argument de plus pour la v126.
 >
+> ### 🎯 LA CAUSE : `invalid-argument` — un document dépasse 1 Mo
+> **Mesuré sur le téléphone d'Amin le 29 octobre**, dès la v127 déployée : son bandeau affiche
+> « ⚠️ Cet appareil n'arrive pas à écrire dans le cloud — Code du serveur : **`invalid-argument`** ».
+> Son téléphone de PATRON est touché lui aussi : **personne n'écrit**.
+>
+> `invalid-argument` ne vient JAMAIS des permissions — ni flotte verrouillée, ni suspension, ni
+> appareil non autorisé. Firestore rejette le **contenu**. Deux causes réelles : un document qui
+> dépasse **1 Mio**, ou une valeur interdite (`undefined`, `NaN`, fonction, imbrication > 20).
+>
+> **Et les 5 documents partent dans UN SEUL lot atomique** : un seul document fautif bloque tout,
+> **les quarts compris**. C'est ce qui fait qu'un appareil cesse d'envoyer en ayant l'air normal.
+>
+> **Reproduit en émulateur** (`test-invalid-argument.js`) : une config gonflée à 1 774 Ko par
+> `C.treso` fait répondre au serveur exactement `invalid-argument`. Le mécanisme est établi.
+>
+> Pourquoi ça colle à tout ce qu'Amin décrit : la config grossit tous les jours (`C.treso` =
+> toute la trésorerie, `C.payes` = chaque semaine × chaque chauffeur, plus `messages`, `justifs`,
+> `cleans`, `schedules`, `giftCards`, `factures`…), donc elle franchit le mur **un jour précis** —
+> le 20 — sans qu'aucun déploiement n'ait eu lieu ; **tous** les appareils sont bloqués d'un coup
+> puisqu'ils écrivent tous la même config ; les lectures continuent de marcher ; et **reculer le
+> code n'y change rien**, ce qui explique l'échec des deux retours en arrière.
+>
+> **POURQUOI ON NE L'A PAS VU PENDANT SIX JOURS** : le diagnostic v123 n'affichait que la taille
+> du document des **quarts** (306 Ko, rassurant). La **config** n'a jamais été mesurée. Toute
+> mesure de taille doit désormais porter sur les CINQ documents.
+>
+> Outils ajoutés (v128) : `diagnosticEcriture()` mesure les 5 documents et les plus gros postes de
+> `C` ; `valeursRefusees()` situe une valeur interdite par son chemin exact ;
+> `verdictEcriture()` écrit la cause en une phrase dans le bandeau ;
+> `montrerDiagnosticEcriture()` donne le rapport complet, copié dans le presse-papier.
+>
+> **RESTE À FAIRE — alléger la config.** Tant qu'elle dépasse, rien ne passe. Il faut sortir du
+> document `config` ce qui grossit sans fin (`C.treso` en premier) : archivage des mouvements
+> anciens, et une alerte AVANT d'atteindre la limite — le document des quarts a la sienne à
+> 750 Ko (`_bigWarned`), la config n'en a aucune.
+>
 > ### « 197 appareils connectés pour 10 chauffeurs » — Amin, 29 octobre
 > Ce ne sont pas d'autres propriétaires : `members.uids` accumule une entrée par **identité
 > anonyme Firebase**, et chaque « 🔄 Forcer la mise à jour » ou vidage de cache en crée une
