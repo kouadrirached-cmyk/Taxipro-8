@@ -1022,6 +1022,11 @@ body{
   </div>
   <div class="chkbar-sm"></div>
 
+  <!-- ⛔ Bandeau d'alerte cloud : flotte suspendue, ou envois refusés.
+       Visible par le patron ET par le chauffeur : c'est précisément parce
+       que personne ne voyait rien que le problème a duré une semaine. -->
+  <div id="alerteCloud"></div>
+
   <!-- 🔔 Panneau des quarts rentrés par les chauffeurs (patron seulement) -->
   <div id="notifOverlay" onclick="if(event.target===this)fermerNotifs()"
        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:9998;align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto;">
@@ -1838,7 +1843,19 @@ window.txpMerge = function(local, remote, tombType){
         }catch(e){
           console.warn('FB save err',e);
           window._fbPending=true;
+          // CE QUE LE SERVEUR A RÉPONDU, retenu pour être AFFICHÉ.
+          // Sans ça, un appareil refusé continuait d'afficher « ☁️ Sync ✓ »
+          // et personne ne pouvait savoir que ses quarts ne partaient pas.
+          window._fbDernierEchec={code:(e&&e.code)||'inconnu',ts:Date.now()};
           if(typeof setSyncStatus==='function')setSyncStatus('offline');
+          // Un refus peut venir d'une flotte suspendue : on va le vérifier
+          // une seule fois, puis le bandeau le dira.
+          if(e&&e.code==='permission-denied'&&typeof verifierSuspension==='function'
+            &&!window._suspVerif){
+            window._suspVerif=true;
+            setTimeout(function(){ verifierSuspension(); },800);
+          }
+          if(typeof rendreAlerteCloud==='function')rendreAlerteCloud();
         }
       },
       async load(){
@@ -2702,6 +2719,12 @@ async function doLogin(){
   // refusent — l'app fonctionne exactement pareil.
   if(U.role==='owner'&&typeof annuaireBattement==='function'){
     setTimeout(function(){ annuaireBattement(); },4000);
+  }
+  // Une flotte suspendue coupe les chauffeurs sans que le patron gardien
+  // s'en aperçoive. On le vérifie à chaque ouverture, pour TOUS les rôles :
+  // le chauffeur doit pouvoir montrer le message à son patron.
+  if(typeof verifierSuspension==='function'){
+    setTimeout(function(){ verifierSuspension(); },5000);
   }
   initShiftForm();
   initCoupSel();
@@ -8059,6 +8082,107 @@ async function flotteSuspendre(tenant,suspendu){
   await _annuColl().doc(tenant).set({suspendu:!!suspendu,
     suspenduLe:suspendu?new Date().toISOString():null},{merge:true});
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// MA FLOTTE EST-ELLE SUSPENDUE ? — le piège qui a coûté une semaine
+// ═══════════════════════════════════════════════════════════════════
+// `firestore.rules` refuse lecture ET écriture à une flotte suspendue :
+//     allow read, write: if … isMember() && !estSuspendue();
+// MAIS la règle juste après rend l'accès complet à un gardien :
+//     allow read, write: if … isDataDoc() && isAdmin();
+// Donc le patron, gardien de l'annuaire, travaille sans rien remarquer
+// pendant que TOUS ses chauffeurs sont refusés en silence. Mesuré : le
+// chauffeur voit même « ☁️ Sync ✓ » alors que le serveur le refuse.
+//
+// C'est aussi un drapeau DIFFÉRENT de `locked` (« flotte verrouillée ») :
+// le diagnostic n'affichait que `locked`, d'où une semaine de recherche
+// à côté. Ne jamais confondre les deux.
+window._flotteSuspendue=null;
+window._suspendueLe=null;
+async function verifierSuspension(){
+  try{
+    if(window._fbEnsure)await window._fbEnsure();
+    var d=await _annuColl().doc(window.TXP_TENANT).get({source:'server'});
+    var f=(d.exists&&d.data())||{};
+    window._flotteSuspendue=(f.suspendu===true);
+    window._suspendueLe=f.suspenduLe||null;
+  }catch(e){
+    // Un refus de lecture sur sa propre fiche n'est PAS une preuve de
+    // suspension (les règles la laissent lisible à un membre). On ne
+    // conclut donc rien ici : seul `suspendu===true` compte.
+    console.warn('Vérification de suspension impossible :',e&&e.code);
+  }
+  rendreAlerteCloud();
+}
+
+// Le bandeau rouge en haut de l'app. Deux messages seulement, par ordre
+// de gravité : la flotte est coupée, ou les envois sont refusés.
+function rendreAlerteCloud(){
+  var el=document.getElementById('alerteCloud');
+  if(!el)return;
+  var patron=(typeof U!=='undefined'&&U&&U.role==='owner');
+  var boite=function(couleur,titre,corps,bouton){
+    return '<div style="background:rgba(255,58,58,.13);border:1px solid '+couleur
+      +';border-left:4px solid '+couleur+';border-radius:10px;margin:8px 10px 0;padding:10px 12px;">'
+      +'<div style="font-size:12px;font-weight:900;color:'+couleur+';">'+titre+'</div>'
+      +'<div style="font-size:11px;color:var(--m3);line-height:1.6;margin-top:4px;">'+corps+'</div>'
+      +(bouton||'')+'</div>';
+  };
+  if(window._flotteSuspendue===true){
+    var quand=window._suspendueLe
+      ? ' (depuis le '+new Date(window._suspendueLe).toLocaleDateString('fr-CA',
+          {day:'numeric',month:'long',year:'numeric'})+')' : '';
+    el.innerHTML=boite('var(--red)','⏸️ Cette flotte est SUSPENDUE'+quand,
+      patron
+        ? 'Tes chauffeurs <b>ne peuvent plus envoyer leurs quarts</b>. Toi tu ne vois rien d\'anormal '
+          +'parce que cet appareil garde l\'annuaire. Rien n\'a été effacé : réactive et tout repart.'
+        : 'Tes quarts <b>restent sur ce téléphone</b> et n\'arrivent pas chez ton patron. '
+          +'Montre-lui ce message — lui seul peut réactiver la flotte.',
+      patron
+        ? '<button onclick="reactiverMaFlotte()" style="width:100%;background:rgba(57,211,83,.16);'
+          +'border:1px solid rgba(57,211,83,.45);color:var(--grn);border-radius:9px;padding:10px;'
+          +'font-size:12px;font-weight:900;cursor:pointer;margin-top:9px;">▶️ Réactiver ma flotte</button>'
+        : '');
+    return;
+  }
+  // Pas de suspension : reste-t-il un refus d'écriture récent ?
+  // `_fbReady` ne veut dire que « le SDK a démarré » — il a menti une
+  // semaine durant. Ici on montre ce que le SERVEUR a répondu.
+  var ech=window._fbDernierEchec;
+  if(ech&&ech.code&&(Date.now()-ech.ts)<36e5){
+    var cause=(ech.code==='permission-denied')
+      ? 'Le serveur refuse les écritures de cet appareil. Causes possibles : flotte verrouillée, '
+        +'appareil plus autorisé (ça arrive après « 🔄 Forcer la mise à jour »), ou flotte suspendue.'
+      : 'Code du serveur : <b>'+String(ech.code)+'</b>';
+    el.innerHTML=boite('var(--gold)',
+      patron?'⚠️ Cet appareil n\'arrive pas à écrire dans le cloud'
+            :'⛔ Tes quarts ne partent PAS',
+      cause+(patron?'':'<br><b>Montre ce message à ton patron.</b>'));
+    return;
+  }
+  el.innerHTML='';
+}
+
+// Réactiver : réservé à un gardien de l'annuaire (les règles l'exigent).
+async function reactiverMaFlotte(){
+  var nom=(C&&C.companyName)||window.TXP_TENANT;
+  if(!confirm('▶️ Réactiver « '+nom+' » ?\n\n'
+    +'Tes chauffeurs pourront de nouveau envoyer leurs quarts. '
+    +'Rien n\'a été effacé pendant la suspension.'))return;
+  try{
+    await flotteSuspendre(window.TXP_TENANT,false);
+    window._flotteSuspendue=false;window._suspendueLe=null;
+    audit('FLOTTE_REACTIVEE',window.TXP_TENANT);
+    rendreAlerteCloud();
+    alert('✅ Flotte réactivée.\n\n'
+      +'Demande à chaque chauffeur de rouvrir l\'app : ses quarts en attente '
+      +'partiront tout seuls, sans qu\'il ait à les ressaisir.');
+  }catch(e){
+    alert('❌ Échec : '+((e&&e.code)||e)+'\n\n'
+      +'Seul un appareil qui garde l\'annuaire peut réactiver une flotte. '
+      +'Va dans ⚙️ Réglages → 📇 Qui utilise l\'application et revendique la place, puis réessaie.');
+  }
+}
 // Supprimer : efface les documents de la flotte ET sa fiche. Irréversible.
 async function flotteSupprimer(tenant){
   if(tenant===(window.TXP_TENANT||'taxipro'))throw new Error('flotte-active');
@@ -8217,7 +8341,19 @@ async function revendiquerAnnuaire(){
 async function basculerSuspension(tenant,suspendre){
   var f=((_annuCache&&_annuCache.flottes)||[]).find(function(x){return x.tenant===tenant;})||{};
   var nom=f.compagnie||tenant;
-  if(suspendre&&!confirm('⏸️ Suspendre « '+nom+' » ?\n\nLa flotte ne pourra plus lire ni écrire ses données tant que tu ne la réactives pas. Rien n\'est effacé.'))return;
+  // SUSPENDRE SA PROPRE FLOTTE NE SE VOIT PAS depuis cet appareil : en tant
+  // que gardien de l'annuaire, le patron garde son accès complet alors que
+  // TOUS ses chauffeurs sont refusés en silence. Il faut donc le dire fort,
+  // et nommer la conséquence — c'est ce piège qui a coûté une semaine.
+  if(suspendre&&tenant===window.TXP_TENANT){
+    if(!confirm('🛑 ATTENTION — c\'est TA PROPRE flotte.\n\n'
+      +'Suspendre « '+nom+' » va couper TES chauffeurs : ils ne pourront plus '
+      +'envoyer leurs quarts, et toi tu ne verras AUCUN changement sur cet '
+      +'appareil (tu gardes l\'annuaire).\n\n'
+      +'Tu ne t\'en apercevras qu\'en constatant que leurs quarts n\'arrivent plus.\n\n'
+      +'Suspendre quand même ?'))return;
+  }
+  else if(suspendre&&!confirm('⏸️ Suspendre « '+nom+' » ?\n\nLa flotte ne pourra plus lire ni écrire ses données tant que tu ne la réactives pas. Rien n\'est effacé.'))return;
   try{
     await flotteSuspendre(tenant,suspendre);
     showToastGrn(suspendre?'Flotte suspendue':'Flotte réactivée');
@@ -12990,7 +13126,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-28-RETOUR-ARRIERE-v115-DU-27-SEPTEMBRE';
+var APP_VERSION = '2026-10-29-v115+ALERTE-FLOTTE-SUSPENDUE';
 function forceMiseAJour(){
   if('caches' in window){
     caches.keys().then(function(names){
