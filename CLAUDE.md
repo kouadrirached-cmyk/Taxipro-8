@@ -308,6 +308,40 @@ TaxiPro est une application de gestion de flotte de taxis pour petits propriéta
    n'est rétroactif. Pour eux, la seule façon d'aligner les deux sessions est que `C.redevance`
    soit identique partout — donc synchronisé.
 
+7. **Le multi-propriétaire est COUPÉ (v133)** — `var MULTI_PROPRIETAIRE=false` dans
+   `index.html`, à la demande d'Amin le 29 octobre : il ne veut que sa flotte. Ça cache la
+   console « 📇 Qui utilise l'application » et arrête le dépôt de la fiche d'annuaire à chaque
+   ouverture (une écriture réseau de moins). **Le code de l'annuaire reste intact : remettre
+   `true` réactive tout** pour la revente en SaaS (feuille de route, point 3).
+   **NE JAMAIS CONFONDRE avec le cloisonnement par flotte.** `window.TXP_TENANT` nomme la
+   collection Firestore où vivent ses données et préfixe ses clés `localStorage` : y toucher le
+   couperait de tous ses quarts. On ne retire que l'annuaire, jamais le multi-flotte. Et retirer
+   du code ne rend PAS l'app plus rapide — du code inutilisé ne coûte rien à l'exécution ; ça lui
+   a été dit explicitement.
+
+### « L'application gèle » — mesuré, et c'était ma régression (v133)
+Mesure à son volume réel (655 quarts + 1 200 mouvements de trésorerie), sur ordinateur — compter
+**5 à 8 fois plus sur son Android** :
+
+| | Ici | Sur son téléphone |
+|---|---|---|
+| Tableau de bord (`dash`) | 144–247 ms | ~1 à 2 s |
+| Trésorerie (`treso`) | 124 ms | ~0,8 à 1 s |
+| **`rendreAlerteCloud()`** | **99 ms** | ~0,6 à 0,8 s, **toutes les 30 s** |
+| Paye | 31–72 ms | ~0,3 à 0,5 s |
+
+**La régression** : `rendreAlerteCloud()` appelait `verdictEcriture()` → `diagnosticEcriture()`,
+qui sérialise les 5 charges ET parcourt chaque champ de chaque quart (taille, entrées d'index,
+valeurs refusées). Or ce bandeau est rendu depuis le `catch` de `_fb.save()`, et la relance part
+toutes les 30 s : l'app figeait par à-coups. Le verdict est désormais **gardé 5 minutes**
+(`window._verdictEcr`). Mesuré : **53 ms au premier rendu, 0,2 ms ensuite**.
+
+**Règle** : `diagnosticEcriture()`, `verdictEcriture()` et `valeursRefusees()` sont des outils
+**à la demande**. Ne jamais les appeler depuis un rendu, un `catch` ou une boucle.
+
+**Reste lourd, non corrigé** : le tableau de bord (~1 à 2 s sur son téléphone) et la trésorerie.
+C'est antérieur et ça tient au volume — l'archivage des vieux quarts est le levier.
+
 ### Les paies versées (`C.payes`)
 - Clé : `"AAAA-MM-JJ|Nom du chauffeur"`, où la date est le **lundi** de la semaine, en heure LOCALE (`_wkKeyDe`). Ne pas fabriquer cette clé avec `toISOString()` : au Québec les deux coïncident, mais pas dans un fuseau à l'est de Greenwich — ce qui compte pour la revente du produit.
 - La clé contient le NOM : renommer un chauffeur doit passer par `renommerChauffeur()`, qui déplace aussi les clés `C.payes` (et les suffixes `_deductCash` / `_essCash`).
