@@ -1,17 +1,18 @@
 # TaxiPro — Contexte du projet
 
-> ## ⏪ RETOUR EN ARRIÈRE EN COURS — à lire avant toute modification
-> **`index.html` a été ramené à la v115 (27 septembre) le 28 octobre, à la demande d'Amin.**
-> Deuxième étape de son test : la v116 (6 octobre) avait d'abord été remise, le problème a
-> persisté, donc on recule avant la réécriture du chemin d'écriture (transactions Firestore).
+> ## ⏪ LE RETOUR EN ARRIÈRE EST TERMINÉ — ce qu'il a prouvé
+> **`index.html` est en v127** (`2026-10-29-v127-DIAGNOSTICS-ET-FLOTTE-SUSPENDUE`) : la v126 plus
+> le bandeau d'alerte « flotte suspendue ». Les v116 à v126 sont donc toutes de retour.
 >
-> **Le 29 octobre, un bandeau d'alerte a été ajouté PAR-DESSUS cette v115** (version
-> `2026-10-29-v115+ALERTE-FLOTTE-SUSPENDUE`) : `verifierSuspension()`, `rendreAlerteCloud()`,
-> `reactiverMaFlotte()`, le relevé de `window._fbDernierEchec` dans le `catch` de `_fb.save()`, et
-> l'avertissement renforcé de `basculerSuspension()` sur sa propre flotte. **Le chemin d'écriture
-> n'est pas touché** (ajout en lecture seule + affichage), donc le test du retour en arrière reste
-> valide. Vérifié : 31 contrôles sur le bandeau, 24 de non-régression v115 — dont le quart de
-> référence inchangé et les huit écrans du patron rendus sans panne.
+> Déroulé : à la demande d'Amin, `index.html` a été ramené à la v116 (6 oct) le 28 octobre, puis
+> à la v115 (27 sept) le même soir, pour éliminer le code comme cause. **Le problème a persisté
+> aux deux reculs.** Le 29 octobre, Amin a exigé que ce soit réglé ; la v126 a été remise avec
+> ses diagnostics, puisque la v115 ne permettait plus de rien observer.
+>
+> **Ce que le test a établi, et qu'il ne faut pas refaire :** le code n'est pas la cause. Six
+> scénarios mesurés en émulateur n'ont jamais réussi à perdre un quart (détail plus bas). Quand
+> Amin dit « avant ça marchait », ne pas repartir des mises à jour : la bascule du 20 octobre
+> n'a correspondu à **aucun déploiement** (la v116 tournait sans changement du 6 au 21).
 >
 > Raison : l'app a fonctionné quatre mois sans incident, puis des quarts de chauffeurs ont cessé
 > d'arriver chez le patron. Mesure certaine : le cloud ne contient qu'UN des six quarts d'un
@@ -131,24 +132,33 @@
 > 3. Le chauffeur refusé doit le SAVOIR : c'est ce que fait `envoiStatut()` (v123) avec
 >    `window._fbDernierEchec`, retiré par le retour en arrière. Argument de plus pour la v126.
 >
-> **Les sections ci-dessous décrivent les v116 à v126, qui ne sont PLUS dans `index.html`.**
-> Elles sont conservées : chaque correctif y est documenté avec sa mesure, et il faudra les
-> réintroduire une fois la cause établie. Repères git : v115 = `3598c7d`, v116 = `51784ef`,
-> v126 = `f6763ef`.
+> ### « 197 appareils connectés pour 10 chauffeurs » — Amin, 29 octobre
+> Ce ne sont pas d'autres propriétaires : `members.uids` accumule une entrée par **identité
+> anonyme Firebase**, et chaque « 🔄 Forcer la mise à jour » ou vidage de cache en crée une
+> nouvelle. Dix chauffeurs sur quatre mois suffisent. Le dire avant d'agir : Amin a demandé de
+> « fermer les sessions des autres propriétaires », ce qui part d'une lecture fausse du compteur.
 >
-> **Ce qui n'est plus actif pendant le test** : écriture transactionnelle et feuille de crédits
-> TPS/TVQ (v116), détection de la mémoire pleine et écriture additive (v123), garde-fous contre
-> l'écran blanc (v120), date locale du formulaire (v119) — **les quarts saisis après 20 h sont de
-> nouveau datés du lendemain** —, protection du rattrapage de paie (v120), et tous les outils de
-> diagnostic (v121 à v126).
+> **NE PAS PURGER `members.uids` à l'aveugle.** Retirer un uid coupe immédiatement l'appareil
+> correspondant — exactement le symptôme qu'on cherche à guérir. Tant que la flotte n'est pas
+> verrouillée, un appareil purgé se réinscrit seul à la réouverture, donc la purge ne gagne rien ;
+> si elle est verrouillée, la purge est **définitive**. Une purge n'est justifiable qu'après avoir
+> établi la cause, et seulement sur les uid absents de `members.etats` depuis des semaines
+> (la balise v125 donne la « dernière nouvelle » de chaque appareil).
 >
-> Vérifié avant chaque bascule : le calcul de la paie est **identique** (taximètre net 329,75 ·
-> salaire 162,00 · part patron 197,85 · essence avancée 40,00 sur le quart de référence).
-> Aucune donnée Firestore n'est touchée par ces retours en arrière.
+> **Les sections ci-dessous (v116 à v126) sont de nouveau à jour** : tout ce qu'elles décrivent
+> est dans `index.html`. Repères git : v115 = `3598c7d`, v116 = `51784ef`, v126 = `f6763ef`.
 >
-> **Pour payer pendant le test** : les quarts manquants ne sont pas dans le cloud, donc aucune
-> récupération ne peut les ramener — les chiffres n'existent que sur les téléphones des
-> chauffeurs. Une page de calcul autonome a été remise à Amin le 28 octobre
+> Vérifié à chaque bascule, aller comme retour : le calcul de la paie est **identique** (taximètre
+> net 329,75 · salaire 162,00 · part patron 197,85 · essence avancée 40,00 sur le quart de
+> référence). Aucune donnée Firestore n'a été touchée par ces allers-retours.
+>
+> **269 contrôles verts sur la v127** : noyau 28, bandeau de suspension 31, renvoi et balises 22,
+> diagnostic de sync 41, semaines voisines 16, manquants automatiques 15, « payer quand je veux »
+> 30, paye robuste 29, rattrapage 20, mémoire pleine 19, plusieurs chauffeurs 18.
+>
+> **Pour payer tant que la cause n'est pas réglée** : les quarts manquants ne sont pas dans le
+> cloud, donc aucune récupération ne peut les ramener — les chiffres n'existent que sur les
+> téléphones des chauffeurs. Une page de calcul autonome a été remise à Amin le 28 octobre
 > (<https://claude.ai/artifact/14nNzEXG1oGSdf623dsWxz>, privée) : il y recopie le compteur, les
 > courses et les pourboires affichés par chaque chauffeur, et elle applique les mêmes formules
 > que l'app (redevance CTQ retirée d'abord, puis le pourcentage, pourboires par-dessus, essence
