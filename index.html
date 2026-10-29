@@ -1978,7 +1978,13 @@ window.txpMerge = function(local, remote, tombType){
           // identité anonyme perdue après un vidage de cache) n'a rien à
           // voir avec le réseau. Le chauffeur voyait ses quarts chez lui
           // et les croyait envoyés ; ils ne partaient jamais.
+          // GARDER AUSSI LE MESSAGE ENTIER. Le code seul (« invalid-argument »)
+          // ne dit pas CE QUI ne va pas ; Firestore, lui, l'écrit en toutes
+          // lettres dans le message — taille dépassée, valeur refusée, tableau
+          // dans un tableau, nom de champ réservé. Ne garder que le code a
+          // coûté une soirée de recherche.
           window._fbDernierEchec={code:(e&&e.code)||String((e&&e.message)||e),
+            msg:String((e&&e.message)||''),
             ts:Date.now(),membre:!!window._fbMember};
           if(typeof setSyncStatus==='function')setSyncStatus('offline');
           // Un refus peut venir d'une flotte SUSPENDUE dans l'annuaire —
@@ -9466,12 +9472,21 @@ function rendreAlerteCloud(){
       // On mesure et on NOMME la cause au lieu de laisser deviner.
       cause='Code du serveur : <b>invalid-argument</b> — ce n\'est pas un problème de permission, '
         +'Firestore refuse le contenu.<br>';
+      // LE MESSAGE DU SERVEUR D'ABORD : c'est lui qui nomme la vraie
+      // cause. La mesure locale ne vient qu'après, en appoint.
+      if(ech.msg){
+        cause+='<b>Message du serveur :</b> <span style="word-break:break-word;">'
+          +String(ech.msg).replace(/</g,'&lt;')+'</span><br>';
+      }
       try{ cause+=verdictEcriture(); }
       catch(x){ cause+='La mesure a échoué : '+String((x&&x.message)||x); }
-      bouton='<button onclick="montrerDiagnosticEcriture()" style="width:100%;'
-        +'background:rgba(245,200,0,.14);border:1px solid rgba(245,200,0,.45);color:var(--gold);'
-        +'border-radius:9px;padding:9px;font-size:11px;font-weight:900;cursor:pointer;'
-        +'margin-top:9px;">🔍 Voir le détail et le copier</button>';
+      var bstyle='width:100%;background:rgba(245,200,0,.14);border:1px solid rgba(245,200,0,.45);'
+        +'color:var(--gold);border-radius:9px;padding:9px;font-size:11px;font-weight:900;'
+        +'cursor:pointer;margin-top:9px;';
+      bouton='<button onclick="montrerDiagnosticEcriture()" style="'+bstyle
+        +'">🔍 Voir le détail et le copier</button>'
+        +'<button onclick="lancerSondeEcriture()" style="'+bstyle
+        +'">🔬 Tester les 5 documents un par un</button>';
     }else{
       cause='Code du serveur : <b>'+String(ech.code)+'</b>';
     }
@@ -9519,16 +9534,84 @@ function valeursRefusees(racine,nom){
       trouve.push({chemin:chemin,quoi:(isNaN(v)?'NaN':'Infini')}); return; }
     if(v===null||typeof v!=='object')return;
     if(Array.isArray(v)){
-      for(var i=0;i<v.length;i++)marcher(v[i],chemin+'['+i+']',prof+1);
+      for(var i=0;i<v.length;i++){
+        // Firestore REFUSE un tableau directement dans un tableau.
+        if(Array.isArray(v[i])){
+          trouve.push({chemin:chemin+'['+i+']',quoi:'tableau dans un tableau (interdit)'});
+          continue;
+        }
+        marcher(v[i],chemin+'['+i+']',prof+1);
+      }
       return;
     }
     for(var k in v){
       if(!Object.prototype.hasOwnProperty.call(v,k))continue;
       if(k===''){ trouve.push({chemin:chemin,quoi:'nom de champ vide'}); continue; }
+      // Les noms encadrés de doubles tirets bas sont réservés par Firestore.
+      if(/^__.*__$/.test(k)){
+        trouve.push({chemin:(chemin?chemin+'.':'')+k,quoi:'nom de champ réservé'});
+        continue;
+      }
       marcher(v[k],chemin?chemin+'.'+k:k,prof+1);
     }
   })(racine,nom||'',0);
   return trouve;
+}
+
+// LA SONDE DÉCISIVE : écrire les 5 documents UN PAR UN et laisser le
+// serveur dire lequel il refuse, et pourquoi. Plus aucune hypothèse —
+// l'app envoie exactement ce qu'elle enverrait, document par document,
+// et rapporte le message entier de Firestore.
+// C'est sans danger : ce sont les écritures que l'app fait déjà, et
+// celles des quarts et des dépenses sont additives (merge).
+async function sonderEcriture(){
+  var out=[];
+  try{ if(window._fbEnsure)await window._fbEnsure(); }catch(e){}
+  var COLL=firebase.firestore().collection(window.TXP_TENANT);
+  var charges=[
+    {nom:'config',   ref:COLL.doc('config'),   val:C,                                       opt:null},
+    {nom:'shifts',   ref:COLL.doc('shifts'),   val:{data:S},                                opt:{merge:true}},
+    {nom:'expenses', ref:COLL.doc('expenses'), val:{data:EX},                               opt:{merge:true}},
+    {nom:'audit',    ref:COLL.doc('audit'),    val:{data:(typeof AU!=='undefined'&&AU?AU:[]).slice(-1000)}, opt:null},
+    {nom:'deleted',  ref:COLL.doc('deleted'),  val:{s:(window.TOMB||{}).s,e:(window.TOMB||{}).e,
+                                                    r:(window.TOMB||{}).r||0},               opt:null}
+  ];
+  for(var i=0;i<charges.length;i++){
+    var c=charges[i];
+    try{
+      if(c.opt)await c.ref.set(c.val,c.opt); else await c.ref.set(c.val);
+      out.push({nom:c.nom,ok:true});
+    }catch(e){
+      out.push({nom:c.nom,ok:false,code:(e&&e.code)||'?',
+        msg:String((e&&e.message)||e).slice(0,400)});
+    }
+  }
+  return out;
+}
+
+async function lancerSondeEcriture(){
+  var el=document.getElementById('alerteCloud');
+  try{
+    var r=await sonderEcriture();
+    var l=['🔬 LES 5 DOCUMENTS, TESTÉS UN PAR UN',''];
+    r.forEach(function(x){
+      l.push((x.ok?'✅ ':'⛔ ')+x.nom+(x.ok?' — accepté':' — REFUSÉ ('+x.code+')'));
+      if(!x.ok&&x.msg)l.push('     '+x.msg);
+    });
+    var ko=r.filter(function(x){return !x.ok;});
+    l.push('');
+    l.push(ko.length
+      ? 'Le serveur refuse : '+ko.map(function(x){return x.nom;}).join(', ')
+        +'. Le message ci-dessus dit exactement pourquoi.'
+      : 'Les 5 documents sont passés. Le blocage venait de l\'envoi groupé, '
+        +'ou il est déjà levé — rouvre l\'app et vérifie.');
+    var txt=l.join('\n');
+    try{ var _c=navigator.clipboard&&navigator.clipboard.writeText(txt);
+    if(_c&&_c.catch)_c.catch(function(){}); }catch(x){}
+    alert(txt+'\n\n(copié dans le presse-papier)');
+  }catch(e){
+    alert('La sonde n\'a pas pu tourner : '+((e&&e.message)||e));
+  }
 }
 
 function diagnosticEcriture(){
@@ -9554,9 +9637,13 @@ function diagnosticEcriture(){
     }
   }catch(e){}
   postes.sort(function(a,b){return b.octets-a.octets;});
+  // Les CINQ charges, pas seulement trois : l'audit et les suppressions
+  // partent dans le même lot et peuvent tout bloquer comme les autres.
   var mauvais=valeursRefusees(C,'config')
     .concat(valeursRefusees(S,'shifts'))
-    .concat(valeursRefusees(EX,'expenses'));
+    .concat(valeursRefusees(EX,'expenses'))
+    .concat(valeursRefusees((typeof AU!=='undefined'&&AU?AU:[]).slice(-1000),'audit'))
+    .concat(valeursRefusees({s:(window.TOMB||{}).s,e:(window.TOMB||{}).e},'deleted'));
   return {docs:docs,trop:trop,postes:postes.slice(0,6),mauvais:mauvais.slice(0,8)};
 }
 
@@ -9587,7 +9674,9 @@ function montrerDiagnosticEcriture(){
   var d=diagnosticEcriture();
   var l=['🔍 POURQUOI LES ÉCRITURES SONT REFUSÉES',''];
   var e=window._fbDernierEchec;
-  if(e&&e.code)l.push('Code du serveur : '+e.code,'');
+  if(e&&e.code)l.push('Code du serveur : '+e.code);
+  if(e&&e.msg)l.push('Message du serveur : '+e.msg);
+  if(e&&e.code)l.push('');
   l.push('TAILLE DES 5 DOCUMENTS (limite : 1024 Ko chacun)');
   d.docs.forEach(function(x){
     l.push('  '+(x.octets>LIMITE_DOC*0.95?'⛔':'  ')+' '+x.nom+' — '+_ko(x.octets));
@@ -9603,7 +9692,8 @@ function montrerDiagnosticEcriture(){
   }
   l.push('','Les 5 documents partent dans UN SEUL lot : un seul fautif bloque tout.');
   var txt=l.join('\n');
-  try{ navigator.clipboard.writeText(txt); }catch(x){}
+  try{ var _c=navigator.clipboard&&navigator.clipboard.writeText(txt);
+    if(_c&&_c.catch)_c.catch(function(){}); }catch(x){}
   alert(txt+'\n\n(copié dans le presse-papier)');
 }
 
@@ -14787,7 +14877,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-29-v128-POURQUOI-LECRITURE-EST-REFUSEE';
+var APP_VERSION = '2026-10-29-v129-LE-MESSAGE-DU-SERVEUR';
 // RECHARGER SANS RIEN PERDRE.
 // Règle du projet : jamais de location.reload() avant la fin des
 // écritures Firebase. Ce bouton rechargeait 300 ms après l'appui, quoi

@@ -163,10 +163,28 @@
 > `verdictEcriture()` écrit la cause en une phrase dans le bandeau ;
 > `montrerDiagnosticEcriture()` donne le rapport complet, copié dans le presse-papier.
 >
-> **RESTE À FAIRE — alléger la config.** Tant qu'elle dépasse, rien ne passe. Il faut sortir du
-> document `config` ce qui grossit sans fin (`C.treso` en premier) : archivage des mouvements
-> anciens, et une alerte AVANT d'atteindre la limite — le document des quarts a la sienne à
-> 750 Ko (`_bigWarned`), la config n'en a aucune.
+> **MESURE SUR SON TÉLÉPHONE (29 oct, v128) : LA TAILLE N'EST PAS LA CAUSE.**
+> shifts 307 Ko · config 103 Ko · audit 84 Ko · deleted 3 Ko · expenses 2 Ko — **aucun ne
+> s'approche des 1024 Ko**, et le détecteur local n'a trouvé aucune valeur interdite. L'hypothèse
+> « document trop gros » est donc **écartée pour sa flotte** (le mécanisme reste réel et reproduit,
+> mais ce n'est pas ce qui le bloque). Ne pas y revenir sans nouvelle mesure.
+>
+> **L'ERREUR À NE PLUS REFAIRE** : `_fbDernierEchec` ne gardait que `e.code`. Or Firestore écrit
+> la raison **en toutes lettres** dans `e.message` — « Nested arrays are not supported (found in
+> document taxipro/config) », « Unsupported field value: undefined », « exceeds the maximum
+> allowed size ». Jeter ce message a coûté une soirée. **Toujours conserver `e.message`.**
+>
+> Ajouts v129 : `_fbDernierEchec.msg` (message entier, affiché dans le bandeau et dans le
+> rapport) ; `sonderEcriture()` écrit les **5 documents un par un** et laisse le serveur désigner
+> le fautif avec son message — sans danger, ce sont les écritures que l'app fait déjà, celles des
+> quarts et des dépenses étant additives ; `valeursRefusees()` détecte en plus les **tableaux
+> imbriqués** (cause classique d'`invalid-argument` qu'aucune mesure de taille ne voit) et les
+> **noms de champs réservés** `__x__`, et scrute désormais les cinq charges, audit et tombstones
+> compris. Corrigé au passage : `navigator.clipboard.writeText` rend une promesse, dont le rejet
+> n'était pas attrapé.
+>
+> **PROCHAINE ÉTAPE** : lire le message du serveur chez Amin, ou le résultat de la sonde par
+> document. C'est lui qui nomme la cause — ne plus avancer d'hypothèse avant de l'avoir.
 >
 > ### « 197 appareils connectés pour 10 chauffeurs » — Amin, 29 octobre
 > Ce ne sont pas d'autres propriétaires : `members.uids` accumule une entrée par **identité
