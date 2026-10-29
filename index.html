@@ -1486,6 +1486,11 @@ body{
           <button class="btn bsuc bsm" style="padding:12px;" onclick="exportCSVAnnuel()">📊 Export CSV comptable</button>
         </div>
         <div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5;">L'export CSV s'ouvre dans Excel/Google Sheets — parfait pour ton comptable et les impôts (quarts + dépenses de l'année).</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
+          <button class="btn bsec bsm" style="padding:12px;" onclick="lancerSondeEcriture()">🔬 Tester les 5 documents</button>
+          <button class="btn bsuc bsm" style="padding:12px;" onclick="reparerDocumentQuarts()">🚑 Réparer les quarts</button>
+        </div>
+        <div style="font-size:10px;color:var(--m2);margin-top:8px;line-height:1.5;">Si les quarts de tes chauffeurs n'arrivent plus : « Tester » demande au serveur quel document il refuse et pourquoi. « Réparer » réécrit le document des quarts dans un format qui occupe 25 fois moins de place dans l'index de Firestore — aucun quart n'est supprimé.</div>
       </div>
       <div style="height:16px"></div>
     </div>
@@ -9516,7 +9521,10 @@ function rendreAlerteCloud(){
       bouton='<button onclick="montrerDiagnosticEcriture()" style="'+bstyle
         +'">🔍 Voir le détail et le copier</button>'
         +'<button onclick="lancerSondeEcriture()" style="'+bstyle
-        +'">🔬 Tester les 5 documents un par un</button>';
+        +'">🔬 Tester les 5 documents un par un</button>'
+        +(patron?'<button onclick="reparerDocumentQuarts()" style="'+bstyle
+          +'background:rgba(57,211,83,.16);border-color:rgba(57,211,83,.45);color:var(--grn);'
+          +'">🚑 Réparer le document des quarts</button>':'');
     }else{
       cause='Code du serveur : <b>'+String(ech.code)+'</b>';
     }
@@ -9617,6 +9625,62 @@ async function sonderEcriture(){
     }
   }
   return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RÉPARER LE DOCUMENT DES QUARTS — migration forcée vers le texte
+// ═══════════════════════════════════════════════════════════════════
+// L'écriture normale fusionne (`merge`) : les quarts que CET appareil
+// n'a pas en mémoire restent dans le cloud sous leur ancienne forme —
+// un objet de 25 champs, donc ~50 entrées d'index chacun. Tant qu'il en
+// reste assez, le document dépasse les 40 000 entrées et TOUTE écriture
+// est refusée : la migration ne peut pas se faire d'elle-même.
+//
+// Ici on lit le cloud au SERVEUR, on réunit avec le local, et on
+// réécrit le document EN ENTIER en texte. Le remplacement complet est
+// volontaire : c'est le seul moyen de faire disparaître les anciens
+// champs. Il est sûr parce que la lecture serveur vient de se faire et
+// que, le document étant bloqué, personne d'autre ne peut écrire.
+async function reparerDocumentQuarts(){
+  var av=0,ap=0;
+  try{
+    if(window._fbEnsure)await window._fbEnsure();
+    var ref=firebase.firestore().collection(window.TXP_TENANT).doc('shifts');
+    var snap=await ref.get({source:'server'});
+    var distBrut=((snap.data()||{}).data)||{};
+    av=estimerEntreesIndex({data:distBrut});
+    var dist=window.txpDecQ(distBrut);
+    // Réunion local + cloud, tombstones respectés (txpMerge s'en charge).
+    var tout=window.txpMerge(S,dist,'s');
+    var combien=Object.keys(tout).length;
+    if(!confirm('🚑 Réparer le document des quarts ?\n\n'
+      +combien+' quart(s) vont être réécrits dans un format qui occupe '
+      +'25 fois moins de place dans l\'index de Firestore.\n\n'
+      +'Aucun quart n\'est supprimé. C\'est ce qui débloque l\'envoi.'))return;
+    var enTexte={},k;
+    for(k in tout)enTexte[k]=window.txpQuartEnTexte(tout[k]);
+    ap=estimerEntreesIndex({data:enTexte});
+    // set COMPLET, sans merge : les anciens champs doivent disparaître.
+    await ref.set({data:enTexte});
+    // On adopte le résultat en local, puis on relit pour VÉRIFIER.
+    S=tout; lSaveLocal();
+    if(typeof _refreshAfterSync==='function')_refreshAfterSync();
+    var v=await ref.get({source:'server'});
+    var n=Object.keys(((v.data()||{}).data)||{}).length;
+    window._fbDernierEchec=null;
+    if(typeof rendreAlerteCloud==='function')rendreAlerteCloud();
+    alert('✅ Réparé.\n\n'
+      +n+' quart(s) sont maintenant dans le cloud.\n'
+      +'Entrées d\'index : '+av.toLocaleString('fr-CA')+' → '+ap.toLocaleString('fr-CA')
+      +'  (limite 40 000)\n\n'
+      +'Demande à chaque chauffeur de rouvrir son app : ce qui attend sur son '
+      +'téléphone va partir tout seul.');
+  }catch(e){
+    alert('❌ La réparation a échoué.\n\n'
+      +'Code : '+((e&&e.code)||'?')+'\n'
+      +'Message : '+String((e&&e.message)||e).slice(0,300)+'\n\n'
+      +'Montre ce message — il dit exactement ce que le serveur refuse.');
+  }
 }
 
 async function lancerSondeEcriture(){
@@ -14952,7 +15016,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-29-v130-QUARTS-EN-TEXTE-INDEX-FIRESTORE';
+var APP_VERSION = '2026-10-29-v131-REPARER-LE-DOCUMENT-DES-QUARTS';
 // RECHARGER SANS RIEN PERDRE.
 // Règle du projet : jamais de location.reload() avant la fin des
 // écritures Firebase. Ce bouton rechargeait 300 ms après l'appui, quoi
