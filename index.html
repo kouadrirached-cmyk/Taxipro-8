@@ -2249,6 +2249,18 @@ function redevanceParams(){
   };
 }
 function redevanceQuart(s){
+  // LE MONTANT EST FIGÉ SUR LE QUART, comme `drvPct` depuis la v117.
+  // Sans ça, la redevance est relue dans les réglages de L'APPAREIL QUI
+  // REGARDE : deux téléphones aux réglages différents calculent deux
+  // paies différentes pour le MÊME quart. Mesuré chez le patron le
+  // 29 octobre — 40 courses, exactement 40 $ d'écart entre sa session et
+  // celle de son chauffeur. Et changer le montant aujourd'hui réécrirait
+  // la paie d'il y a un mois, ce qui est faux comptablement.
+  // Les quarts saisis avant cette version n'ont pas le champ : ils
+  // continuent de suivre le réglage, pour ne rien changer rétroactivement.
+  if(s&&s.rdvParCourse!==undefined&&s.rdvParCourse!==null&&s.rdvParCourse!==''){
+    return pi(s.courses)*pf(s.rdvParCourse);
+  }
   var r=redevanceParams();
   return r.deduire?pi(s.courses)*r.montant:0;
 }
@@ -3422,7 +3434,12 @@ function doSaveShift({taxd,taxf,crs,comp,card,sts,coup,ext,pour,rec,driver,isOwn
   const selVehObj=C.vehicles.find(v=>v.num===selV);
   const s={
     id:uid(),date:gv('fd'),time:gv('ft'),vehicle:((selVehObj&&selVehObj.model)||'Prius')+' '+selV,driver,
-    isOwner:isOwn,drvPct:pct,taxd,taxf,crsd:gv('fcrsd'),crsf:gv('fcrsf'),
+    isOwner:isOwn,drvPct:pct,
+    // La redevance par course en vigueur AU MOMENT DE LA SAISIE, figée
+    // sur le quart : la paie ne doit dépendre ni de l'appareil qui la
+    // regarde, ni d'un réglage changé plus tard.
+    rdvParCourse:(function(){var r=redevanceParams();return r.deduire?r.montant:0;})(),
+    taxd,taxf,crsd:gv('fcrsd'),crsf:gv('fcrsf'),
     courses:crs,comp,card,sts,coup,ext,pourboire:pour,
     coupDetails:[...coupClients],
     essence:pf(gv('fess')),essencePar:essType,remarque:gv('frem'),
@@ -15016,7 +15033,7 @@ function renderClean(){
 </script>
 <script>
 // ═══ VERSION ═══
-var APP_VERSION = '2026-10-29-v131-REPARER-LE-DOCUMENT-DES-QUARTS';
+var APP_VERSION = '2026-10-29-v132-REDEVANCE-FIGEE-SUR-LE-QUART';
 // RECHARGER SANS RIEN PERDRE.
 // Règle du projet : jamais de location.reload() avant la fin des
 // écritures Firebase. Ce bouton rechargeait 300 ms après l'appui, quoi
